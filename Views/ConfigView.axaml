@@ -1,0 +1,106 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:models="using:TranslationToolUI.Models"
+        mc:Ignorable="d" d:DesignWidth="600" d:DesignHeight="500"
+        x:Class="TranslationToolUI.Views.ConfigView"
+        Title="Azure 订阅管理"
+        Width="600" Height="500"
+        WindowStartupLocation="CenterOwner">
+    
+    <Grid RowDefinitions="Auto,*,Auto" Margin="20">
+        <TextBlock Grid.Row="0" Text="Azure 语音服务订阅管理" FontSize="18" FontWeight="Bold" Margin="0,0,0,20"/>
+        
+        <ScrollViewer Grid.Row="1">
+            <Grid ColumnDefinitions="*,Auto">
+                <!-- 左侧订阅列表 -->
+                <Border Grid.Column="0" BorderBrush="Gray" BorderThickness="1" Margin="0,0,10,0">
+                    <Grid RowDefinitions="Auto,*">
+                        <TextBlock Grid.Row="0" Text="订阅列表" FontWeight="Bold" Margin="10,10,10,5"/>                        <ListBox Grid.Row="1" x:Name="SubscriptionListBox" Margin="10" 
+                                 SelectionMode="Single">                            <ListBox.ItemTemplate>
+                                <DataTemplate DataType="models:AzureSubscription">
+                                    <StackPanel Orientation="Vertical" Margin="5">
+                                        <TextBlock Text="{Binding Name}" FontWeight="Bold"/>
+                                        <TextBlock Text="{Binding ServiceRegion}" FontSize="12" Foreground="Gray"/>
+                                        <TextBlock Text="密钥: **********************" FontSize="10" Foreground="DarkGray"/>
+                                    </StackPanel>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+                    </Grid>
+                </Border>
+                
+                <!-- 右侧编辑区域 -->
+                <StackPanel Grid.Column="1" Spacing="10" MinWidth="250">
+                    <TextBlock Text="订阅配置" FontWeight="Bold"/>
+                    
+                    <StackPanel Spacing="5">
+                        <TextBlock Text="订阅名称"/>
+                        <TextBox x:Name="SubscriptionNameTextBox" Watermark="例如：生产环境、测试环境"/>
+                    </StackPanel>
+                      <StackPanel Spacing="5">
+                        <TextBlock Text="订阅密钥"/>
+                        <TextBox x:Name="SubscriptionKeyTextBox" 
+                                 Watermark="输入 Azure 语音服务订阅密钥"
+                                 MaxWidth="280" 
+                                 Width="280"
+                                 PasswordChar="*"
+                                 RevealPassword="{Binding IsChecked, ElementName=ShowPasswordCheckBox}"/>
+                        <CheckBox x:Name="ShowPasswordCheckBox" Content="显示密钥" FontSize="10" Margin="0,2,0,0"/>
+                    </StackPanel>
+                      <StackPanel Spacing="5">
+                        <TextBlock Text="服务区域"/>
+                        <ComboBox x:Name="RegionComboBox">
+                            <ComboBoxItem Tag="southeastasia" Content="东南亚（新加坡）"/>
+                            <ComboBoxItem Tag="eastasia" Content="东亚（香港）"/>
+                            <ComboBoxItem Tag="eastus" Content="美国东部"/>
+                            <ComboBoxItem Tag="westus" Content="美国西部"/>
+                            <ComboBoxItem Tag="westeurope" Content="西欧"/>
+                            <ComboBoxItem Tag="northeurope" Content="北欧"/>
+                            <ComboBoxItem Tag="japaneast" Content="日本东部"/>
+                            <ComboBoxItem Tag="koreacentral" Content="韩国中部"/>
+                        </ComboBox>
+                    </StackPanel>
+                    
+                    <StackPanel Orientation="Horizontal" Spacing="5" Margin="0,20,0,0">
+                        <Button x:Name="AddButton" Content="添加" Width="60"/>
+                        <Button x:Name="UpdateButton" Content="更新" Width="60"/>
+                        <Button x:Name="DeleteButton" Content="删除" Width="60"/>
+                        <Button x:Name="TestButton" Content="测试" Width="60"/>
+                    </StackPanel>
+                    
+                    <Separator Margin="0,20,0,10"/>
+                    
+                    <!-- 其他设置 -->
+                    <TextBlock Text="其他设置" FontWeight="Bold"/>
+                    
+                    <CheckBox x:Name="FilterModalParticlesCheckBox" Content="过滤语气助词" IsChecked="True"/>
+                    
+                    <StackPanel Spacing="5">
+                        <TextBlock Text="最大历史记录数量"/>
+                        <NumericUpDown x:Name="MaxHistoryItemsNumeric" Value="15" Minimum="5" Maximum="100" Width="120" FormatString="F0"/>
+                    </StackPanel>
+                    
+                    <StackPanel Spacing="5">
+                        <TextBlock Text="实时字幕最大长度"/>
+                        <NumericUpDown x:Name="RealtimeMaxLengthNumeric" Value="150" Minimum="50" Maximum="500" Width="120" FormatString="F0"/>
+                    </StackPanel>
+                    
+                    <StackPanel Spacing="5">
+                        <TextBlock Text="会话记录保存目录"/>
+                        <Grid ColumnDefinitions="*,Auto">
+                            <TextBox x:Name="SessionDirectoryTextBox" Grid.Column="0" IsReadOnly="True" MaxWidth="280"/>
+                            <Button x:Name="BrowseButton" Grid.Column="1" Content="..." Margin="5,0,0,0" Width="30"/>
+                        </Grid>
+                    </StackPanel>
+                </StackPanel>
+            </Grid>
+        </ScrollViewer>
+        
+        <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="10" Margin="0,20,0,0">
+            <Button x:Name="SaveButton" Content="保存" Width="80"/>
+            <Button x:Name="CancelButton" Content="取消" Width="80"/>
+        </StackPanel>
+    </Grid>
+</Window>

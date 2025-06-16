@@ -1,0 +1,128 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:vm="using:TranslationToolUI.ViewModels"
+        xmlns:models="using:TranslationToolUI.Models"
+        xmlns:controls="using:TranslationToolUI.Controls"
+        mc:Ignorable="d" d:DesignWidth="800" d:DesignHeight="600"
+        x:Class="TranslationToolUI.MainWindow"
+        x:DataType="vm:MainWindowViewModel"
+        Title="Azure 语音实时翻译工具"
+        MinWidth="800" MinHeight="600">
+
+    <Design.DataContext>
+        <vm:MainWindowViewModel/>
+    </Design.DataContext>    <Grid RowDefinitions="Auto,Auto,*,Auto">
+        <!-- 顶部工具栏 -->
+        <Grid Grid.Row="0" ColumnDefinitions="Auto,*,Auto" Margin="10">
+            <TextBlock Grid.Column="0" Text="Azure 语音实时翻译工具" FontSize="18" FontWeight="Bold" VerticalAlignment="Center" Margin="0,0,20,0"/>
+              <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="5">
+                <Button Content="配置" Command="{Binding ShowConfigCommand}" Padding="10,5" 
+                        IsEnabled="{Binding IsConfigurationEnabled}"/>
+                <Button Content="开始翻译" Command="{Binding StartTranslationCommand}" Background="Green" Foreground="White" Padding="10,5"/>
+                <Button Content="停止翻译" Command="{Binding StopTranslationCommand}" Background="Red" Foreground="White" Padding="10,5"/>
+                <Button Content="清空历史" Command="{Binding ClearHistoryCommand}" Padding="10,5"/>
+                <Button Content="查看历史记录" Command="{Binding OpenHistoryFolderCommand}" Padding="10,5" 
+                        ToolTip.Tip="打开本地历史记录文件夹，查看保存的翻译文件"/>
+                <Button Content="浮动字幕" Command="{Binding ShowFloatingSubtitlesCommand}" Padding="10,5" 
+                        ToolTip.Tip="使用可拖动的透明字幕框提供服务"/>
+            </StackPanel>
+            
+            <ToggleSwitch Grid.Column="2" IsChecked="{Binding IsTranslating}" IsEnabled="False" OnContent="翻译中" OffContent="已停止"/>
+        </Grid>
+          <!-- 语言和订阅选择区域 -->
+        <Grid Grid.Row="1" ColumnDefinitions="Auto,Auto,*,Auto,Auto" Margin="10,0,10,10">
+            <TextBlock Grid.Column="0" Text="订阅:" VerticalAlignment="Center" Margin="0,0,5,0"/>            <ComboBox Grid.Column="1" Name="SubscriptionComboBox" MinWidth="150" 
+                      ItemsSource="{Binding SubscriptionNames}" 
+                      SelectedIndex="{Binding ActiveSubscriptionIndex, Mode=TwoWay}"
+                      IsEnabled="{Binding IsConfigurationEnabled}"
+                      ToolTip.Tip="选择要使用的Azure订阅"/>
+            
+            <StackPanel Grid.Column="2" Orientation="Horizontal" HorizontalAlignment="Center" Spacing="10">                <StackPanel Orientation="Horizontal" Spacing="5">
+                    <TextBlock Text="源语言:" VerticalAlignment="Center"/>
+                    <ComboBox Name="SourceLanguageComboBox" MinWidth="120"
+                              IsEnabled="{Binding IsConfigurationEnabled}"
+                              SelectedIndex="{Binding SourceLanguageIndex}">
+                        <ComboBoxItem Tag="zh-CN" Content="中文"/>
+                        <ComboBoxItem Tag="en-US" Content="英语"/>
+                        <ComboBoxItem Tag="ja-JP" Content="日语"/>
+                        <ComboBoxItem Tag="ko-KR" Content="韩语"/>
+                        <ComboBoxItem Tag="fr-FR" Content="法语"/>
+                        <ComboBoxItem Tag="de-DE" Content="德语"/>
+                        <ComboBoxItem Tag="es-ES" Content="西班牙语"/>
+                    </ComboBox>
+                </StackPanel>
+                
+                <TextBlock Text="→" VerticalAlignment="Center" FontSize="16" FontWeight="Bold"/>
+                
+                <StackPanel Orientation="Horizontal" Spacing="5">
+                    <TextBlock Text="目标语言:" VerticalAlignment="Center"/>
+                    <ComboBox Name="TargetLanguageComboBox" MinWidth="120"
+                              IsEnabled="{Binding IsConfigurationEnabled}"
+                              SelectedIndex="{Binding TargetLanguageIndex}">
+                        <ComboBoxItem Tag="en" Content="英语"/>
+                        <ComboBoxItem Tag="zh-CN" Content="中文"/>
+                        <ComboBoxItem Tag="ja-JP" Content="日语"/>
+                        <ComboBoxItem Tag="ko-KR" Content="韩语"/>
+                        <ComboBoxItem Tag="fr-FR" Content="法语"/>
+                        <ComboBoxItem Tag="de-DE" Content="德语"/>
+                        <ComboBoxItem Tag="es-ES" Content="西班牙语"/>
+                    </ComboBox>
+                </StackPanel>
+            </StackPanel>
+            
+            <TextBlock Grid.Column="4" Text="{Binding ActiveSubscriptionStatus}" 
+                       VerticalAlignment="Center" FontSize="10" Foreground="Gray"
+                       ToolTip.Tip="当前订阅状态"/>
+        </Grid>        <!-- 中间翻译内容区域 -->
+        <Grid Grid.Row="2" ColumnDefinitions="*,*" Margin="10">
+            <!-- 左侧实时翻译区域 -->
+            <Border Grid.Column="0" BorderBrush="Gray" BorderThickness="1" Margin="0,0,5,0">
+                <Grid RowDefinitions="Auto,*,Auto,*">                    <TextBlock Grid.Row="0" Text="实时翻译" FontWeight="Bold" Margin="5"/>
+                    
+                    <!-- 原文可配置文本框 (高级编辑器) -->
+                    <Border Grid.Row="1" Margin="5" BorderBrush="LightGray" BorderThickness="1">
+                        <controls:ConfigurableTextEditor x:Name="OriginalEditor"
+                                                         Text="{Binding CurrentOriginal, Mode=TwoWay}"
+                                                         Placeholder="原文将在这里显示..."
+                                                         EditorType="Advanced"/>
+                    </Border>
+                    
+                    <TextBlock Grid.Row="2" Text="译文：" FontWeight="Bold" Margin="5"/>
+                    
+                    <!-- 译文可配置文本框 (简单编辑器) -->
+                    <Border Grid.Row="3" Margin="5" BorderBrush="LightBlue" BorderThickness="1">
+                        <controls:ConfigurableTextEditor x:Name="TranslatedEditor"
+                                                         Text="{Binding CurrentTranslated, Mode=TwoWay}"
+                                                         Placeholder="译文将在这里显示..."
+                                                         EditorType="Advanced"/>
+                    </Border>
+                </Grid>
+            </Border>
+            
+            <!-- 右侧历史记录区域 -->
+            <Border Grid.Column="1" BorderBrush="Gray" BorderThickness="1" Margin="5,0,0,0">
+                <Grid RowDefinitions="Auto,*">
+                    <TextBlock Grid.Row="0" Text="历史记录" FontWeight="Bold" Margin="5"/>
+                      <ListBox Grid.Row="1" ItemsSource="{Binding History}" Margin="5">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate DataType="models:TranslationItem">
+                                <StackPanel Margin="0,5">
+                                    <TextBlock Text="{Binding Timestamp, StringFormat=\{0:HH:mm:ss\}}" FontWeight="Bold"/>
+                                    <TextBlock Text="{Binding OriginalText}" TextWrapping="Wrap"/>
+                                    <TextBlock Text="{Binding TranslatedText}" TextWrapping="Wrap" Foreground="Blue"/>
+                                    <Separator Height="1" Background="LightGray" Margin="0,5"/>
+                                </StackPanel>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                </Grid>
+            </Border>
+        </Grid>        
+        <!-- 底部状态栏 -->
+        <Border Grid.Row="3" BorderBrush="Gray" BorderThickness="0,1,0,0" Padding="10,5">
+            <TextBlock Text="{Binding StatusMessage}" />
+        </Border>
+    </Grid>
+</Window>
