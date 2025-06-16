@@ -2,6 +2,8 @@
 
 跨平台实时语音翻译工具，基于 Avalonia UI 和 Azure Speech Services 构建。
 
+![alt text](image.png)
+![alt text](image-1.png)
 ## 功能特性
 
 - 🎤 **实时语音识别以及翻译**：支持多种语言的语音输入,检测麦克风后，从麦克风获取实时音频
