@@ -1,0 +1,23 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+  xmlns:md="clr-namespace:Markdown.Avalonia;assembly=Markdown.Avalonia"
+        mc:Ignorable="d" d:DesignWidth="640" d:DesignHeight="520"
+        x:Class="TranslationToolUI.Views.HelpView"
+  x:CompileBindings="False"
+          Title="说明"
+        WindowStartupLocation="CenterOwner"
+        Width="640"
+        Height="520">
+
+  <Border Padding="16">
+    <DockPanel LastChildFill="True">
+      <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="10" Margin="0,12,0,0">
+        <Button x:Name="CloseButton" Content="关闭" Width="80"/>
+      </StackPanel>
+
+      <md:MarkdownScrollViewer x:Name="HelpMarkdown" />
+    </DockPanel>
+  </Border>
+</Window>

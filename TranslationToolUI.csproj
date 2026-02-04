@@ -1,0 +1,69 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <AvaloniaUseCompiledBindingsByDefault>false</AvaloniaUseCompiledBindingsByDefault>
+
+    <AppLogoPng>Assets\AppLogo.png</AppLogoPng>
+    <AppIconPng Condition="Exists('Assets\\AppIcon.png')">Assets\\AppIcon.png</AppIconPng>
+    <AppIconPng Condition="'$(AppIconPng)'=='' and Exists('Assets\\AppLogo.png')">$(AppLogoPng)</AppIconPng>
+  </PropertyGroup>
+  
+  
+  <ItemGroup>
+    <PackageReference Include="Avalonia" Version="11.3.0" />
+    <PackageReference Include="Avalonia.AvaloniaEdit" Version="11.3.0" />
+    <PackageReference Include="Avalonia.Desktop" Version="11.3.0" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.0" />
+    <PackageReference Include="Avalonia.Fonts.Inter" Version="11.3.0" />
+    <PackageReference Include="Avalonia.Diagnostics" Version="11.3.0">
+      <IncludeAssets Condition="'$(Configuration)' != 'Debug'">None</IncludeAssets>
+      <PrivateAssets Condition="'$(Configuration)' != 'Debug'">All</PrivateAssets>
+    </PackageReference>
+    <PackageReference Include="Markdown.Avalonia" Version="11.0.3-a1" />
+    
+    <PackageReference Include="Microsoft.CognitiveServices.Speech" Version="1.44.0" />
+    <PackageReference Include="NAudio" Version="2.2.1" />
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Remove="tools\**\*.cs" />
+    <None Include="tools\**\*" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <AvaloniaResource Include="Assets\**" />
+  </ItemGroup>
+
+  <Target Name="GenerateAppIconIco" BeforeTargets="CoreCompile" Condition="'$(AppIconPng)' != ''">
+    <PropertyGroup>
+      <_GeneratedIconDir>$(MSBuildProjectDirectory)\obj\Generated</_GeneratedIconDir>
+      <_IconBuildId>$([System.Guid]::NewGuid())</_IconBuildId>
+      <_GeneratedIconIco>$(_GeneratedIconDir)\AppIcon.$(_IconBuildId).ico</_GeneratedIconIco>
+      <_GeneratedIconLatest>$(_GeneratedIconDir)\AppIcon.ico</_GeneratedIconLatest>
+      <_AgreedIconIco>$(MSBuildProjectDirectory)\Assets\AppIcon.ico</_AgreedIconIco>
+    </PropertyGroup>
+
+    <MakeDir Directories="$(_GeneratedIconDir)" />
+    <ItemGroup>
+      <_OldGeneratedIcons Include="$(_GeneratedIconDir)\AppIcon.*.ico" Exclude="$(_GeneratedIconIco)" />
+    </ItemGroup>
+    <Delete Files="@(_OldGeneratedIcons)" ContinueOnError="true" />
+    <Delete Files="$(_GeneratedIconIco)" ContinueOnError="true" />
+
+    <Message Importance="high" Text="[Icon] Generating $(_GeneratedIconIco) from $(AppIconPng)" />
+    <Exec Command="dotnet run --project &quot;$(MSBuildProjectDirectory)\tools\IconGen\IconGen.csproj&quot; -c Release -- &quot;$(MSBuildProjectDirectory)\$(AppIconPng)&quot; &quot;$(_GeneratedIconIco)&quot;" IgnoreExitCode="true" ContinueOnError="WarnAndContinue" />
+    <PropertyGroup Condition="Exists('$(_GeneratedIconIco)')">
+      <ApplicationIcon>$(_GeneratedIconIco)</ApplicationIcon>
+    </PropertyGroup>
+    <Message Importance="high" Condition="Exists('$(_GeneratedIconIco)')" Text="[Icon] ApplicationIcon=$(_GeneratedIconIco)" />
+    <Copy SourceFiles="$(_GeneratedIconIco)" DestinationFiles="$(_GeneratedIconLatest)" Condition="Exists('$(_GeneratedIconIco)')" OverwriteReadOnlyFiles="true" SkipUnchangedFiles="false" ContinueOnError="true" />
+    <Copy SourceFiles="$(_GeneratedIconIco)" DestinationFiles="$(_AgreedIconIco)" Condition="Exists('$(_GeneratedIconIco)')" OverwriteReadOnlyFiles="true" SkipUnchangedFiles="false" ContinueOnError="true" />
+    <Message Importance="high" Condition="Exists('$(_AgreedIconIco)')" Text="[Icon] Copied to $(_AgreedIconIco)" />
+    <Warning Condition="!Exists('$(_GeneratedIconIco)')" Text="[Icon] Failed to generate ICO (build continues; app still runs)." />
+  </Target>
+</Project>

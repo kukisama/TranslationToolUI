@@ -1,0 +1,34 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+  xmlns:md="clr-namespace:Markdown.Avalonia;assembly=Markdown.Avalonia"
+        mc:Ignorable="d" d:DesignWidth="520" d:DesignHeight="360"
+        x:Class="TranslationToolUI.Views.AboutView"
+  x:CompileBindings="False"
+        Title="关于"
+        WindowStartupLocation="CenterOwner"
+        Width="640"
+        Height="520">
+
+  <Border Padding="20">
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+      <StackPanel Spacing="10" MaxWidth="520">
+        <Image x:Name="LogoImage"
+               Width="256" Height="256"
+           Stretch="Uniform"
+               RenderOptions.BitmapInterpolationMode="None"
+               HorizontalAlignment="Center"/>
+
+            <md:MarkdownScrollViewer x:Name="AboutMarkdown"
+              Margin="0,4,0,0" />
+
+        <Separator Margin="0,6"/>
+
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="10">
+          <Button x:Name="CloseButton" Content="关闭" Width="80"/>
+        </StackPanel>
+      </StackPanel>
+    </ScrollViewer>
+  </Border>
+</Window>
