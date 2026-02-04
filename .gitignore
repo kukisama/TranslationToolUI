@@ -2,6 +2,7 @@
 bin/
 obj/
 out/
+Docs/
 
 # NuGet packages
 packages/
