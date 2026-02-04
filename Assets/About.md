@@ -36,7 +36,7 @@ TranslationToolUI 会采集音频（麦克风 / 系统回环 Loopback），推�
 - MP3 转码通常由 Windows 的 Media Foundation 编码器能力决定；不同 Windows 版本/精简系统可能存在差异。
 - 在不支持的环境中，应用应回退到更保守的输入路径（例如默认麦克风），保证“不崩溃、可运行”。
 
-## 构建期工具（可选，不耦合主程序）
+## 构建期工具（不耦合主程序）
 为在 Windows 上设置可执行文件图标，项目包含一个独立的 IconGen构建期工具。
 - 依赖：SixLabors.ImageSharp 3.1.10（[官网](https://sixlabors.com/) | [NuGet](https://www.nuget.org/packages/SixLabors.ImageSharp/3.1.10)；**仅工具使用**，主程序不引用该依赖）
 - 行为：构建时从 Assets下的AppIcon.png 生成多尺寸 *.ico，并尽力复制到 Assets下的AppIcon.ico。
