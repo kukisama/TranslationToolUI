@@ -1,120 +1,66 @@
 # TranslationToolUI
 
-跨平台实时语音翻译工具，基于 Avalonia UI 和 Azure Speech Services 构建。
+![TranslationToolUI Logo](Assets/AppIcon.png)
 
-## 功能特性
+使用Azure Speech服务，把声音变成可读字幕：采集音频（麦克风/系统回环），推送到 Azure Speech 做识别与翻译，实时显示中间结果与最终结果；并提供浮动字幕、会话历史与可选录音。
 
-- 🎤 **实时语音识别以及翻译**：支持多种语言的语音输入,检测麦克风后，从麦克风获取实时音频
-- 💬 **智能字幕**：实时显示带翻译的字幕
-- 📝 **历史记录**：自动保存翻译历史，支持搜索和管理
-- ⚙️ **灵活配置**：可配置 Azure 服务密钥、语言设置等
-- 🖥️ **跨平台**：支持 Windows、macOS、Linux
-- 🎨 **现代UI**：基于 Avalonia UI 的现代化界面
+> 说明：项目基于 Avalonia（理论可跨平台），但目前主要在 Windows 环境验证与使用；其它平台请先充分测试。
 
-## 系统要求
+## 你可能会怎么用它（偏“使用场景”）
 
-- .NET 8.0 或更高版本
-- Azure Speech Services 订阅
-- Azure Translator 订阅（可选）
+- 看外语视频/课程：用 **Loopback** 把系统正在播放的声音当输入，字幕实时可读
+- 线上会议/直播：开着浮动字幕，边听边看（也能留会话历史）
+- 做笔记/留存：同场会话同步录音（WAV），停止后自动转 MP3（Windows）
 
-## 快速开始
+## 功能概览
 
-### 1. 克隆项目
-```bash
-git clone https://github.com/你的用户名/TranslationToolUI.git
-cd TranslationToolUI
-```
+- 实时识别/翻译：支持中间结果/最终结果字幕
+- 输入源选择：默认麦克风 / WASAPI 设备选择 / WASAPI Loopback
+- 浮动字幕：可置顶显示
+- 会话录音：翻译同时写 WAV，停止后异步转 MP3（Windows Media Foundation）
+- 历史记录：按会话保存，方便后续整理
+- 配置持久化：本地 JSON 保存，启动自动加载
 
-### 2. 安装依赖
+## 运行要求
+
+- .NET 8（开发用 SDK；运行用 Desktop Runtime）
+- Azure Speech Services 订阅（Key + Region）
+
+## 快速开始（开发/本地运行）
+
 ```bash
 dotnet restore
-```
-
-### 3. 配置 Azure 服务
-在首次运行时，程序会提示配置 Azure Speech Services：
-- 订阅密钥 (Subscription Key)
-- 服务区域 (Service Region)
-- 识别语言和翻译目标语言
-
-### 4. 运行程序
-```bash
 dotnet run
 ```
 
-## 项目架构
-
-### 核心组件
-
-- **PathManager**: 跨平台路径管理，统一管理配置、会话、日志等路径
-- **ConfigurationService**: 配置管理，支持Azure服务配置
-- **SpeechTranslationService**: 语音识别和翻译核心服务
-- **SessionService**: 会话和历史记录管理
-- **MainWindowViewModel**: 主界面MVVM逻辑
-
-### 目录结构
-
-```
-TranslationToolUI/
-├── Models/              # 数据模型
-├── Services/            # 业务服务
-├── ViewModels/          # MVVM 视图模型
-├── Views/               # UI 界面
-├── Controls/            # 自定义控件
-├── Converters/          # 数据转换器
-└── Assets/              # 静态资源
-```
-
-## 核心特性详解
-
-### 跨平台路径管理
-使用 `PathManager` 实现跨平台路径统一管理：
-- Windows: `%APPDATA%/TranslationToolUI/`
-- macOS: `~/Library/Application Support/TranslationToolUI/`
-- Linux: `~/.config/TranslationToolUI/`
-
-### 智能配置系统
-- 自动检测和创建配置目录
-- 支持配置文件热加载
-- 敏感信息安全存储
-
-### 历史记录管理
-- 自动保存翻译历史
-- 支持按日期、语言筛选
-- 快速搜索和导出功能
-
-## 开发说明
-
-### 环境设置
-```bash
-# 安装 .NET 8 SDK
-# 克隆项目
-git clone <repository-url>
-cd TranslationToolUI
-
-# 还原包
-dotnet restore
-
-# 运行
-dotnet run
+首次运行按界面提示填写 Azure Speech 的订阅信息，并选择输入来源与设备。
 
 
-```
 
-## 说明
-虽然代码按照跨平台规范设计，但并没有在Windows以外的真实环境进行过测试。请在实际部署前进行充分测试。
- 
+
+## 平台与限制（务必先读）
+
+- WASAPI Loopback 与 WAV→MP3（Media Foundation）主要面向 Windows
+- Windows on ARM：依赖层面支持 `win-arm64`，但建议真机验证音频链路（录音/环回/识别）
+
+## 内容更新（关于/帮助）
+
+应用内“关于/帮助”内容来自 Markdown：
+
+- 优先读取可执行文件同目录的 `About.md` / `Help.md`
+- 外部文件不存在时回退到应用内置资源
+
+如果你希望发布后可直接改文案（不重编译），可以在打包脚本里加 `-CopyExternalDocs`。
+
+## 更多说明
+
+- 详细说明与依赖/设计取舍：见 [PROJECT_DETAILS.md](PROJECT_DETAILS.md)
+
 ## 许可证
 
-本项目采用 MIT 许可证。详见 [LICENSE](LICENSE) 文件。
+MIT，见 [LICENSE](LICENSE)
 
 ## 致谢
 
-- [Avalonia UI](https://avaloniaui.net/) - 跨平台 .NET UI 框架
-- [Azure Speech Services](https://azure.microsoft.com/services/cognitive-services/speech-services/) - 语音识别和翻译服务
-- 所有贡献者和测试用户
-
- 
-
----
-
-⭐ 如果这个项目对您有帮助，请给个 Star！
+- [Avalonia UI](https://avaloniaui.net/)
+- [Azure Speech Services](https://learn.microsoft.com/azure/ai-services/speech-service/)
