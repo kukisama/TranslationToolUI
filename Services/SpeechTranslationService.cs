@@ -1,6 +1,7 @@
 ﻿using System;
 using System.IO;
 using System.Collections.Generic;
+using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.CognitiveServices.Speech;
 using Microsoft.CognitiveServices.Speech.Audio;
@@ -26,6 +27,12 @@ namespace TranslationToolUI.Services
 
         private WavChunkRecorder? _wavRecorder;
         private Task? _pendingTranscodeTask;
+
+        private readonly SemaphoreSlim _restartLock = new(1, 1);
+        private CancellationTokenSource? _noResponseMonitorCts;
+        private Task? _noResponseMonitorTask;
+        private DateTime _lastRecognitionUtc = DateTime.MinValue;
+        private DateTime _lastAudioActivityUtc = DateTime.MinValue;
 
         public event EventHandler<TranslationItem>? OnRealtimeTranslationReceived;
         public event EventHandler<TranslationItem>? OnFinalTranslationReceived;
@@ -76,35 +83,8 @@ namespace TranslationToolUI.Services
             {
                 _currentRunStamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
 
-                var speechConfig = SpeechTranslationConfig.FromSubscription(_config.SubscriptionKey, _config.ServiceRegion);
-                speechConfig.SpeechRecognitionLanguage = _config.SourceLanguage;
-                speechConfig.AddTargetLanguage(_config.TargetLanguage);
-                speechConfig.OutputFormat = OutputFormat.Detailed;
-
-                if (_config.EnableAutoTimeout)
-                {
-                    speechConfig.SetProperty(PropertyId.SpeechServiceConnection_InitialSilenceTimeoutMs,
-                        (_config.TimeoutSeconds * 5000).ToString());
-                    speechConfig.SetProperty(PropertyId.SpeechServiceConnection_EndSilenceTimeoutMs, "1000");
-                }
-                else
-                {
-                    speechConfig.SetProperty(PropertyId.SpeechServiceConnection_InitialSilenceTimeoutMs, "300000");
-                    speechConfig.SetProperty(PropertyId.SpeechServiceConnection_EndSilenceTimeoutMs, "300000");
-                }
-
-                if (_config.FilterModalParticles)
-                {
-                    OnStatusChanged?.Invoke(this, "已启用语气助词过滤功能");
-                    speechConfig.SetProperty(PropertyId.SpeechServiceResponse_PostProcessingOption, "TrueText");
-                    speechConfig.SetProperty(PropertyId.SpeechServiceResponse_ProfanityOption, "Raw");
-                }
-                else
-                {
-                    OnStatusChanged?.Invoke(this, "未启用语气助词过滤功能");
-                }
-
                 _audioConfig = CreateAudioConfigAndStartSource();
+                var speechConfig = CreateSpeechConfig();
                 _recognizer = new TranslationRecognizer(speechConfig, _audioConfig);
 
                 _recognizer.Recognized += OnRecognized;
@@ -115,6 +95,9 @@ namespace TranslationToolUI.Services
 
                 await _recognizer.StartContinuousRecognitionAsync();
                 _isTranslating = true;
+                _lastRecognitionUtc = DateTime.UtcNow;
+                _lastAudioActivityUtc = DateTime.UtcNow;
+                StartNoResponseMonitor();
 
                 var inputName = GetInputDisplayName();
                 var statusMessage = _config.FilterModalParticles
@@ -136,6 +119,7 @@ namespace TranslationToolUI.Services
 
             try
             {
+                StopNoResponseMonitor();
                 await _recognizer.StopContinuousRecognitionAsync();
                 _recognizer.Recognized -= OnRecognized;
                 _recognizer.Recognizing -= OnRecognizing;
@@ -161,6 +145,7 @@ namespace TranslationToolUI.Services
         {
             if (e.Result.Reason == ResultReason.TranslatedSpeech)
             {
+                _lastRecognitionUtc = DateTime.UtcNow;
                 string originalText = e.Result.Text;
                 string translatedText = e.Result.Translations.ContainsKey(_config.TargetLanguage)
                     ? e.Result.Translations[_config.TargetLanguage]
@@ -188,6 +173,7 @@ namespace TranslationToolUI.Services
         {
             if (e.Result.Reason == ResultReason.TranslatingSpeech)
             {
+                _lastRecognitionUtc = DateTime.UtcNow;
                 string originalText = e.Result.Text;
                 string translatedText = e.Result.Translations.ContainsKey(_config.TargetLanguage)
                     ? e.Result.Translations[_config.TargetLanguage]
@@ -371,16 +357,179 @@ namespace TranslationToolUI.Services
             return AudioConfig.FromStreamInput(_pushStream);
         }
 
+        private SpeechTranslationConfig CreateSpeechConfig()
+        {
+            var speechConfig = SpeechTranslationConfig.FromSubscription(_config.SubscriptionKey, _config.ServiceRegion);
+            speechConfig.SpeechRecognitionLanguage = _config.SourceLanguage;
+            speechConfig.AddTargetLanguage(_config.TargetLanguage);
+            speechConfig.OutputFormat = OutputFormat.Detailed;
+
+            if (_config.EnableAutoTimeout)
+            {
+                var initialSeconds = Math.Clamp(_config.InitialSilenceTimeoutSeconds, 1, 300);
+                var endSeconds = Math.Clamp(_config.EndSilenceTimeoutSeconds, 1, 30);
+                speechConfig.SetProperty(PropertyId.SpeechServiceConnection_InitialSilenceTimeoutMs,
+                    (initialSeconds * 1000).ToString());
+                speechConfig.SetProperty(PropertyId.SpeechServiceConnection_EndSilenceTimeoutMs,
+                    (endSeconds * 1000).ToString());
+            }
+            else
+            {
+                speechConfig.SetProperty(PropertyId.SpeechServiceConnection_InitialSilenceTimeoutMs, "300000");
+                speechConfig.SetProperty(PropertyId.SpeechServiceConnection_EndSilenceTimeoutMs, "300000");
+            }
+
+            if (_config.FilterModalParticles)
+            {
+                OnStatusChanged?.Invoke(this, "已启用语气助词过滤功能");
+                speechConfig.SetProperty(PropertyId.SpeechServiceResponse_PostProcessingOption, "TrueText");
+                speechConfig.SetProperty(PropertyId.SpeechServiceResponse_ProfanityOption, "Raw");
+            }
+            else
+            {
+                OnStatusChanged?.Invoke(this, "未启用语气助词过滤功能");
+            }
+
+            return speechConfig;
+        }
+
         private void OnPcm16ChunkReady(byte[] chunk)
         {
             try
             {
+                if (HasAudioActivity(chunk))
+                {
+                    _lastAudioActivityUtc = DateTime.UtcNow;
+                }
                 _pushStream?.Write(chunk);
                 _wavRecorder?.TryEnqueue(chunk);
             }
             catch
             {
                 // ignore: can happen during shutdown
+            }
+        }
+
+        private static bool HasAudioActivity(byte[] chunk)
+        {
+            const short threshold = 600;
+            for (var i = 0; i + 1 < chunk.Length; i += 2)
+            {
+                var sample = (short)(chunk[i] | (chunk[i + 1] << 8));
+                if (sample >= threshold || sample <= -threshold)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private void StartNoResponseMonitor()
+        {
+            if (!_config.EnableNoResponseRestart)
+            {
+                return;
+            }
+
+            _noResponseMonitorCts?.Cancel();
+            _noResponseMonitorCts = new CancellationTokenSource();
+            var token = _noResponseMonitorCts.Token;
+
+            _noResponseMonitorTask = Task.Run(async () =>
+            {
+                while (!token.IsCancellationRequested)
+                {
+                    try
+                    {
+                        await Task.Delay(500, token).ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        break;
+                    }
+
+                    if (!_isTranslating || _recognizer == null || !_config.EnableNoResponseRestart)
+                    {
+                        continue;
+                    }
+
+                    var thresholdSeconds = Math.Max(1, _config.NoResponseRestartSeconds);
+                    var threshold = TimeSpan.FromSeconds(thresholdSeconds);
+                    var now = DateTime.UtcNow;
+
+                    if (now - _lastRecognitionUtc < threshold)
+                    {
+                        continue;
+                    }
+
+                    if (now - _lastAudioActivityUtc > threshold)
+                    {
+                        continue;
+                    }
+
+                    await RestartRecognitionAsync($"无回显超过 {thresholdSeconds} 秒").ConfigureAwait(false);
+                }
+            }, token);
+        }
+
+        private void StopNoResponseMonitor()
+        {
+            _noResponseMonitorCts?.Cancel();
+            _noResponseMonitorCts?.Dispose();
+            _noResponseMonitorCts = null;
+            _noResponseMonitorTask = null;
+        }
+
+        private async Task RestartRecognitionAsync(string reason)
+        {
+            await _restartLock.WaitAsync().ConfigureAwait(false);
+            try
+            {
+                if (!_isTranslating || _recognizer == null || _audioConfig == null)
+                {
+                    return;
+                }
+
+                OnStatusChanged?.Invoke(this, $"{reason}，正在重连...");
+
+                try
+                {
+                    await _recognizer.StopContinuousRecognitionAsync().ConfigureAwait(false);
+                }
+                catch
+                {
+                    // ignore stop failures
+                }
+
+                _recognizer.Recognized -= OnRecognized;
+                _recognizer.Recognizing -= OnRecognizing;
+                _recognizer.Canceled -= OnCanceled;
+                _recognizer.SessionStarted -= OnSessionStarted;
+                _recognizer.SessionStopped -= OnSessionStopped;
+
+                _recognizer.Dispose();
+                _recognizer = null;
+
+                var speechConfig = CreateSpeechConfig();
+                _recognizer = new TranslationRecognizer(speechConfig, _audioConfig);
+
+                _recognizer.Recognized += OnRecognized;
+                _recognizer.Recognizing += OnRecognizing;
+                _recognizer.Canceled += OnCanceled;
+                _recognizer.SessionStarted += OnSessionStarted;
+                _recognizer.SessionStopped += OnSessionStopped;
+
+                await _recognizer.StartContinuousRecognitionAsync().ConfigureAwait(false);
+                _lastRecognitionUtc = DateTime.UtcNow;
+            }
+            catch (Exception ex)
+            {
+                OnStatusChanged?.Invoke(this, $"重连失败: {ex.Message}");
+            }
+            finally
+            {
+                _restartLock.Release();
             }
         }
 

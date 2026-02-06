@@ -89,6 +89,36 @@
 
                     <Separator Margin="0,10,0,10"/>
 
+                    <TextBlock Text="静音超时" FontWeight="Bold"/>
+
+                    <CheckBox x:Name="EnableAutoTimeoutCheckBox" Content="启用静音超时" IsChecked="True"/>
+
+                    <StackPanel Spacing="5">
+                        <TextBlock Text="初始静音超时 (秒)"/>
+                        <NumericUpDown x:Name="InitialSilenceTimeoutSecondsNumeric" Value="25" Minimum="1" Maximum="300" Width="120" FormatString="F0"/>
+                        <TextBlock FontSize="10" Foreground="Gray" Text="未检测到语音的等待时间" TextWrapping="Wrap"/>
+                    </StackPanel>
+
+                    <StackPanel Spacing="5">
+                        <TextBlock Text="断句静音超时 (秒)"/>
+                        <NumericUpDown x:Name="EndSilenceTimeoutSecondsNumeric" Value="1" Minimum="1" Maximum="30" Width="120" FormatString="F0"/>
+                        <TextBlock FontSize="10" Foreground="Gray" Text="识别到语音后，判定一句结束的等待时间" TextWrapping="Wrap"/>
+                    </StackPanel>
+
+                    <Separator Margin="0,10,0,10"/>
+
+                    <TextBlock Text="无回显重连" FontWeight="Bold"/>
+
+                    <CheckBox x:Name="EnableNoResponseRestartCheckBox" Content="有音频输入但无回显时自动重连" IsChecked="False"/>
+
+                    <StackPanel Spacing="5">
+                        <TextBlock Text="无回显阈值 (秒)"/>
+                        <NumericUpDown x:Name="NoResponseRestartSecondsNumeric" Value="3" Minimum="1" Maximum="30" Width="120" FormatString="F0"/>
+                        <TextBlock FontSize="10" Foreground="Gray" Text="连续 N 秒无中间/最终结果且检测到音频活动时触发" TextWrapping="Wrap"/>
+                    </StackPanel>
+
+                    <Separator Margin="0,10,0,10"/>
+
                     <StackPanel Spacing="5">
                         <TextBlock Text="Chunk 时长 (ms)"/>
                         <NumericUpDown x:Name="ChunkDurationMsNumeric" Value="200" Minimum="20" Maximum="2000" Width="120" FormatString="F0"/>

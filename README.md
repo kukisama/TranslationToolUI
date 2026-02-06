@@ -55,7 +55,7 @@ dotnet run
 
 ## 更多说明
 
-- 详细说明与依赖/设计取舍：见 [PROJECT_DETAILS.md](PROJECT_DETAILS.md)
+- 详细说明与依赖版本/设计取舍：见 [PROJECT_DETAILS.md](PROJECT_DETAILS.md)
 
 ## 许可证
 

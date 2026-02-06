@@ -59,6 +59,8 @@ namespace TranslationToolUI.Views
             SubscriptionListBox.PointerPressed += SubscriptionListBox_PointerPressed;
 
             EnableRecordingCheckBox.IsCheckedChanged += EnableRecordingCheckBox_IsCheckedChanged;
+            EnableAutoTimeoutCheckBox.IsCheckedChanged += EnableAutoTimeoutCheckBox_IsCheckedChanged;
+            EnableNoResponseRestartCheckBox.IsCheckedChanged += EnableNoResponseRestartCheckBox_IsCheckedChanged;
 
             this.Opened += ConfigView_Opened;
         }
@@ -71,6 +73,15 @@ namespace TranslationToolUI.Views
             MaxHistoryItemsNumeric.Value = 15;
             RealtimeMaxLengthNumeric.Value = 150;
             ChunkDurationMsNumeric.Value = 200;
+
+            EnableAutoTimeoutCheckBox.IsChecked = true;
+            InitialSilenceTimeoutSecondsNumeric.Value = 25;
+            EndSilenceTimeoutSecondsNumeric.Value = 1;
+            UpdateTimeoutUiEnabledState();
+
+            EnableNoResponseRestartCheckBox.IsChecked = false;
+            NoResponseRestartSecondsNumeric.Value = 3;
+            UpdateNoResponseUiEnabledState();
 
             EnableRecordingCheckBox.IsChecked = true;
             RecordingMp3BitrateNumeric.Value = 96;
@@ -93,6 +104,15 @@ namespace TranslationToolUI.Views
             RealtimeMaxLengthNumeric.Value = _config.RealtimeMaxLength;
             ChunkDurationMsNumeric.Value = _config.ChunkDurationMs;
 
+            EnableAutoTimeoutCheckBox.IsChecked = _config.EnableAutoTimeout;
+            InitialSilenceTimeoutSecondsNumeric.Value = _config.InitialSilenceTimeoutSeconds;
+            EndSilenceTimeoutSecondsNumeric.Value = _config.EndSilenceTimeoutSeconds;
+            UpdateTimeoutUiEnabledState();
+
+            EnableNoResponseRestartCheckBox.IsChecked = _config.EnableNoResponseRestart;
+            NoResponseRestartSecondsNumeric.Value = _config.NoResponseRestartSeconds;
+            UpdateNoResponseUiEnabledState();
+
             EnableRecordingCheckBox.IsChecked = _config.EnableRecording;
             RecordingMp3BitrateNumeric.Value = _config.RecordingMp3BitrateKbps;
             DeleteWavAfterMp3CheckBox.IsChecked = _config.DeleteWavAfterMp3;
@@ -107,11 +127,34 @@ namespace TranslationToolUI.Views
             UpdateRecordingUiEnabledState();
         }
 
+        private void EnableAutoTimeoutCheckBox_IsCheckedChanged(object? sender, RoutedEventArgs e)
+        {
+            UpdateTimeoutUiEnabledState();
+        }
+
+        private void EnableNoResponseRestartCheckBox_IsCheckedChanged(object? sender, RoutedEventArgs e)
+        {
+            UpdateNoResponseUiEnabledState();
+        }
+
         private void UpdateRecordingUiEnabledState()
         {
             var enabled = EnableRecordingCheckBox.IsChecked ?? true;
             RecordingMp3BitrateNumeric.IsEnabled = enabled;
             DeleteWavAfterMp3CheckBox.IsEnabled = enabled;
+        }
+
+        private void UpdateTimeoutUiEnabledState()
+        {
+            var enabled = EnableAutoTimeoutCheckBox.IsChecked ?? true;
+            InitialSilenceTimeoutSecondsNumeric.IsEnabled = enabled;
+            EndSilenceTimeoutSecondsNumeric.IsEnabled = enabled;
+        }
+
+        private void UpdateNoResponseUiEnabledState()
+        {
+            var enabled = EnableNoResponseRestartCheckBox.IsChecked ?? false;
+            NoResponseRestartSecondsNumeric.IsEnabled = enabled;
         }
 
         private void ForceUpdateListBoxSelection(int targetIndex)
@@ -480,6 +523,13 @@ namespace TranslationToolUI.Views
                 _config.MaxHistoryItems = (int)(MaxHistoryItemsNumeric.Value ?? 15);
                 _config.RealtimeMaxLength = (int)(RealtimeMaxLengthNumeric.Value ?? 150);
                 _config.ChunkDurationMs = (int)(ChunkDurationMsNumeric.Value ?? 200);
+
+                _config.EnableAutoTimeout = EnableAutoTimeoutCheckBox.IsChecked ?? true;
+                _config.InitialSilenceTimeoutSeconds = (int)(InitialSilenceTimeoutSecondsNumeric.Value ?? 25);
+                _config.EndSilenceTimeoutSeconds = (int)(EndSilenceTimeoutSecondsNumeric.Value ?? 1);
+
+                _config.EnableNoResponseRestart = EnableNoResponseRestartCheckBox.IsChecked ?? false;
+                _config.NoResponseRestartSeconds = (int)(NoResponseRestartSecondsNumeric.Value ?? 3);
 
                 _config.EnableRecording = EnableRecordingCheckBox.IsChecked ?? true;
                 _config.RecordingMp3BitrateKbps = (int)(RecordingMp3BitrateNumeric.Value ?? 96);

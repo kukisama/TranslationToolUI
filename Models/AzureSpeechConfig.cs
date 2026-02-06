@@ -32,6 +32,11 @@ namespace TranslationToolUI.Models
         public int RealtimeMaxLength { get; set; } = 150;
         public bool EnableAutoTimeout { get; set; } = true;
         public int TimeoutSeconds { get; set; } = 5;
+        public int InitialSilenceTimeoutSeconds { get; set; } = 25;
+        public int EndSilenceTimeoutSeconds { get; set; } = 1;
+
+        public bool EnableNoResponseRestart { get; set; } = false;
+        public int NoResponseRestartSeconds { get; set; } = 3;
 
         public AudioSourceMode AudioSourceMode { get; set; } = AudioSourceMode.DefaultMic;
         public string SelectedAudioDeviceId { get; set; } = "";

@@ -26,17 +26,17 @@ TranslationToolUI 是一个主要展示 Azure Speech 能力的桌面工具：
 - WAV → MP3 转码依赖 Windows Media Foundation 的编码器能力；不同 Windows 版本/精简系统可能存在差异
 - 代码整体按跨平台习惯组织，但目前主要在 Windows 上验证；其它平台请先测试关键链路
 
-## 依赖
+## 依赖与版本
 
-项目依赖版本以 NuGet 引用为准（见 TranslationToolUI.csproj），核心包括：
+项目依赖版本以 NuGet 引用为准（见 TranslationToolUI.csproj），以下为当前核心组件与版本：
 
-- Avalonia UI / Avalonia.Desktop
-- UI 生态需保持同一大版本（11.x）：Avalonia 11.3.11 / AvaloniaEdit 11.4.1（11.x 最新）/ Markdown.Avalonia 11.0.2
-- Microsoft.CognitiveServices.Speech
-- NAudio
-- Newtonsoft.Json
-
-。
+- .NET：.NET 10（运行时依赖 Desktop Runtime）
+- Avalonia UI：Avalonia 11.3.11 / Avalonia.Desktop 11.3.11
+- AvaloniaEdit：11.4.1（11.x 最新）
+- Markdown 渲染：Markdown.Avalonia 11.0.2
+- 语音识别/翻译：Microsoft.CognitiveServices.Speech 1.44.0
+- 音频采集/处理：NAudio 2.2.1
+- 配置/序列化：Newtonsoft.Json 13.0.3
 
 ## 构建期工具：IconGen（不耦合主程序）
 
@@ -45,6 +45,7 @@ TranslationToolUI 是一个主要展示 Azure Speech 能力的桌面工具：
 - 构建时从 `Assets/AppIcon.png` 生成多尺寸 `.ico`
 - 尽力复制到 `Assets/AppIcon.ico`
 - 即使生成失败也 **不阻断** 主程序构建（图标只是附加体验）
+- 工具依赖：SixLabors.ImageSharp 3.1.10（仅工具使用，主程序不引用）
 
 ## 内容更新方式（关于/帮助）
 
