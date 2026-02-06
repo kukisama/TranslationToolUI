@@ -31,6 +31,7 @@ TranslationToolUI 是一个主要展示 Azure Speech 能力的桌面工具：
 项目依赖版本以 NuGet 引用为准（见 TranslationToolUI.csproj），核心包括：
 
 - Avalonia UI / Avalonia.Desktop
+- UI 生态需保持同一大版本（11.x）：Avalonia 11.3.11 / AvaloniaEdit 11.4.1（11.x 最新）/ Markdown.Avalonia 11.0.2
 - Microsoft.CognitiveServices.Speech
 - NAudio
 - Newtonsoft.Json
@@ -57,4 +58,3 @@ TranslationToolUI 是一个主要展示 Azure Speech 能力的桌面工具：
 ## 发布建议（适合 GitHub Releases）
 
 推荐默认发布 FDD（framework-dependent）：
-
