@@ -1,6 +1,6 @@
 ﻿using System;
 using System.IO;
-using System.Collections.Generic;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.CognitiveServices.Speech;
@@ -28,15 +28,25 @@ namespace TranslationToolUI.Services
         private WavChunkRecorder? _wavRecorder;
         private Task? _pendingTranscodeTask;
 
+        private readonly object _subtitleLock = new();
+        private StreamWriter? _srtWriter;
+        private StreamWriter? _vttWriter;
+        private int _subtitleIndex = 1;
+        private DateTime _sessionStartUtc;
+        private TimeSpan _lastSubtitleEnd = TimeSpan.Zero;
+
         private readonly SemaphoreSlim _restartLock = new(1, 1);
         private CancellationTokenSource? _noResponseMonitorCts;
         private Task? _noResponseMonitorTask;
         private DateTime _lastRecognitionUtc = DateTime.MinValue;
         private DateTime _lastAudioActivityUtc = DateTime.MinValue;
+        private double _smoothedAudioLevel;
 
         public event EventHandler<TranslationItem>? OnRealtimeTranslationReceived;
         public event EventHandler<TranslationItem>? OnFinalTranslationReceived;
         public event EventHandler<string>? OnStatusChanged;
+        public event EventHandler<string>? OnReconnectTriggered;
+        public event EventHandler<double>? OnAudioLevelUpdated;
         public SpeechTranslationService(AzureSpeechConfig config)
         {
             _config = config;
@@ -82,8 +92,9 @@ namespace TranslationToolUI.Services
             try
             {
                 _currentRunStamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
-
+                _sessionStartUtc = DateTime.UtcNow;
                 _audioConfig = CreateAudioConfigAndStartSource();
+                InitializeSubtitleWriters();
                 var speechConfig = CreateSpeechConfig();
                 _recognizer = new TranslationRecognizer(speechConfig, _audioConfig);
 
@@ -130,6 +141,9 @@ namespace TranslationToolUI.Services
                 _recognizer.Dispose();
                 _recognizer = null;
                 _isTranslating = false;
+                PublishAudioLevel(0);
+
+                DisposeSubtitleWriters();
 
                 await CleanupAudioAsync().ConfigureAwait(false);
 
@@ -163,6 +177,7 @@ namespace TranslationToolUI.Services
                 };
 
                 SaveTranslationToFile(translationItem);
+                WriteSubtitleEntry(e.Result, translatedText);
                 OnFinalTranslationReceived?.Invoke(this, translationItem);
 
                 OnStatusChanged?.Invoke(this, "收到最终识别结果");
@@ -276,6 +291,218 @@ namespace TranslationToolUI.Services
             {
                 OnStatusChanged?.Invoke(this, $"保存翻译到文件失败: {ex.Message}");
             }
+        }
+
+        private void InitializeSubtitleWriters()
+        {
+            DisposeSubtitleWriters();
+
+            _subtitleIndex = 1;
+            _lastSubtitleEnd = TimeSpan.Zero;
+
+            if (!_config.ExportSrtSubtitles && !_config.ExportVttSubtitles)
+            {
+                return;
+            }
+
+            var sessionsPath = PathManager.Instance.SessionsPath;
+            Directory.CreateDirectory(sessionsPath);
+            var baseName = GetSubtitleBaseName();
+
+            if (_config.ExportSrtSubtitles)
+            {
+                var srtPath = PathManager.Instance.GetSessionFile($"{baseName}.srt");
+                _srtWriter = new StreamWriter(new FileStream(srtPath, FileMode.Create, FileAccess.Write, FileShare.ReadWrite));
+            }
+
+            if (_config.ExportVttSubtitles)
+            {
+                var vttPath = PathManager.Instance.GetSessionFile($"{baseName}.vtt");
+                _vttWriter = new StreamWriter(new FileStream(vttPath, FileMode.Create, FileAccess.Write, FileShare.ReadWrite));
+                _vttWriter.WriteLine("WEBVTT");
+                _vttWriter.WriteLine();
+                _vttWriter.Flush();
+            }
+        }
+
+        private string GetSubtitleBaseName()
+        {
+            var audioPath = _currentAudioMp3Path ?? _currentAudioWavPath;
+            if (!string.IsNullOrWhiteSpace(audioPath))
+            {
+                return $"{Path.GetFileNameWithoutExtension(audioPath)}.speech";
+            }
+
+            return $"Audio_{_currentRunStamp}.speech";
+        }
+
+        private void DisposeSubtitleWriters()
+        {
+            lock (_subtitleLock)
+            {
+                try
+                {
+                    _srtWriter?.Flush();
+                    _srtWriter?.Dispose();
+                }
+                catch
+                {
+                    // ignore
+                }
+
+                try
+                {
+                    _vttWriter?.Flush();
+                    _vttWriter?.Dispose();
+                }
+                catch
+                {
+                    // ignore
+                }
+
+                _srtWriter = null;
+                _vttWriter = null;
+            }
+        }
+
+        private void WriteSubtitleEntry(TranslationRecognitionResult result, string translatedText)
+        {
+            if (string.IsNullOrWhiteSpace(translatedText))
+            {
+                return;
+            }
+
+            if (_srtWriter == null && _vttWriter == null)
+            {
+                return;
+            }
+
+            if (!TryGetSubtitleTiming(result, out var start, out var end))
+            {
+                var fallbackEnd = DateTime.UtcNow - _sessionStartUtc;
+                if (fallbackEnd < _lastSubtitleEnd + TimeSpan.FromMilliseconds(200))
+                {
+                    fallbackEnd = _lastSubtitleEnd + TimeSpan.FromMilliseconds(200);
+                }
+                start = _lastSubtitleEnd;
+                end = fallbackEnd;
+            }
+
+            if (end <= start)
+            {
+                end = start + TimeSpan.FromMilliseconds(300);
+            }
+
+            lock (_subtitleLock)
+            {
+                if (_srtWriter != null)
+                {
+                    _srtWriter.WriteLine(_subtitleIndex);
+                    _srtWriter.WriteLine($"{FormatSrtTime(start)} --> {FormatSrtTime(end)}");
+                    _srtWriter.WriteLine(translatedText);
+                    _srtWriter.WriteLine();
+                    _srtWriter.Flush();
+                }
+
+                if (_vttWriter != null)
+                {
+                    _vttWriter.WriteLine($"{FormatVttTime(start)} --> {FormatVttTime(end)}");
+                    _vttWriter.WriteLine(translatedText);
+                    _vttWriter.WriteLine();
+                    _vttWriter.Flush();
+                }
+
+                _subtitleIndex++;
+            }
+
+            _lastSubtitleEnd = end;
+        }
+
+        private static string FormatSrtTime(TimeSpan time)
+        {
+            if (time < TimeSpan.Zero)
+            {
+                time = TimeSpan.Zero;
+            }
+
+            return string.Format("{0:00}:{1:00}:{2:00},{3:000}",
+                (int)time.TotalHours,
+                time.Minutes,
+                time.Seconds,
+                time.Milliseconds);
+        }
+
+        private static string FormatVttTime(TimeSpan time)
+        {
+            if (time < TimeSpan.Zero)
+            {
+                time = TimeSpan.Zero;
+            }
+
+            return string.Format("{0:00}:{1:00}:{2:00}.{3:000}",
+                (int)time.TotalHours,
+                time.Minutes,
+                time.Seconds,
+                time.Milliseconds);
+        }
+
+        private static bool TryGetSubtitleTiming(TranslationRecognitionResult result, out TimeSpan start, out TimeSpan end)
+        {
+            start = TimeSpan.Zero;
+            end = TimeSpan.Zero;
+
+            var json = result.Properties.GetProperty(PropertyId.SpeechServiceResponse_JsonResult);
+            if (string.IsNullOrWhiteSpace(json))
+            {
+                return false;
+            }
+
+            try
+            {
+                using var doc = JsonDocument.Parse(json);
+                if (!TryReadOffsetDuration(doc.RootElement, out var offset, out var duration))
+                {
+                    return false;
+                }
+
+                start = TimeSpan.FromTicks(Math.Max(0, offset));
+                end = start + TimeSpan.FromTicks(Math.Max(0, duration));
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static bool TryReadOffsetDuration(JsonElement root, out long offset, out long duration)
+        {
+            offset = 0;
+            duration = 0;
+
+            if (root.TryGetProperty("Offset", out var offsetElement) &&
+                root.TryGetProperty("Duration", out var durationElement) &&
+                offsetElement.TryGetInt64(out offset) &&
+                durationElement.TryGetInt64(out duration))
+            {
+                return true;
+            }
+
+            if (root.TryGetProperty("NBest", out var nbest) &&
+                nbest.ValueKind == JsonValueKind.Array &&
+                nbest.GetArrayLength() > 0)
+            {
+                var first = nbest[0];
+                if (first.TryGetProperty("Offset", out var nbOffset) &&
+                    first.TryGetProperty("Duration", out var nbDuration) &&
+                    nbOffset.TryGetInt64(out offset) &&
+                    nbDuration.TryGetInt64(out duration))
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
         public void UpdateConfig(AzureSpeechConfig newConfig)
         {
@@ -397,10 +624,11 @@ namespace TranslationToolUI.Services
         {
             try
             {
-                if (HasAudioActivity(chunk))
+                if (HasAudioActivity(chunk, _config.AudioActivityThreshold))
                 {
                     _lastAudioActivityUtc = DateTime.UtcNow;
                 }
+                UpdateAudioLevel(chunk);
                 _pushStream?.Write(chunk);
                 _wavRecorder?.TryEnqueue(chunk);
             }
@@ -410,13 +638,42 @@ namespace TranslationToolUI.Services
             }
         }
 
-        private static bool HasAudioActivity(byte[] chunk)
+        private void UpdateAudioLevel(byte[] chunk)
         {
-            const short threshold = 600;
+            var peak = GetPeakLevel(chunk);
+            _smoothedAudioLevel = (_smoothedAudioLevel * 0.8) + (peak * 0.2);
+            var gain = Math.Max(0.1, _config.AudioLevelGain);
+            PublishAudioLevel(Math.Clamp(_smoothedAudioLevel * gain, 0, 1));
+        }
+
+        private static double GetPeakLevel(byte[] chunk)
+        {
+            var max = 0;
             for (var i = 0; i + 1 < chunk.Length; i += 2)
             {
                 var sample = (short)(chunk[i] | (chunk[i + 1] << 8));
-                if (sample >= threshold || sample <= -threshold)
+                var abs = Math.Abs(sample);
+                if (abs > max)
+                {
+                    max = abs;
+                }
+            }
+
+            return Math.Clamp(max / 32768d, 0, 1);
+        }
+
+        private void PublishAudioLevel(double level)
+        {
+            OnAudioLevelUpdated?.Invoke(this, Math.Clamp(level, 0, 1));
+        }
+
+        private static bool HasAudioActivity(byte[] chunk, int threshold)
+        {
+            var sampleThreshold = (short)Math.Clamp(Math.Abs(threshold), 50, 8000);
+            for (var i = 0; i + 1 < chunk.Length; i += 2)
+            {
+                var sample = (short)(chunk[i] | (chunk[i + 1] << 8));
+                if (sample >= sampleThreshold || sample <= -sampleThreshold)
                 {
                     return true;
                 }
@@ -491,6 +748,7 @@ namespace TranslationToolUI.Services
                     return;
                 }
 
+                OnReconnectTriggered?.Invoke(this, reason);
                 OnStatusChanged?.Invoke(this, $"{reason}，正在重连...");
 
                 try

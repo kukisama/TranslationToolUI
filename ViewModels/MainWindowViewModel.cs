@@ -42,6 +42,8 @@ namespace TranslationToolUI.ViewModels
         private AudioDeviceInfo? _selectedAudioDevice;
         private bool _isAudioDeviceSelectionEnabled;
         private bool _isAudioDeviceRefreshEnabled;
+        private double _audioLevel;
+        private readonly ObservableCollection<double> _audioLevelHistory;
 
         private readonly AzureSubscriptionValidator _subscriptionValidator = new();
         private SubscriptionValidationState _subscriptionValidationState = SubscriptionValidationState.Unknown;
@@ -61,6 +63,7 @@ namespace TranslationToolUI.ViewModels
             _history = new ObservableCollection<TranslationItem>();
             _subscriptionNames = new ObservableCollection<string>();
             _audioDevices = new ObservableCollection<AudioDeviceInfo>();
+            _audioLevelHistory = new ObservableCollection<double>(Enumerable.Repeat(0d, 24));
 
             _subscriptionLampTimer = new DispatcherTimer(TimeSpan.FromMilliseconds(500), DispatcherPriority.Background, (_, _) =>
             {
@@ -282,13 +285,21 @@ namespace TranslationToolUI.ViewModels
 
         public ObservableCollection<AudioDeviceInfo> AudioDevices => _audioDevices;
 
+        public ObservableCollection<double> AudioLevelHistory => _audioLevelHistory;
+
+        public double AudioLevel
+        {
+            get => _audioLevel;
+            private set => SetProperty(ref _audioLevel, value);
+        }
+
         public AudioDeviceInfo? SelectedAudioDevice
         {
             get => _selectedAudioDevice;
             set => SetSelectedAudioDevice(value, persistSelection: true);
         }
 
-        public bool IsAudioSourceSelectionEnabled => OperatingSystem.IsWindows();
+        public bool IsAudioSourceSelectionEnabled => OperatingSystem.IsWindows() && !IsTranslating;
 
         public bool IsAudioDeviceSelectionEnabled
         {
@@ -328,6 +339,13 @@ namespace TranslationToolUI.ViewModels
 
         private void RefreshAudioDevices(bool persistSelection)
         {
+            if (IsTranslating)
+            {
+                IsAudioDeviceSelectionEnabled = false;
+                IsAudioDeviceRefreshEnabled = false;
+                return;
+            }
+
             _audioDevices.Clear();
 
             if (!OperatingSystem.IsWindows())
@@ -414,6 +432,17 @@ namespace TranslationToolUI.ViewModels
                 OnPropertyChanged(nameof(TranslationToggleButtonText));
                 OnPropertyChanged(nameof(TranslationToggleButtonBackground));
                 OnPropertyChanged(nameof(TranslationToggleButtonForeground));
+                OnPropertyChanged(nameof(IsAudioSourceSelectionEnabled));
+
+                if (value)
+                {
+                    IsAudioDeviceSelectionEnabled = false;
+                    IsAudioDeviceRefreshEnabled = false;
+                }
+                else
+                {
+                    RefreshAudioDevices(persistSelection: false);
+                }
 
                 ((RelayCommand)StartTranslationCommand).RaiseCanExecuteChanged();
                 ((RelayCommand)StopTranslationCommand).RaiseCanExecuteChanged();
@@ -661,6 +690,8 @@ namespace TranslationToolUI.ViewModels
                 _translationService.OnRealtimeTranslationReceived += OnRealtimeTranslationReceived;
                 _translationService.OnFinalTranslationReceived += OnFinalTranslationReceived;
                 _translationService.OnStatusChanged += OnStatusChanged;
+                _translationService.OnReconnectTriggered += OnReconnectTriggered;
+                _translationService.OnAudioLevelUpdated += OnAudioLevelUpdated;
             }
 
             await _translationService.StartTranslationAsync();
@@ -681,6 +712,8 @@ namespace TranslationToolUI.ViewModels
             IsTranslating = false;
             IsConfigurationEnabled = true;
             StatusMessage = "已停止";
+            AudioLevel = 0;
+            ResetAudioLevelHistory();
 
             if (_floatingSubtitleManager?.IsWindowOpen == true)
             {
@@ -690,6 +723,32 @@ namespace TranslationToolUI.ViewModels
 
             ((RelayCommand)StartTranslationCommand).RaiseCanExecuteChanged();
             ((RelayCommand)StopTranslationCommand).RaiseCanExecuteChanged();
+        }
+
+        private void OnReconnectTriggered(object? sender, string reason)
+        {
+            if (!_config.ShowReconnectMarkerInSubtitle)
+            {
+                return;
+            }
+
+            Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+            {
+                var marker = "*触发重连*";
+                if (string.IsNullOrWhiteSpace(CurrentTranslated))
+                {
+                    CurrentTranslated = marker;
+                }
+                else if (!CurrentTranslated.Contains(marker, StringComparison.Ordinal))
+                {
+                    CurrentTranslated = $"{CurrentTranslated} {marker}";
+                }
+
+                if (_floatingSubtitleManager?.IsWindowOpen == true)
+                {
+                    _floatingSubtitleManager.UpdateSubtitle(CurrentTranslated);
+                }
+            });
         }
         private void ClearHistory()
         {
@@ -902,6 +961,35 @@ namespace TranslationToolUI.ViewModels
                 StatusMessage = message;
             });
         }
+
+        private void OnAudioLevelUpdated(object? sender, double level)
+        {
+            Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+            {
+                AudioLevel = level;
+                PushAudioLevelSample(level);
+            });
+        }
+
+        private void PushAudioLevelSample(double level)
+        {
+            if (_audioLevelHistory.Count == 0)
+            {
+                return;
+            }
+
+            _audioLevelHistory.RemoveAt(0);
+            _audioLevelHistory.Add(level);
+        }
+
+        private void ResetAudioLevelHistory()
+        {
+            _audioLevelHistory.Clear();
+            for (var i = 0; i < 24; i++)
+            {
+                _audioLevelHistory.Add(0);
+            }
+        }
         private void OnConfigurationUpdated(object? sender, AzureSpeechConfig updatedConfig)
         {
             _config = updatedConfig;
@@ -1006,6 +1094,8 @@ namespace TranslationToolUI.ViewModels
                 _translationService.OnRealtimeTranslationReceived -= OnRealtimeTranslationReceived;
                 _translationService.OnFinalTranslationReceived -= OnFinalTranslationReceived;
                 _translationService.OnStatusChanged -= OnStatusChanged;
+                _translationService.OnReconnectTriggered -= OnReconnectTriggered;
+                _translationService.OnAudioLevelUpdated -= OnAudioLevelUpdated;
             }
             
             _floatingSubtitleManager?.Dispose();

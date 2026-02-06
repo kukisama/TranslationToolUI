@@ -37,6 +37,9 @@ namespace TranslationToolUI.Models
 
         public bool EnableNoResponseRestart { get; set; } = false;
         public int NoResponseRestartSeconds { get; set; } = 3;
+        public bool ShowReconnectMarkerInSubtitle { get; set; } = true;
+        public int AudioActivityThreshold { get; set; } = 600;
+        public double AudioLevelGain { get; set; } = 2.0;
 
         public AudioSourceMode AudioSourceMode { get; set; } = AudioSourceMode.DefaultMic;
         public string SelectedAudioDeviceId { get; set; } = "";
@@ -46,6 +49,9 @@ namespace TranslationToolUI.Models
         public bool EnableRecording { get; set; } = true;
         public int RecordingMp3BitrateKbps { get; set; } = 96;
         public bool DeleteWavAfterMp3 { get; set; } = true;
+
+        public bool ExportSrtSubtitles { get; set; } = false;
+        public bool ExportVttSubtitles { get; set; } = false;
 
         [JsonIgnore]
         public string SessionDirectory => PathManager.Instance.SessionsPath;

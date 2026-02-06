@@ -81,12 +81,18 @@ namespace TranslationToolUI.Views
 
             EnableNoResponseRestartCheckBox.IsChecked = false;
             NoResponseRestartSecondsNumeric.Value = 3;
+            AudioActivityThresholdNumeric.Value = 600;
+            AudioLevelGainNumeric.Value = 2.0m;
+            ShowReconnectMarkerCheckBox.IsChecked = true;
             UpdateNoResponseUiEnabledState();
 
             EnableRecordingCheckBox.IsChecked = true;
             RecordingMp3BitrateNumeric.Value = 96;
             DeleteWavAfterMp3CheckBox.IsChecked = true;
             UpdateRecordingUiEnabledState();
+
+            ExportSrtCheckBox.IsChecked = false;
+            ExportVttCheckBox.IsChecked = false;
 
             SessionDirectoryTextBox.Text = PathManager.Instance.SessionsPath;
 
@@ -111,12 +117,18 @@ namespace TranslationToolUI.Views
 
             EnableNoResponseRestartCheckBox.IsChecked = _config.EnableNoResponseRestart;
             NoResponseRestartSecondsNumeric.Value = _config.NoResponseRestartSeconds;
+            AudioActivityThresholdNumeric.Value = _config.AudioActivityThreshold;
+            AudioLevelGainNumeric.Value = (decimal)_config.AudioLevelGain;
+            ShowReconnectMarkerCheckBox.IsChecked = _config.ShowReconnectMarkerInSubtitle;
             UpdateNoResponseUiEnabledState();
 
             EnableRecordingCheckBox.IsChecked = _config.EnableRecording;
             RecordingMp3BitrateNumeric.Value = _config.RecordingMp3BitrateKbps;
             DeleteWavAfterMp3CheckBox.IsChecked = _config.DeleteWavAfterMp3;
             UpdateRecordingUiEnabledState();
+
+            ExportSrtCheckBox.IsChecked = _config.ExportSrtSubtitles;
+            ExportVttCheckBox.IsChecked = _config.ExportVttSubtitles;
             
             SessionDirectoryTextBox.Text = _config.SessionDirectory;
 
@@ -155,6 +167,8 @@ namespace TranslationToolUI.Views
         {
             var enabled = EnableNoResponseRestartCheckBox.IsChecked ?? false;
             NoResponseRestartSecondsNumeric.IsEnabled = enabled;
+            AudioActivityThresholdNumeric.IsEnabled = enabled;
+            ShowReconnectMarkerCheckBox.IsEnabled = enabled;
         }
 
         private void ForceUpdateListBoxSelection(int targetIndex)
@@ -530,10 +544,16 @@ namespace TranslationToolUI.Views
 
                 _config.EnableNoResponseRestart = EnableNoResponseRestartCheckBox.IsChecked ?? false;
                 _config.NoResponseRestartSeconds = (int)(NoResponseRestartSecondsNumeric.Value ?? 3);
+                _config.AudioActivityThreshold = (int)(AudioActivityThresholdNumeric.Value ?? 600);
+                _config.AudioLevelGain = (double)(AudioLevelGainNumeric.Value ?? 2.0m);
+                _config.ShowReconnectMarkerInSubtitle = ShowReconnectMarkerCheckBox.IsChecked ?? true;
 
                 _config.EnableRecording = EnableRecordingCheckBox.IsChecked ?? true;
                 _config.RecordingMp3BitrateKbps = (int)(RecordingMp3BitrateNumeric.Value ?? 96);
                 _config.DeleteWavAfterMp3 = DeleteWavAfterMp3CheckBox.IsChecked ?? true;
+
+                _config.ExportSrtSubtitles = ExportSrtCheckBox.IsChecked ?? false;
+                _config.ExportVttSubtitles = ExportVttCheckBox.IsChecked ?? false;
 
                 ConfigurationUpdated?.Invoke(this, _config);
 
