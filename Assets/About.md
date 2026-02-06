@@ -23,8 +23,8 @@ TranslationToolUI 会采集音频（麦克风 / 系统回环 Loopback），推�
 
 版本以当前项目的 NuGet 引用为准（详见 `TranslationToolUI.csproj`）：
 
-- .NET： .NET 8（[官网](https://dotnet.microsoft.com/)）
-- Avalonia UI：Avalonia 11.3.0（[官网](https://avaloniaui.net/) | [NuGet](https://www.nuget.org/packages/Avalonia/11.3.0)）
+- .NET： .NET 10（[官网](https://dotnet.microsoft.com/)）
+- Avalonia UI：Avalonia 11.3.11（[官网](https://avaloniaui.net/) | [NuGet](https://www.nuget.org/packages/Avalonia/11.3.11)）
 - Markdown 渲染：Markdown.Avalonia 11.0.2（[GitHub](https://github.com/whistyun/Markdown.Avalonia) | [NuGet](https://www.nuget.org/packages/Markdown.Avalonia/11.0.2)）
 - 语音识别/翻译：Microsoft.CognitiveServices.Speech 1.44.0（[文档](https://learn.microsoft.com/azure/ai-services/speech-service/) | [NuGet](https://www.nuget.org/packages/Microsoft.CognitiveServices.Speech/1.44.0)）
 - 音频采集/处理：NAudio 2.2.1（[GitHub](https://github.com/naudio/NAudio) | [NuGet](https://www.nuget.org/packages/NAudio/2.2.1)）

@@ -24,7 +24,7 @@
 
 ## 运行要求
 
-- .NET 8（开发用 SDK；运行用 Desktop Runtime）
+- .NET 10（开发用 SDK；运行用 Desktop Runtime）
 - Azure Speech Services 订阅（Key + Region）
 
 ## 快速开始（开发/本地运行）
