@@ -14,6 +14,8 @@ namespace TranslationToolUI.Services
 
         public bool IsWindowOpen => _isWindowOpen;
 
+        public event EventHandler<bool>? WindowStateChanged;
+
         public void ToggleWindow()
         {
             if (_isWindowOpen)
@@ -42,6 +44,7 @@ namespace TranslationToolUI.Services
 
                 _window.Show();
                 _isWindowOpen = true;
+                WindowStateChanged?.Invoke(this, true);
             }
             catch (Exception ex)
             {
@@ -74,6 +77,7 @@ namespace TranslationToolUI.Services
         private void OnWindowClosed(object? sender, EventArgs e)
         {
             _isWindowOpen = false;
+            WindowStateChanged?.Invoke(this, false);
 
             if (_window != null)
             {

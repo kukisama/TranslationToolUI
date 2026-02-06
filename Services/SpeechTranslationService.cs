@@ -330,10 +330,10 @@ namespace TranslationToolUI.Services
             var audioPath = _currentAudioMp3Path ?? _currentAudioWavPath;
             if (!string.IsNullOrWhiteSpace(audioPath))
             {
-                return $"{Path.GetFileNameWithoutExtension(audioPath)}.speech";
+                return Path.GetFileNameWithoutExtension(audioPath);
             }
 
-            return $"Audio_{_currentRunStamp}.speech";
+            return $"Audio_{_currentRunStamp}";
         }
 
         private void DisposeSubtitleWriters()

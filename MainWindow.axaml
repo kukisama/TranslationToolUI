@@ -18,6 +18,7 @@
 
     <Window.Resources>
         <controls:LevelToHeightConverter x:Key="LevelToHeight" MaxHeight="16"/>
+        <controls:ProgressToOffsetConverter x:Key="ProgressToOffset" Padding="6"/>
     </Window.Resources>
 
     <Window.Styles>
@@ -34,9 +35,29 @@
         <Style Selector="Button#HelpButton:pressed">
             <Setter Property="Background" Value="#FF1E40AF" />
         </Style>
+        <Style Selector="Slider#PlaybackSlider">
+            <Setter Property="Height" Value="12" />
+            <Setter Property="Background" Value="#FFE5E7EB" />
+            <Setter Property="Foreground" Value="#FF111827" />
+        </Style>
+        <Style Selector="Slider#PlaybackSlider /template/ Thumb">
+            <Setter Property="Width" Value="9" />
+            <Setter Property="Height" Value="9" />
+            <Setter Property="CornerRadius" Value="4.5" />
+            <Setter Property="MinWidth" Value="9" />
+            <Setter Property="MinHeight" Value="9" />
+            <Setter Property="MaxWidth" Value="9" />
+            <Setter Property="MaxHeight" Value="9" />
+            <Setter Property="Background" Value="#FF111827" />
+            <Setter Property="BorderBrush" Value="#FFE5E7EB" />
+            <Setter Property="BorderThickness" Value="1" />
+        </Style>
+        <Style Selector="Slider#PlaybackSlider /template/ Track">
+            <Setter Property="Height" Value="3" />
+        </Style>
     </Window.Styles>
 
-    <Grid RowDefinitions="Auto,Auto,*,Auto">
+    <Grid RowDefinitions="Auto,Auto,*,Auto,Auto">
         <!-- 顶部工具栏 -->
         <Grid Grid.Row="0" ColumnDefinitions="Auto,*" Margin="10">
             <TextBlock Grid.Column="0" Text="Azure 语音实时翻译工具" FontSize="18" FontWeight="Bold" VerticalAlignment="Center" Margin="0,0,20,0"/>
@@ -46,8 +67,10 @@
                 <Button Content="清空历史" Command="{Binding ClearHistoryCommand}" Padding="10,5"/>
                 <Button Content="查看历史记录" Command="{Binding OpenHistoryFolderCommand}" Padding="10,5" 
                         ToolTip.Tip="打开本地历史记录文件夹，查看保存的翻译文件"/>
-                <Button Content="浮动字幕" Command="{Binding ShowFloatingSubtitlesCommand}" Padding="10,5" 
-                        ToolTip.Tip="使用可拖动的透明字幕框提供服务"/>
+                <Button Content="浮动字幕" Command="{Binding ShowFloatingSubtitlesCommand}" Padding="10,5"
+                    Background="{Binding FloatingSubtitleButtonBackground}"
+                    Foreground="{Binding FloatingSubtitleButtonForeground}"
+                    ToolTip.Tip="使用可拖动的透明字幕框提供服务"/>
 
                 <Button Name="HelpButton" Content="帮助" Padding="10,5" Click="HelpButton_Click">
                     <Button.ContextMenu>
@@ -171,49 +194,169 @@
         <Grid Grid.Row="2" ColumnDefinitions="*,*" Margin="10">
             <!-- 左侧实时翻译区域 -->
             <Border Grid.Column="0" BorderBrush="Gray" BorderThickness="1" Margin="0,0,5,0">
-                <Grid RowDefinitions="Auto,*,Auto,*">                    <TextBlock Grid.Row="0" Text="实时翻译" FontWeight="Bold" Margin="5"/>
-                    
-                    <!-- 原文可配置文本框 (高级编辑器) -->
-                    <Border Grid.Row="1" Margin="5" BorderBrush="LightGray" BorderThickness="1">
-                        <controls:ConfigurableTextEditor x:Name="OriginalEditor"
-                                                         Text="{Binding CurrentOriginal, Mode=TwoWay}"
-                                                         Placeholder="原文将在这里显示..."
-                                                         EditorType="Advanced"/>
-                    </Border>
-                    
-                    <TextBlock Grid.Row="2" Text="译文：" FontWeight="Bold" Margin="5"/>
-                    
-                    <!-- 译文可配置文本框 (简单编辑器) -->
-                    <Border Grid.Row="3" Margin="5" BorderBrush="LightBlue" BorderThickness="1">
-                        <controls:ConfigurableTextEditor x:Name="TranslatedEditor"
-                                                         Text="{Binding CurrentTranslated, Mode=TwoWay}"
-                                                         Placeholder="译文将在这里显示..."
-                                                         EditorType="Advanced"/>
-                    </Border>
+                <Grid RowDefinitions="Auto,*">
+                    <DockPanel Grid.Row="0" Margin="5">
+                        <TextBlock Text="实时翻译" FontWeight="Bold" DockPanel.Dock="Left"/>
+                        <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right">
+                            <RadioButton Content="原文" GroupName="EditorView"
+                                         IsChecked="{Binding IsOriginalView}"/>
+                            <RadioButton Content="译文" GroupName="EditorView"
+                                         IsChecked="{Binding IsTranslatedView}"/>
+                            <RadioButton Content="双语" GroupName="EditorView"
+                                         IsChecked="{Binding IsBilingualView}"/>
+                        </StackPanel>
+                    </DockPanel>
+
+                    <Grid Grid.Row="1" Margin="5">
+                        <Border BorderBrush="LightGray" BorderThickness="1" IsVisible="{Binding IsSingleView}">
+                            <controls:ConfigurableTextEditor x:Name="UnifiedEditor"
+                                                             Text="{Binding DisplayedText, Mode=TwoWay}"
+                                                             Placeholder="{Binding DisplayPlaceholder}"
+                                                             EditorType="Advanced"/>
+                        </Border>
+                        <StackPanel Spacing="6" IsVisible="{Binding IsBilingualView}">
+                            <Border BorderBrush="LightGray" BorderThickness="1">
+                                <controls:ConfigurableTextEditor Text="{Binding CurrentOriginal, Mode=TwoWay}"
+                                                                 Placeholder="原文将在这里显示..."
+                                                                 EditorType="Advanced"/>
+                            </Border>
+                            <Border BorderBrush="LightGray" BorderThickness="1">
+                                <controls:ConfigurableTextEditor Text="{Binding CurrentTranslated, Mode=TwoWay}"
+                                                                 Placeholder="译文将在这里显示..."
+                                                                 EditorType="Advanced"/>
+                            </Border>
+                        </StackPanel>
+                    </Grid>
                 </Grid>
             </Border>
             
-            <!-- 右侧历史记录区域 -->
+            <!-- 右侧历史/洞察区域 -->
             <Border Grid.Column="1" BorderBrush="Gray" BorderThickness="1" Margin="5,0,0,0">
-                <Grid RowDefinitions="Auto,*">
-                    <TextBlock Grid.Row="0" Text="历史记录" FontWeight="Bold" Margin="5"/>
-                      <ListBox Grid.Row="1" ItemsSource="{Binding History}" Margin="5">
-                        <ListBox.ItemTemplate>
-                            <DataTemplate DataType="models:TranslationItem">
-                                <StackPanel Margin="0,5">
-                                    <TextBlock Text="{Binding Timestamp, StringFormat=\{0:HH:mm:ss\}}" FontWeight="Bold"/>
-                                    <TextBlock Text="{Binding OriginalText}" TextWrapping="Wrap"/>
-                                    <TextBlock Text="{Binding TranslatedText}" TextWrapping="Wrap" Foreground="Blue"/>
-                                    <Separator Height="1" Background="LightGray" Margin="0,5"/>
-                                </StackPanel>
-                            </DataTemplate>
-                        </ListBox.ItemTemplate>
-                    </ListBox>
-                </Grid>
+                <TabControl>
+                    <TabItem Header="历史记录">
+                        <Grid RowDefinitions="Auto,*">
+                            <TextBlock Grid.Row="0" Text="历史记录" FontWeight="Bold" Margin="5"/>
+                            <ListBox Grid.Row="1" ItemsSource="{Binding History}" Margin="5">
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate DataType="models:TranslationItem">
+                                        <Border Margin="0,4" BorderBrush="#FFE5E7EB" BorderThickness="1" CornerRadius="4" Padding="6">
+                                            <Expander>
+                                                <Expander.Header>
+                                                    <StackPanel Spacing="2">
+                                                        <DockPanel>
+                                                            <TextBlock Text="{Binding Timestamp, StringFormat=\{0:HH:mm:ss\}}" FontWeight="Bold" DockPanel.Dock="Left"/>
+                                                            <TextBlock Text="{Binding TranslatedText}" Foreground="Blue"
+                                                                       TextTrimming="CharacterEllipsis" Margin="8,0,0,0"/>
+                                                        </DockPanel>
+                                                        <TextBlock Text="{Binding OriginalText}" Foreground="Gray"
+                                                                   TextTrimming="CharacterEllipsis"/>
+                                                    </StackPanel>
+                                                </Expander.Header>
+                                                <StackPanel Spacing="6" Margin="0,6,0,0">
+                                                    <TextBlock Text="原文" FontSize="10" Foreground="Gray"/>
+                                                    <TextBlock Text="{Binding OriginalText}" TextWrapping="Wrap"/>
+                                                    <TextBlock Text="译文" FontSize="10" Foreground="Gray"/>
+                                                    <TextBlock Text="{Binding TranslatedText}" TextWrapping="Wrap" Foreground="Blue"/>
+                                                </StackPanel>
+                                            </Expander>
+                                        </Border>
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
+                        </Grid>
+                    </TabItem>
+                    <TabItem Header="洞察">
+                        <Grid>
+                            <TextBlock Text="洞察功能规划中" Foreground="Gray"
+                                       HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Grid>
+                    </TabItem>
+                </TabControl>
             </Border>
         </Grid>        
+        <!-- 音频/字幕复盘面板 -->
+        <Border Grid.Row="3" BorderBrush="Gray" BorderThickness="0,1,0,0" Padding="8,6">
+            <Expander IsExpanded="False">
+                <Expander.Header>
+                    <TextBlock Text="音频/字幕复盘" FontWeight="Bold"/>
+                </Expander.Header>
+                <Grid Margin="0,8,0,0" ColumnDefinitions="260,*" RowDefinitions="Auto,*">
+                    <StackPanel Grid.Column="0" Spacing="10">
+                        <DockPanel Margin="0,0,0,2">
+                            <TextBlock Text="音频文件" FontSize="11" Foreground="Gray" DockPanel.Dock="Left"/>
+                            <Button Content="刷新" Width="50" Padding="6,2" Command="{Binding RefreshAudioLibraryCommand}"
+                                    HorizontalAlignment="Right" DockPanel.Dock="Right"/>
+                        </DockPanel>
+                        <ListBox ItemsSource="{Binding AudioFiles}" SelectedItem="{Binding SelectedAudioFile}" Height="120">
+                            <ListBox.ItemTemplate>
+                                <DataTemplate DataType="models:MediaFileItem">
+                                    <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis"/>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+
+                        <TextBlock Text="字幕文件" FontSize="11" Foreground="Gray"/>
+                        <ListBox ItemsSource="{Binding SubtitleFiles}" SelectedItem="{Binding SelectedSubtitleFile}" Height="90">
+                            <ListBox.ItemTemplate>
+                                <DataTemplate DataType="models:MediaFileItem">
+                                    <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis"/>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+
+                        <StackPanel Spacing="6">
+                            <TextBlock Text="播放控制" FontSize="11" Foreground="Gray"/>
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <Button Content="▶" Width="34" Command="{Binding PlayAudioCommand}" IsEnabled="{Binding IsPlayEnabled}"/>
+                                <Button Content="⏸" Width="34" Command="{Binding PauseAudioCommand}" IsEnabled="{Binding IsPauseEnabled}"/>
+                                <Button Content="⏹" Width="34" Command="{Binding StopAudioCommand}" IsEnabled="{Binding IsStopEnabled}"/>
+                                <TextBlock Text="{Binding PlaybackTimeText}" VerticalAlignment="Center" Foreground="Gray"/>
+                            </StackPanel>
+                            <Grid RowDefinitions="Auto,Auto">
+                                <Canvas Height="18" Margin="0,0,0,1" IsHitTestVisible="False"
+                                        Width="{Binding ElementName=PlaybackSlider, Path=Bounds.Width}">
+                                    <Border Width="96" Height="16" Background="#FFF3F4F6" BorderBrush="#FFE5E7EB"
+                                            BorderThickness="1" CornerRadius="8" Padding="4,0">
+                                        <Canvas.Left>
+                                            <MultiBinding Converter="{StaticResource ProgressToOffset}">
+                                                <Binding Path="PlaybackProgress"/>
+                                                <Binding ElementName="PlaybackSlider" Path="Bounds.Width"/>
+                                                <Binding RelativeSource="{RelativeSource Self}" Path="Bounds.Width"/>
+                                            </MultiBinding>
+                                        </Canvas.Left>
+                                        <TextBlock Text="{Binding PlaybackTimeText}" FontSize="10" Foreground="#FF111827"
+                                                   VerticalAlignment="Center" HorizontalAlignment="Center"/>
+                                    </Border>
+                                </Canvas>
+                                <Slider Grid.Row="1" Name="PlaybackSlider" Minimum="0" Maximum="1"
+                                        Value="{Binding PlaybackProgress, Mode=TwoWay}"/>
+                            </Grid>
+                        </StackPanel>
+                    </StackPanel>
+
+                    <Border Grid.Column="1" Margin="12,0,0,0" BorderBrush="#FFE5E7EB" BorderThickness="1" CornerRadius="4">
+                        <Grid>
+                            <ListBox Name="SubtitleCueListBox" ItemsSource="{Binding SubtitleCues}" SelectedItem="{Binding SelectedSubtitleCue}" Margin="0" Padding="0"
+                                     Height="{Binding SubtitleListHeight}" MinHeight="0" VerticalAlignment="Top"
+                                     ScrollViewer.VerticalScrollBarVisibility="Auto"
+                                     DoubleTapped="SubtitleCueListBox_DoubleTapped">
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate DataType="models:SubtitleCue">
+                                        <StackPanel Margin="0,2">
+                                            <TextBlock Text="{Binding RangeText}" FontSize="10" Foreground="Gray"/>
+                                            <TextBlock Text="{Binding Text}" TextWrapping="Wrap"/>
+                                        </StackPanel>
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
+                        </Grid>
+                    </Border>
+                </Grid>
+            </Expander>
+        </Border>
+
         <!-- 底部状态栏 -->
-        <Border Grid.Row="3" BorderBrush="Gray" BorderThickness="0,1,0,0" Padding="10,5">
+        <Border Grid.Row="4" BorderBrush="Gray" BorderThickness="0,1,0,0" Padding="10,5">
             <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto">
                 <TextBlock Grid.Column="0" Text="{Binding StatusMessage}" />
                 <TextBlock Grid.Column="1" Text="{Binding SubscriptionValidationStatusMessage}" 

@@ -5,6 +5,7 @@ using TranslationToolUI.Models;
 using TranslationToolUI.Services;
 using TranslationToolUI.Views;
 using System.Threading.Tasks;
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Threading;
 using System.Threading;
@@ -15,10 +16,19 @@ using System.ComponentModel;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Media;
 using TranslationToolUI.Services.Audio;
+using System.IO;
 using System.Diagnostics;
+using NAudio.Wave;
 
 namespace TranslationToolUI.ViewModels
 {
+    public enum EditorDisplayMode
+    {
+        Original,
+        Translated,
+        Bilingual
+    }
+
     public class MainWindowViewModel : ViewModelBase
     {
         private AzureSpeechConfig _config;
@@ -36,6 +46,7 @@ namespace TranslationToolUI.ViewModels
         private string _targetLanguage = "en";
         private bool _isConfigurationEnabled = true;
         private TextEditorType _editorType = TextEditorType.Advanced;
+        private EditorDisplayMode _editorDisplayMode = EditorDisplayMode.Translated;
 
         private int _audioSourceModeIndex;
         private readonly ObservableCollection<AudioDeviceInfo> _audioDevices;
@@ -44,6 +55,27 @@ namespace TranslationToolUI.ViewModels
         private bool _isAudioDeviceRefreshEnabled;
         private double _audioLevel;
         private readonly ObservableCollection<double> _audioLevelHistory;
+
+        private readonly ObservableCollection<MediaFileItem> _audioFiles;
+        private readonly ObservableCollection<MediaFileItem> _subtitleFiles;
+        private readonly ObservableCollection<SubtitleCue> _subtitleCues;
+        private MediaFileItem? _selectedAudioFile;
+        private MediaFileItem? _selectedSubtitleFile;
+        private SubtitleCue? _selectedSubtitleCue;
+        private double _subtitleListHeight;
+
+        private WaveOutEvent? _playbackOutput;
+        private AudioFileReader? _playbackReader;
+        private readonly DispatcherTimer _playbackTimer;
+        private TimeSpan _playbackPosition = TimeSpan.Zero;
+        private TimeSpan _playbackDuration = TimeSpan.Zero;
+        private double _playbackProgress;
+        private bool _isPlaybackReady;
+        private bool _isPlaying;
+        private bool _suppressSeek;
+        private bool _suppressSubtitleSeek;
+        private const double SubtitleCueRowHeight = 56;
+        private bool _isFloatingSubtitleOpen;
 
         private readonly AzureSubscriptionValidator _subscriptionValidator = new();
         private SubscriptionValidationState _subscriptionValidationState = SubscriptionValidationState.Unknown;
@@ -64,6 +96,15 @@ namespace TranslationToolUI.ViewModels
             _subscriptionNames = new ObservableCollection<string>();
             _audioDevices = new ObservableCollection<AudioDeviceInfo>();
             _audioLevelHistory = new ObservableCollection<double>(Enumerable.Repeat(0d, 24));
+            _audioFiles = new ObservableCollection<MediaFileItem>();
+            _subtitleFiles = new ObservableCollection<MediaFileItem>();
+            _subtitleCues = new ObservableCollection<SubtitleCue>();
+            _subtitleCues.CollectionChanged += (_, _) => UpdateSubtitleListHeight();
+
+            _playbackTimer = new DispatcherTimer(TimeSpan.FromMilliseconds(200), DispatcherPriority.Background, (_, _) =>
+            {
+                UpdatePlaybackProgressFromReader();
+            });
 
             _subscriptionLampTimer = new DispatcherTimer(TimeSpan.FromMilliseconds(500), DispatcherPriority.Background, (_, _) =>
             {
@@ -133,6 +174,26 @@ namespace TranslationToolUI.ViewModels
                 canExecute: _ => true
             );
 
+            RefreshAudioLibraryCommand = new RelayCommand(
+                execute: _ => RefreshAudioLibrary(),
+                canExecute: _ => true
+            );
+
+            PlayAudioCommand = new RelayCommand(
+                execute: _ => PlayAudio(),
+                canExecute: _ => IsPlayEnabled
+            );
+
+            PauseAudioCommand = new RelayCommand(
+                execute: _ => PauseAudio(),
+                canExecute: _ => IsPauseEnabled
+            );
+
+            StopAudioCommand = new RelayCommand(
+                execute: _ => StopAudio(),
+                canExecute: _ => IsStopEnabled
+            );
+
             OpenAzureSpeechPortalCommand = new RelayCommand(
                 execute: _ => OpenUrl("https://portal.azure.com/#view/Microsoft_Azure_ProjectOxford/CognitiveServicesHub/~/SpeechServices"),
                 canExecute: _ => true
@@ -157,6 +218,10 @@ namespace TranslationToolUI.ViewModels
         public ICommand ToggleTranslationCommand { get; }
 
         public ICommand RefreshAudioDevicesCommand { get; }
+        public ICommand RefreshAudioLibraryCommand { get; }
+        public ICommand PlayAudioCommand { get; }
+        public ICommand PauseAudioCommand { get; }
+        public ICommand StopAudioCommand { get; }
         public void SetMainWindow(Window mainWindow)
         {
             _mainWindow = mainWindow;
@@ -204,6 +269,7 @@ namespace TranslationToolUI.ViewModels
                     ForceUpdateComboBoxSelection();
 
                     RefreshAudioDevices(persistSelection: false);
+                    RefreshAudioLibrary();
 
                     ((RelayCommand)StartTranslationCommand).RaiseCanExecuteChanged();
                     ((RelayCommand)ToggleTranslationCommand).RaiseCanExecuteChanged();
@@ -285,12 +351,100 @@ namespace TranslationToolUI.ViewModels
 
         public ObservableCollection<AudioDeviceInfo> AudioDevices => _audioDevices;
 
+        public ObservableCollection<MediaFileItem> AudioFiles => _audioFiles;
+
+        public ObservableCollection<MediaFileItem> SubtitleFiles => _subtitleFiles;
+
+        public ObservableCollection<SubtitleCue> SubtitleCues => _subtitleCues;
+
+        public double SubtitleListHeight
+        {
+            get => _subtitleListHeight;
+            private set => SetProperty(ref _subtitleListHeight, value);
+        }
+
         public ObservableCollection<double> AudioLevelHistory => _audioLevelHistory;
 
         public double AudioLevel
         {
             get => _audioLevel;
             private set => SetProperty(ref _audioLevel, value);
+        }
+
+        public MediaFileItem? SelectedAudioFile
+        {
+            get => _selectedAudioFile;
+            set
+            {
+                if (!SetProperty(ref _selectedAudioFile, value))
+                {
+                    return;
+                }
+
+                LoadSubtitleFilesForAudio(value);
+                LoadAudioForPlayback(value);
+            }
+        }
+
+        public MediaFileItem? SelectedSubtitleFile
+        {
+            get => _selectedSubtitleFile;
+            set
+            {
+                if (!SetProperty(ref _selectedSubtitleFile, value))
+                {
+                    return;
+                }
+
+                LoadSubtitleCues(value);
+            }
+        }
+
+        public SubtitleCue? SelectedSubtitleCue
+        {
+            get => _selectedSubtitleCue;
+            set
+            {
+                if (!SetProperty(ref _selectedSubtitleCue, value))
+                {
+                    return;
+                }
+
+                if (_suppressSubtitleSeek)
+                {
+                    return;
+                }
+
+                if (value != null)
+                {
+                    SeekToTime(value.Start);
+                }
+            }
+        }
+
+        public bool IsPlayEnabled => _isPlaybackReady && !_isPlaying;
+
+        public bool IsPauseEnabled => _isPlaybackReady && _isPlaying;
+
+        public bool IsStopEnabled => _isPlaybackReady;
+
+        public string PlaybackTimeText => $"{FormatTime(_playbackPosition)} / {FormatTime(_playbackDuration)}";
+
+        public double PlaybackProgress
+        {
+            get => _playbackProgress;
+            set
+            {
+                if (!SetProperty(ref _playbackProgress, value))
+                {
+                    return;
+                }
+
+                if (!_suppressSeek)
+                {
+                    SeekToProgress(value);
+                }
+            }
         }
 
         public AudioDeviceInfo? SelectedAudioDevice
@@ -391,6 +545,443 @@ namespace TranslationToolUI.ViewModels
             selection ??= _audioDevices.FirstOrDefault();
             SetSelectedAudioDevice(selection, persistSelection);
         }
+
+        private void RefreshAudioLibrary()
+        {
+            _audioFiles.Clear();
+            _subtitleFiles.Clear();
+            _subtitleCues.Clear();
+
+            var sessionsPath = PathManager.Instance.SessionsPath;
+            if (!Directory.Exists(sessionsPath))
+            {
+                return;
+            }
+
+            var files = Directory.GetFiles(sessionsPath, "*.mp3")
+                .Concat(Directory.GetFiles(sessionsPath, "*.wav"))
+                .OrderByDescending(path => File.GetLastWriteTimeUtc(path));
+
+            foreach (var file in files)
+            {
+                _audioFiles.Add(new MediaFileItem
+                {
+                    Name = Path.GetFileName(file),
+                    FullPath = file
+                });
+            }
+
+            if (_selectedAudioFile != null && !_audioFiles.Any(item => item.FullPath == _selectedAudioFile.FullPath))
+            {
+                SelectedAudioFile = null;
+            }
+        }
+
+        private void LoadSubtitleFilesForAudio(MediaFileItem? audioFile)
+        {
+            _subtitleFiles.Clear();
+            _subtitleCues.Clear();
+            SelectedSubtitleFile = null;
+
+            if (audioFile == null || string.IsNullOrWhiteSpace(audioFile.FullPath))
+            {
+                return;
+            }
+
+            var directory = Path.GetDirectoryName(audioFile.FullPath) ?? PathManager.Instance.SessionsPath;
+            var baseName = Path.GetFileNameWithoutExtension(audioFile.FullPath);
+            var candidateBases = new[] { baseName };
+
+            foreach (var candidate in candidateBases)
+            {
+                var srtPath = Path.Combine(directory, candidate + ".srt");
+                if (File.Exists(srtPath))
+                {
+                    _subtitleFiles.Add(new MediaFileItem
+                    {
+                        Name = Path.GetFileName(srtPath),
+                        FullPath = srtPath
+                    });
+                }
+
+                var vttPath = Path.Combine(directory, candidate + ".vtt");
+                if (File.Exists(vttPath))
+                {
+                    _subtitleFiles.Add(new MediaFileItem
+                    {
+                        Name = Path.GetFileName(vttPath),
+                        FullPath = vttPath
+                    });
+                }
+            }
+
+            if (_subtitleFiles.Count > 0)
+            {
+                SelectedSubtitleFile = _subtitleFiles[0];
+            }
+        }
+
+        private void LoadSubtitleCues(MediaFileItem? subtitleFile)
+        {
+            _subtitleCues.Clear();
+            SelectedSubtitleCue = null;
+
+            if (subtitleFile == null || string.IsNullOrWhiteSpace(subtitleFile.FullPath))
+            {
+                return;
+            }
+
+            if (!File.Exists(subtitleFile.FullPath))
+            {
+                return;
+            }
+
+            var extension = Path.GetExtension(subtitleFile.FullPath).ToLowerInvariant();
+            if (extension == ".srt")
+            {
+                ParseSrt(subtitleFile.FullPath);
+            }
+            else if (extension == ".vtt")
+            {
+                ParseVtt(subtitleFile.FullPath);
+            }
+
+            UpdateSubtitleListHeight();
+        }
+
+        private void ParseSrt(string path)
+        {
+            var lines = File.ReadAllLines(path);
+            ParseSubtitleLines(lines, expectsHeader: false);
+        }
+
+        private void ParseVtt(string path)
+        {
+            var lines = File.ReadAllLines(path);
+            ParseSubtitleLines(lines, expectsHeader: true);
+        }
+
+        private void ParseSubtitleLines(string[] lines, bool expectsHeader)
+        {
+            var index = 0;
+            if (expectsHeader && index < lines.Length && lines[index].StartsWith("WEBVTT", StringComparison.OrdinalIgnoreCase))
+            {
+                index++;
+            }
+
+            while (index < lines.Length)
+            {
+                var line = lines[index].Trim();
+                if (string.IsNullOrWhiteSpace(line))
+                {
+                    index++;
+                    continue;
+                }
+
+                if (int.TryParse(line, out _))
+                {
+                    index++;
+                    if (index >= lines.Length)
+                    {
+                        break;
+                    }
+                    line = lines[index].Trim();
+                }
+
+                if (!TryParseTimeRange(line, out var start, out var end))
+                {
+                    index++;
+                    continue;
+                }
+
+                index++;
+                var textLines = new List<string>();
+                while (index < lines.Length && !string.IsNullOrWhiteSpace(lines[index]))
+                {
+                    textLines.Add(lines[index].Trim());
+                    index++;
+                }
+
+                var text = string.Join(" ", textLines).Trim();
+                if (!string.IsNullOrWhiteSpace(text))
+                {
+                    _subtitleCues.Add(new SubtitleCue
+                    {
+                        Start = start,
+                        End = end,
+                        Text = text
+                    });
+                }
+            }
+
+            UpdateSubtitleListHeight();
+        }
+
+        private void UpdateSubtitleListHeight()
+        {
+            var visible = Math.Min(_subtitleCues.Count, 6);
+            SubtitleListHeight = visible * SubtitleCueRowHeight;
+        }
+
+        private static bool TryParseTimeRange(string line, out TimeSpan start, out TimeSpan end)
+        {
+            start = TimeSpan.Zero;
+            end = TimeSpan.Zero;
+
+            var match = Regex.Match(line, @"(?<start>\d{2}:\d{2}:\d{2}[\.,]\d{3})\s*-->\s*(?<end>\d{2}:\d{2}:\d{2}[\.,]\d{3})");
+            if (!match.Success)
+            {
+                return false;
+            }
+
+            if (!TryParseTimecode(match.Groups["start"].Value, out start))
+            {
+                return false;
+            }
+
+            if (!TryParseTimecode(match.Groups["end"].Value, out end))
+            {
+                return false;
+            }
+
+            return true;
+        }
+
+        private static bool TryParseTimecode(string value, out TimeSpan time)
+        {
+            time = TimeSpan.Zero;
+            var normalized = value.Replace(',', '.');
+            if (TimeSpan.TryParseExact(normalized, @"hh\:mm\:ss\.fff", null, out time))
+            {
+                return true;
+            }
+
+            return false;
+        }
+
+        private void LoadAudioForPlayback(MediaFileItem? audioFile)
+        {
+            StopPlaybackInternal();
+
+            _playbackDuration = TimeSpan.Zero;
+            _playbackPosition = TimeSpan.Zero;
+            PlaybackProgress = 0;
+
+            if (audioFile == null || string.IsNullOrWhiteSpace(audioFile.FullPath))
+            {
+                UpdatePlaybackState(false, false);
+                return;
+            }
+
+            if (!File.Exists(audioFile.FullPath))
+            {
+                UpdatePlaybackState(false, false);
+                return;
+            }
+
+            try
+            {
+                _playbackReader = new AudioFileReader(audioFile.FullPath);
+                _playbackOutput = new WaveOutEvent();
+                _playbackOutput.Init(_playbackReader);
+                _playbackOutput.PlaybackStopped += OnPlaybackStopped;
+                _playbackDuration = _playbackReader.TotalTime;
+                _playbackPosition = TimeSpan.Zero;
+                PlaybackProgress = 0;
+                UpdatePlaybackState(true, false);
+                _playbackTimer.Start();
+            }
+            catch (Exception ex)
+            {
+                UpdatePlaybackState(false, false);
+                StatusMessage = $"加载音频失败: {ex.Message}";
+            }
+        }
+
+        private void PlayAudio()
+        {
+            if (_playbackOutput == null)
+            {
+                return;
+            }
+
+            _playbackOutput.Play();
+            UpdatePlaybackState(true, true);
+        }
+
+        private void PauseAudio()
+        {
+            if (_playbackOutput == null)
+            {
+                return;
+            }
+
+            _playbackOutput.Pause();
+            UpdatePlaybackState(true, false);
+        }
+
+        private void StopAudio()
+        {
+            if (_playbackOutput == null)
+            {
+                return;
+            }
+
+            _playbackOutput.Stop();
+            SeekToTime(TimeSpan.Zero);
+            UpdatePlaybackState(true, false);
+        }
+
+        private void OnPlaybackStopped(object? sender, StoppedEventArgs e)
+        {
+            UpdatePlaybackProgressFromReader();
+            UpdatePlaybackState(_playbackReader != null, false);
+        }
+
+        private void SeekToTime(TimeSpan time)
+        {
+            if (_playbackReader == null)
+            {
+                return;
+            }
+
+            var safe = time;
+            if (safe < TimeSpan.Zero)
+            {
+                safe = TimeSpan.Zero;
+            }
+            if (_playbackDuration > TimeSpan.Zero && safe > _playbackDuration)
+            {
+                safe = _playbackDuration;
+            }
+
+            _playbackReader.CurrentTime = safe;
+            _playbackPosition = safe;
+            UpdatePlaybackProgressFromReader();
+        }
+
+        private void SeekToProgress(double progress)
+        {
+            if (_playbackReader == null || _playbackDuration <= TimeSpan.Zero)
+            {
+                return;
+            }
+
+            var clamped = Math.Clamp(progress, 0, 1);
+            var target = TimeSpan.FromMilliseconds(_playbackDuration.TotalMilliseconds * clamped);
+            SeekToTime(target);
+        }
+
+        private void UpdatePlaybackProgressFromReader()
+        {
+            if (_playbackReader == null)
+            {
+                return;
+            }
+
+            _suppressSeek = true;
+            _playbackPosition = _playbackReader.CurrentTime;
+            _playbackDuration = _playbackReader.TotalTime;
+            _playbackProgress = _playbackDuration > TimeSpan.Zero
+                ? _playbackPosition.TotalMilliseconds / _playbackDuration.TotalMilliseconds
+                : 0;
+            OnPropertyChanged(nameof(PlaybackProgress));
+            OnPropertyChanged(nameof(PlaybackTimeText));
+            UpdateCurrentSubtitleCue(_playbackPosition);
+            _suppressSeek = false;
+        }
+
+        public void PlayFromSubtitleCue(SubtitleCue? cue)
+        {
+            if (cue == null || _playbackReader == null || _playbackOutput == null)
+            {
+                return;
+            }
+
+            SeekToTime(cue.Start);
+            PlayAudio();
+        }
+
+        private void UpdateCurrentSubtitleCue(TimeSpan position)
+        {
+            if (_subtitleCues.Count == 0)
+            {
+                return;
+            }
+
+            if (_selectedSubtitleCue != null
+                && position >= _selectedSubtitleCue.Start
+                && position <= _selectedSubtitleCue.End)
+            {
+                return;
+            }
+
+            var match = _subtitleCues.FirstOrDefault(cue => position >= cue.Start && position <= cue.End);
+            if (ReferenceEquals(match, _selectedSubtitleCue))
+            {
+                return;
+            }
+
+            _suppressSubtitleSeek = true;
+            SelectedSubtitleCue = match;
+            _suppressSubtitleSeek = false;
+        }
+
+        private void UpdatePlaybackState(bool ready, bool playing)
+        {
+            _isPlaybackReady = ready;
+            _isPlaying = playing;
+            OnPropertyChanged(nameof(IsPlayEnabled));
+            OnPropertyChanged(nameof(IsPauseEnabled));
+            OnPropertyChanged(nameof(IsStopEnabled));
+            OnPropertyChanged(nameof(PlaybackTimeText));
+            ((RelayCommand)PlayAudioCommand).RaiseCanExecuteChanged();
+            ((RelayCommand)PauseAudioCommand).RaiseCanExecuteChanged();
+            ((RelayCommand)StopAudioCommand).RaiseCanExecuteChanged();
+        }
+
+        private void StopPlaybackInternal()
+        {
+            try
+            {
+                if (_playbackOutput != null)
+                {
+                    _playbackOutput.PlaybackStopped -= OnPlaybackStopped;
+                    _playbackOutput.Stop();
+                    _playbackOutput.Dispose();
+                }
+            }
+            catch
+            {
+                // ignore
+            }
+            finally
+            {
+                _playbackOutput = null;
+            }
+
+            try
+            {
+                _playbackReader?.Dispose();
+            }
+            catch
+            {
+                // ignore
+            }
+            finally
+            {
+                _playbackReader = null;
+            }
+
+            _playbackTimer.Stop();
+        }
+
+        private static string FormatTime(TimeSpan time)
+        {
+            return time.TotalHours >= 1
+                ? time.ToString(@"hh\:mm\:ss")
+                : time.ToString(@"mm\:ss");
+        }
         private void UpdateSubscriptionNames()
         {
             _subscriptionNames.Clear();
@@ -410,14 +1001,128 @@ namespace TranslationToolUI.ViewModels
         public string CurrentOriginal
         {
             get => _currentOriginal;
-            set => SetProperty(ref _currentOriginal, value);
+            set
+            {
+                if (SetProperty(ref _currentOriginal, value))
+                {
+                    OnPropertyChanged(nameof(DisplayedText));
+                }
+            }
         }
 
         public string CurrentTranslated
         {
             get => _currentTranslated;
-            set => SetProperty(ref _currentTranslated, value);
+            set
+            {
+                if (SetProperty(ref _currentTranslated, value))
+                {
+                    OnPropertyChanged(nameof(DisplayedText));
+                }
+            }
         }
+
+        public EditorDisplayMode EditorDisplayMode
+        {
+            get => _editorDisplayMode;
+            set
+            {
+                if (!SetProperty(ref _editorDisplayMode, value))
+                {
+                    return;
+                }
+
+                OnPropertyChanged(nameof(IsOriginalView));
+                OnPropertyChanged(nameof(IsTranslatedView));
+                OnPropertyChanged(nameof(IsBilingualView));
+                OnPropertyChanged(nameof(IsSingleView));
+                OnPropertyChanged(nameof(DisplayedText));
+                OnPropertyChanged(nameof(DisplayPlaceholder));
+            }
+        }
+
+        public bool IsOriginalView
+        {
+            get => _editorDisplayMode == EditorDisplayMode.Original;
+            set
+            {
+                if (value)
+                {
+                    EditorDisplayMode = EditorDisplayMode.Original;
+                }
+            }
+        }
+
+        public bool IsTranslatedView
+        {
+            get => _editorDisplayMode == EditorDisplayMode.Translated;
+            set
+            {
+                if (value)
+                {
+                    EditorDisplayMode = EditorDisplayMode.Translated;
+                }
+            }
+        }
+
+        public bool IsBilingualView
+        {
+            get => _editorDisplayMode == EditorDisplayMode.Bilingual;
+            set
+            {
+                if (value)
+                {
+                    EditorDisplayMode = EditorDisplayMode.Bilingual;
+                }
+            }
+        }
+
+        public bool IsSingleView => _editorDisplayMode != EditorDisplayMode.Bilingual;
+
+        public string DisplayedText
+        {
+            get => _editorDisplayMode == EditorDisplayMode.Original ? CurrentOriginal : CurrentTranslated;
+            set
+            {
+                if (_editorDisplayMode == EditorDisplayMode.Original)
+                {
+                    CurrentOriginal = value;
+                }
+                else if (_editorDisplayMode == EditorDisplayMode.Translated)
+                {
+                    CurrentTranslated = value;
+                }
+            }
+        }
+
+        public string DisplayPlaceholder => _editorDisplayMode == EditorDisplayMode.Original
+            ? "原文将在这里显示..."
+            : _editorDisplayMode == EditorDisplayMode.Translated
+                ? "译文将在这里显示..."
+                : "双语将在这里显示...";
+
+        public bool IsFloatingSubtitleOpen
+        {
+            get => _isFloatingSubtitleOpen;
+            private set
+            {
+                if (!SetProperty(ref _isFloatingSubtitleOpen, value))
+                {
+                    return;
+                }
+
+                OnPropertyChanged(nameof(FloatingSubtitleButtonBackground));
+                OnPropertyChanged(nameof(FloatingSubtitleButtonForeground));
+            }
+        }
+
+        public object? FloatingSubtitleButtonBackground => IsFloatingSubtitleOpen
+            ? new SolidColorBrush(Color.Parse("#FF10B981"))
+            : AvaloniaProperty.UnsetValue;
+
+        public object? FloatingSubtitleButtonForeground => IsFloatingSubtitleOpen
+            ? Brushes.White
+            : AvaloniaProperty.UnsetValue;
 
         public bool IsTranslating
         {
@@ -895,9 +1600,11 @@ namespace TranslationToolUI.ViewModels
                 if (_floatingSubtitleManager == null)
                 {
                     _floatingSubtitleManager = new FloatingSubtitleManager();
+                    _floatingSubtitleManager.WindowStateChanged += (_, isOpen) => IsFloatingSubtitleOpen = isOpen;
                 }
 
                 _floatingSubtitleManager.ToggleWindow();
+                IsFloatingSubtitleOpen = _floatingSubtitleManager.IsWindowOpen;
 
                 if (_floatingSubtitleManager.IsWindowOpen)
                 {
