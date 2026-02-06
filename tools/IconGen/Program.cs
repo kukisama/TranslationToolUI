@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Security.Cryptography;
 using System.Text;
@@ -15,8 +16,24 @@ if (args.Length < 2)
 
 try
 {
-    Console.OutputEncoding = Encoding.UTF8;
-    Console.InputEncoding = Encoding.UTF8;
+    if (OperatingSystem.IsWindows())
+    {
+        // MSBuild's Exec task commonly decodes child process stdout using the current Windows ANSI
+        // code page (e.g., CP936 on zh-CN). If we emit UTF-8 here, Chinese paths can appear garbled.
+        // .NET uses UTF-8 for Encoding.Default, so we explicitly select the ANSI code page.
+        Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+
+        var ansiCodePage = CultureInfo.CurrentCulture.TextInfo.ANSICodePage;
+        var ansiEncoding = Encoding.GetEncoding(ansiCodePage);
+
+        Console.OutputEncoding = ansiEncoding;
+        Console.InputEncoding = ansiEncoding;
+    }
+    else
+    {
+        Console.OutputEncoding = Encoding.UTF8;
+        Console.InputEncoding = Encoding.UTF8;
+    }
 }
 catch
 {
