@@ -9,6 +9,12 @@ namespace TranslationToolUI.Models
         AzureOpenAi
     }
 
+    public enum AiChatProfile
+    {
+        Quick,
+        Summary
+    }
+
     public class InsightPresetButton
     {
         public string Name { get; set; } = "";
@@ -22,9 +28,15 @@ namespace TranslationToolUI.Models
         public string ApiEndpoint { get; set; } = "";
         public string ApiKey { get; set; } = "";
         public string ModelName { get; set; } = "gpt-4o-mini";
+        public string SummaryModelName { get; set; } = "";
+        public string QuickModelName { get; set; } = "";
 
         public string DeploymentName { get; set; } = "";
+        public string SummaryDeploymentName { get; set; } = "";
+        public string QuickDeploymentName { get; set; } = "";
         public string ApiVersion { get; set; } = "2024-02-01";
+
+        public bool SummaryEnableReasoning { get; set; } = false;
 
         public List<InsightPresetButton> PresetButtons { get; set; } = new()
         {
@@ -40,6 +52,46 @@ namespace TranslationToolUI.Models
                             && !string.IsNullOrWhiteSpace(ApiKey)
                             && (ProviderType == AiProviderType.OpenAiCompatible
                                 ? !string.IsNullOrWhiteSpace(ModelName)
-                                : !string.IsNullOrWhiteSpace(DeploymentName));
+                                    || !string.IsNullOrWhiteSpace(SummaryModelName)
+                                    || !string.IsNullOrWhiteSpace(QuickModelName)
+                                : !string.IsNullOrWhiteSpace(DeploymentName)
+                                    || !string.IsNullOrWhiteSpace(SummaryDeploymentName)
+                                    || !string.IsNullOrWhiteSpace(QuickDeploymentName));
+
+        public string GetModelName(AiChatProfile profile)
+        {
+            if (profile == AiChatProfile.Summary)
+            {
+                if (!string.IsNullOrWhiteSpace(SummaryModelName))
+                    return SummaryModelName;
+                if (!string.IsNullOrWhiteSpace(QuickModelName))
+                    return QuickModelName;
+                return ModelName;
+            }
+
+            if (!string.IsNullOrWhiteSpace(QuickModelName))
+                return QuickModelName;
+            if (!string.IsNullOrWhiteSpace(SummaryModelName))
+                return SummaryModelName;
+            return ModelName;
+        }
+
+        public string GetDeploymentName(AiChatProfile profile)
+        {
+            if (profile == AiChatProfile.Summary)
+            {
+                if (!string.IsNullOrWhiteSpace(SummaryDeploymentName))
+                    return SummaryDeploymentName;
+                if (!string.IsNullOrWhiteSpace(QuickDeploymentName))
+                    return QuickDeploymentName;
+                return DeploymentName;
+            }
+
+            if (!string.IsNullOrWhiteSpace(QuickDeploymentName))
+                return QuickDeploymentName;
+            if (!string.IsNullOrWhiteSpace(SummaryDeploymentName))
+                return SummaryDeploymentName;
+            return DeploymentName;
+        }
     }
 }

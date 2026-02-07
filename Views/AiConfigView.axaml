@@ -40,17 +40,30 @@
                               FontSize="10" Margin="0,2,0,0"/>
                 </StackPanel>
 
-                <StackPanel x:Name="ModelNamePanel" Spacing="5">
-                    <TextBlock Text="模型名称"/>
-                    <TextBox x:Name="ModelNameTextBox"
-                             Watermark="例如: gpt-4o-mini"/>
+                <StackPanel x:Name="ModelNamePanel" Spacing="8">
+                    <TextBlock Text="模型名称 (OpenAI 兼容)"/>
+                    <StackPanel Spacing="4">
+                        <TextBlock Text="快速应答模型 (默认)" FontSize="11" Foreground="Gray"/>
+                        <TextBox x:Name="QuickModelNameTextBox"
+                                 Watermark="例如: gpt-5.2-chat"/>
+                    </StackPanel>
+                    <StackPanel Spacing="4">
+                        <TextBlock Text="总结模型" FontSize="11" Foreground="Gray"/>
+                        <TextBox x:Name="SummaryModelNameTextBox"
+                                 Watermark="例如: gpt-5.2"/>
+                    </StackPanel>
                 </StackPanel>
 
                 <StackPanel x:Name="AzureFieldsPanel" Spacing="10" IsVisible="False">
                     <StackPanel Spacing="5">
-                        <TextBlock Text="部署名称"/>
-                        <TextBox x:Name="DeploymentNameTextBox"
-                                 Watermark="Azure OpenAI 部署名"/>
+                        <TextBlock Text="快速应答部署名称 (默认)"/>
+                        <TextBox x:Name="QuickDeploymentNameTextBox"
+                                 Watermark="Azure OpenAI 快速应答部署名"/>
+                    </StackPanel>
+                    <StackPanel Spacing="5">
+                        <TextBlock Text="总结部署名称"/>
+                        <TextBox x:Name="SummaryDeploymentNameTextBox"
+                                 Watermark="Azure OpenAI 总结部署名"/>
                     </StackPanel>
                     <StackPanel Spacing="5">
                         <TextBlock Text="API 版本"/>
@@ -58,6 +71,14 @@
                                  Watermark="例如: 2024-02-01"
                                  Text="2024-02-01"/>
                     </StackPanel>
+                </StackPanel>
+
+                <StackPanel Spacing="5">
+                    <CheckBox x:Name="SummaryReasoningCheckBox"
+                              Content="总结模型开启思考"
+                              FontSize="11"/>
+                    <TextBlock FontSize="10" Foreground="Gray"
+                               Text="仅在支持思考/推理的模型上开启"/>
                 </StackPanel>
 
                 <TextBlock x:Name="StatusTextBlock" FontSize="11" Foreground="Gray"

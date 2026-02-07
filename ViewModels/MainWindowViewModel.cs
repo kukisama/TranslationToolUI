@@ -60,6 +60,11 @@ namespace TranslationToolUI.ViewModels
         private readonly ObservableCollection<MediaFileItem> _audioFiles;
         private readonly ObservableCollection<MediaFileItem> _subtitleFiles;
         private readonly ObservableCollection<SubtitleCue> _subtitleCues;
+        private readonly ObservableCollection<BatchTaskItem> _batchTasks;
+        private int _batchConcurrencyLimit = 5;
+        private bool _isBatchRunning;
+        private CancellationTokenSource? _batchCts;
+        private string _batchStatusMessage = "";
         private MediaFileItem? _selectedAudioFile;
         private MediaFileItem? _selectedSubtitleFile;
         private SubtitleCue? _selectedSubtitleCue;
@@ -85,6 +90,7 @@ namespace TranslationToolUI.ViewModels
         private int _subscriptionValidationVersion;
         private bool _subscriptionLampBlinkOn = true;
         private readonly DispatcherTimer _subscriptionLampTimer;
+        private bool _reviewLampBlinkOn = true;
 
         private FloatingSubtitleManager? _floatingSubtitleManager;
 
@@ -101,6 +107,14 @@ namespace TranslationToolUI.ViewModels
         private DispatcherTimer? _autoInsightTimer;
         private int _lastAutoInsightHistoryCount;
 
+        private int _uiModeIndex;
+
+        private string _reviewSummaryMarkdown = "";
+        private string _reviewSummaryStatusMessage = "";
+        private bool _isReviewSummaryLoading;
+        private CancellationTokenSource? _reviewSummaryCts;
+        private readonly ObservableCollection<ReviewTimeLink> _reviewTimeLinks = new();
+
         private readonly string[] _sourceLanguages = { "zh-CN", "en-US", "ja-JP", "ko-KR", "fr-FR", "de-DE", "es-ES" };
         private readonly string[] _targetLanguages = { "en", "zh-CN", "ja-JP", "ko-KR", "fr-FR", "de-DE", "es-ES" };        public MainWindowViewModel()
         {
@@ -113,7 +127,19 @@ namespace TranslationToolUI.ViewModels
             _audioFiles = new ObservableCollection<MediaFileItem>();
             _subtitleFiles = new ObservableCollection<MediaFileItem>();
             _subtitleCues = new ObservableCollection<SubtitleCue>();
+            _batchTasks = new ObservableCollection<BatchTaskItem>();
             _subtitleCues.CollectionChanged += (_, _) => UpdateSubtitleListHeight();
+            _batchTasks.CollectionChanged += (_, _) =>
+            {
+                if (ClearBatchTasksCommand is RelayCommand cmd)
+                {
+                    cmd.RaiseCanExecuteChanged();
+                }
+                if (StartBatchCommand is RelayCommand startCmd)
+                {
+                    startCmd.RaiseCanExecuteChanged();
+                }
+            };
 
             _playbackTimer = new DispatcherTimer(TimeSpan.FromMilliseconds(200), DispatcherPriority.Background, (_, _) =>
             {
@@ -126,6 +152,16 @@ namespace TranslationToolUI.ViewModels
                 {
                     _subscriptionLampBlinkOn = !_subscriptionLampBlinkOn;
                     OnPropertyChanged(nameof(SubscriptionLampOpacity));
+                }
+                if (IsReviewSummaryLoading)
+                {
+                    _reviewLampBlinkOn = !_reviewLampBlinkOn;
+                    OnPropertyChanged(nameof(ReviewSummaryLampOpacity));
+                }
+                else if (ReviewSummaryLampOpacity != 1)
+                {
+                    _reviewLampBlinkOn = true;
+                    OnPropertyChanged(nameof(ReviewSummaryLampOpacity));
                 }
                 else if (SubscriptionLampOpacity != 1)
                 {
@@ -257,6 +293,43 @@ namespace TranslationToolUI.ViewModels
             ToggleAutoInsightCommand = new RelayCommand(
                 execute: _ => ToggleAutoInsight(),
                 canExecute: _ => IsAiConfigured
+            );
+
+            GenerateReviewSummaryCommand = new RelayCommand(
+                execute: _ => GenerateReviewSummary(),
+                canExecute: _ => CanGenerateReviewSummary()
+            );
+
+            RefreshReviewSummaryCommand = new RelayCommand(
+                execute: _ => GenerateReviewSummary(),
+                canExecute: _ => CanGenerateReviewSummary()
+            );
+
+            JumpToReviewTimeCommand = new RelayCommand(
+                execute: param => JumpToReviewTime(param)
+            );
+
+            ReviewMarkdownLinkCommand = new RelayCommand(
+                execute: param => OnReviewMarkdownLink(param)
+            );
+
+            LoadBatchTasksCommand = new RelayCommand(
+                execute: _ => LoadBatchTasksFromLibrary()
+            );
+
+            ClearBatchTasksCommand = new RelayCommand(
+                execute: _ => ClearBatchTasks(),
+                canExecute: _ => BatchTasks.Count > 0
+            );
+
+            StartBatchCommand = new RelayCommand(
+                execute: _ => StartBatchProcessing(),
+                canExecute: _ => CanStartBatchProcessing()
+            );
+
+            StopBatchCommand = new RelayCommand(
+                execute: _ => StopBatchProcessing(),
+                canExecute: _ => IsBatchRunning
             );
         }
 
@@ -408,6 +481,74 @@ namespace TranslationToolUI.ViewModels
 
         public ObservableCollection<SubtitleCue> SubtitleCues => _subtitleCues;
 
+        public ObservableCollection<BatchTaskItem> BatchTasks => _batchTasks;
+
+        public int BatchConcurrencyLimit
+        {
+            get => _batchConcurrencyLimit;
+            set => SetProperty(ref _batchConcurrencyLimit, Math.Clamp(value, 1, 10));
+        }
+
+        public bool IsBatchRunning
+        {
+            get => _isBatchRunning;
+            private set
+            {
+                if (SetProperty(ref _isBatchRunning, value))
+                {
+                    if (StartBatchCommand is RelayCommand startCmd)
+                    {
+                        startCmd.RaiseCanExecuteChanged();
+                    }
+
+                    if (StopBatchCommand is RelayCommand stopCmd)
+                    {
+                        stopCmd.RaiseCanExecuteChanged();
+                    }
+                }
+            }
+        }
+
+        public string BatchStatusMessage
+        {
+            get => _batchStatusMessage;
+            set => SetProperty(ref _batchStatusMessage, value);
+        }
+
+        public IBrush ReviewSummaryLampFill
+        {
+            get
+            {
+                if (IsReviewSummaryLoading)
+                {
+                    return Brushes.Orange;
+                }
+
+                return string.IsNullOrWhiteSpace(ReviewSummaryMarkdown)
+                    ? Brushes.Gray
+                    : Brushes.LimeGreen;
+            }
+        }
+
+        public IBrush ReviewSummaryLampStroke
+        {
+            get
+            {
+                if (IsReviewSummaryLoading)
+                {
+                    return Brushes.DarkOrange;
+                }
+
+                return string.IsNullOrWhiteSpace(ReviewSummaryMarkdown)
+                    ? Brushes.DarkGray
+                    : Brushes.Green;
+            }
+        }
+
+        public double ReviewSummaryLampOpacity => IsReviewSummaryLoading
+            ? (_reviewLampBlinkOn ? 1.0 : 0.35)
+            : 1.0;
+
         public double SubtitleListHeight
         {
             get => _subtitleListHeight;
@@ -434,6 +575,7 @@ namespace TranslationToolUI.ViewModels
 
                 LoadSubtitleFilesForAudio(value);
                 LoadAudioForPlayback(value);
+                LoadReviewSummaryForAudio(value);
             }
         }
 
@@ -602,6 +744,8 @@ namespace TranslationToolUI.ViewModels
             _audioFiles.Clear();
             _subtitleFiles.Clear();
             _subtitleCues.Clear();
+            ReviewSummaryMarkdown = "";
+            ReviewSummaryStatusMessage = "";
 
             var sessionsPath = PathManager.Instance.SessionsPath;
             if (!Directory.Exists(sessionsPath))
@@ -626,6 +770,233 @@ namespace TranslationToolUI.ViewModels
             {
                 SelectedAudioFile = null;
             }
+        }
+
+        private void LoadBatchTasksFromLibrary()
+        {
+            if (_audioFiles.Count == 0)
+            {
+                RefreshAudioLibrary();
+            }
+
+            _batchTasks.Clear();
+            foreach (var audio in _audioFiles)
+            {
+                var hasAiSummary = File.Exists(GetReviewSummaryPath(audio.FullPath));
+                var hasAiSubtitle = HasAiSubtitle(audio.FullPath);
+                var subtitlePath = GetPreferredSubtitlePath(audio.FullPath);
+
+                _batchTasks.Add(new BatchTaskItem
+                {
+                    FileName = audio.Name,
+                    FullPath = audio.FullPath,
+                    Status = BatchTaskStatus.Pending,
+                    Progress = 0,
+                    HasAiSubtitle = hasAiSubtitle,
+                    HasAiSummary = hasAiSummary,
+                    StatusMessage = string.IsNullOrWhiteSpace(subtitlePath) ? "缺少字幕" : "待处理"
+                });
+            }
+
+            StatusMessage = _batchTasks.Count == 0
+                ? "未找到可批处理的音频文件"
+                : $"已载入 {_batchTasks.Count} 条批处理任务";
+            BatchStatusMessage = "";
+        }
+
+        private void ClearBatchTasks()
+        {
+            _batchTasks.Clear();
+            StatusMessage = "批处理任务已清空";
+            BatchStatusMessage = "";
+        }
+
+        private bool CanStartBatchProcessing()
+        {
+            return !IsBatchRunning && BatchTasks.Count > 0 && IsAiConfigured;
+        }
+
+        private void StartBatchProcessing()
+        {
+            if (_config.AiConfig == null || !_config.AiConfig.IsValid)
+            {
+                BatchStatusMessage = "AI 配置无效，请先配置 AI 服务";
+                return;
+            }
+
+            if (BatchTasks.Count == 0)
+            {
+                BatchStatusMessage = "没有可处理的任务";
+                return;
+            }
+
+            _batchCts?.Cancel();
+            _batchCts = new CancellationTokenSource();
+            var token = _batchCts.Token;
+            IsBatchRunning = true;
+            BatchStatusMessage = "批处理已开始";
+
+            _ = Task.Run(async () =>
+            {
+                var semaphore = new SemaphoreSlim(BatchConcurrencyLimit, BatchConcurrencyLimit);
+                var tasks = new List<Task>();
+
+                foreach (var taskItem in BatchTasks.ToList())
+                {
+                    if (token.IsCancellationRequested)
+                    {
+                        break;
+                    }
+
+                    tasks.Add(Task.Run(async () =>
+                    {
+                        await semaphore.WaitAsync(token);
+                        try
+                        {
+                            await ProcessBatchTask(taskItem, token);
+                        }
+                        finally
+                        {
+                            semaphore.Release();
+                        }
+                    }, token));
+                }
+
+                try
+                {
+                    await Task.WhenAll(tasks);
+                }
+                catch (OperationCanceledException)
+                {
+                    // ignore cancellation
+                }
+
+                Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+                {
+                    IsBatchRunning = false;
+                    BatchStatusMessage = token.IsCancellationRequested
+                        ? "批处理已停止"
+                        : "批处理完成";
+                });
+            }, token);
+        }
+
+        private void StopBatchProcessing()
+        {
+            _batchCts?.Cancel();
+            BatchStatusMessage = "正在停止批处理...";
+        }
+
+        private async Task ProcessBatchTask(BatchTaskItem item, CancellationToken token)
+        {
+            if (item.HasAiSummary)
+            {
+                UpdateBatchItem(item, BatchTaskStatus.Completed, 1, "已存在");
+                return;
+            }
+
+            var subtitlePath = GetPreferredSubtitlePath(item.FullPath);
+            if (string.IsNullOrWhiteSpace(subtitlePath) || !File.Exists(subtitlePath))
+            {
+                UpdateBatchItem(item, BatchTaskStatus.Failed, 0, "缺少字幕");
+                return;
+            }
+
+            UpdateBatchItem(item, BatchTaskStatus.Running, 0.1, "生成中");
+
+            var cues = ParseSubtitleFileToCues(subtitlePath);
+            if (cues.Count == 0)
+            {
+                UpdateBatchItem(item, BatchTaskStatus.Failed, 0, "字幕为空");
+                return;
+            }
+
+            var systemPrompt = "你是一个会议复盘助手。根据字幕内容生成结构化 Markdown 总结。请输出包含关键结论、行动项和风险点，并在引用内容时标注时间戳，格式为 [HH:MM:SS]。";
+            var userPrompt = $"以下是会议字幕内容:\n\n{FormatSubtitleForSummary(cues)}\n\n---\n\n请生成复盘总结。";
+
+            try
+            {
+                var sb = new System.Text.StringBuilder();
+                AiRequestOutcome? outcome = null;
+                await _aiInsightService.StreamChatAsync(
+                    _config.AiConfig!,
+                    systemPrompt,
+                    userPrompt,
+                    chunk =>
+                    {
+                        sb.Append(chunk);
+                    },
+                    token,
+                    AiChatProfile.Summary,
+                    enableReasoning: _config.AiConfig!.SummaryEnableReasoning,
+                    onOutcome: o => outcome = o);
+
+                var markdown = InjectTimeLinks(sb.ToString());
+                var summaryPath = GetReviewSummaryPath(item.FullPath);
+                File.WriteAllText(summaryPath, markdown);
+                var note = "完成";
+                if (outcome?.UsedFallback == true)
+                {
+                    note = "完成(降级)";
+                }
+                else if (outcome?.UsedReasoning == true)
+                {
+                    note = "完成(思考)";
+                }
+                else if (_config.AiConfig!.SummaryEnableReasoning)
+                {
+                    note = "完成(非思考)";
+                }
+                UpdateBatchItem(item, BatchTaskStatus.Completed, 1, note);
+
+                Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+                {
+                    item.HasAiSummary = true;
+                });
+            }
+            catch (OperationCanceledException)
+            {
+                UpdateBatchItem(item, BatchTaskStatus.Failed, 0, "已取消");
+            }
+            catch (Exception ex)
+            {
+                UpdateBatchItem(item, BatchTaskStatus.Failed, 0, $"失败: {ex.Message}");
+            }
+        }
+
+        private void UpdateBatchItem(BatchTaskItem item, BatchTaskStatus status, double progress, string message)
+        {
+            Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+            {
+                item.Status = status;
+                item.Progress = progress;
+                item.StatusMessage = message;
+            });
+        }
+
+        private static string? GetPreferredSubtitlePath(string audioFilePath)
+        {
+            var directory = Path.GetDirectoryName(audioFilePath) ?? PathManager.Instance.SessionsPath;
+            var baseName = Path.GetFileNameWithoutExtension(audioFilePath);
+
+            var candidates = new[]
+            {
+                Path.Combine(directory, baseName + ".ai.srt"),
+                Path.Combine(directory, baseName + ".ai.vtt"),
+                Path.Combine(directory, baseName + ".srt"),
+                Path.Combine(directory, baseName + ".vtt")
+            };
+
+            return candidates.FirstOrDefault(File.Exists);
+        }
+
+        private static bool HasAiSubtitle(string audioFilePath)
+        {
+            var directory = Path.GetDirectoryName(audioFilePath) ?? PathManager.Instance.SessionsPath;
+            var baseName = Path.GetFileNameWithoutExtension(audioFilePath);
+            var aiSrt = Path.Combine(directory, baseName + ".ai.srt");
+            var aiVtt = Path.Combine(directory, baseName + ".ai.vtt");
+            return File.Exists(aiSrt) || File.Exists(aiVtt);
         }
 
         private void LoadSubtitleFilesForAudio(MediaFileItem? audioFile)
@@ -698,6 +1069,284 @@ namespace TranslationToolUI.ViewModels
             }
 
             UpdateSubtitleListHeight();
+            ((RelayCommand)GenerateReviewSummaryCommand).RaiseCanExecuteChanged();
+            ((RelayCommand)RefreshReviewSummaryCommand).RaiseCanExecuteChanged();
+        }
+
+        private void LoadReviewSummaryForAudio(MediaFileItem? audioFile)
+        {
+            ReviewSummaryMarkdown = "";
+            ReviewSummaryStatusMessage = "";
+
+            if (audioFile == null || string.IsNullOrWhiteSpace(audioFile.FullPath))
+            {
+                return;
+            }
+
+            var summaryPath = GetReviewSummaryPath(audioFile.FullPath);
+            if (File.Exists(summaryPath))
+            {
+                ReviewSummaryMarkdown = InjectTimeLinks(File.ReadAllText(summaryPath));
+                ReviewSummaryStatusMessage = $"已加载总结: {Path.GetFileName(summaryPath)}";
+            }
+            else
+            {
+                ReviewSummaryStatusMessage = "未找到复盘总结，可生成。";
+            }
+
+            ((RelayCommand)GenerateReviewSummaryCommand).RaiseCanExecuteChanged();
+            ((RelayCommand)RefreshReviewSummaryCommand).RaiseCanExecuteChanged();
+        }
+
+        private static string GetReviewSummaryPath(string audioFilePath)
+        {
+            var directory = Path.GetDirectoryName(audioFilePath) ?? PathManager.Instance.SessionsPath;
+            var baseName = Path.GetFileNameWithoutExtension(audioFilePath);
+            return Path.Combine(directory, baseName + ".ai.summary.md");
+        }
+
+        private bool CanGenerateReviewSummary()
+        {
+            return IsAiConfigured
+                   && SelectedAudioFile != null
+                   && SubtitleCues.Count > 0
+                   && !IsReviewSummaryLoading;
+        }
+
+        private async void GenerateReviewSummary()
+        {
+            if (_config.AiConfig == null || !_config.AiConfig.IsValid)
+            {
+                ReviewSummaryStatusMessage = "AI 配置无效，请先配置 AI 服务";
+                return;
+            }
+
+            if (SelectedAudioFile == null)
+            {
+                ReviewSummaryStatusMessage = "未选择音频文件";
+                return;
+            }
+
+            if (SubtitleCues.Count == 0)
+            {
+                ReviewSummaryStatusMessage = "未加载字幕，无法生成总结";
+                return;
+            }
+
+            _reviewSummaryCts?.Cancel();
+            _reviewSummaryCts = new CancellationTokenSource();
+            var token = _reviewSummaryCts.Token;
+
+            IsReviewSummaryLoading = true;
+            ReviewSummaryMarkdown = "";
+            ReviewSummaryStatusMessage = "正在生成复盘总结...";
+
+            var systemPrompt = "你是一个会议复盘助手。根据字幕内容生成结构化 Markdown 总结。请输出包含关键结论、行动项和风险点，并在引用内容时标注时间戳，格式为 [HH:MM:SS]。";
+            var subtitlesText = FormatSubtitleForSummary();
+            var userPrompt = $"以下是会议字幕内容:\n\n{subtitlesText}\n\n---\n\n请生成复盘总结。";
+
+            try
+            {
+                var sb = new System.Text.StringBuilder();
+                AiRequestOutcome? outcome = null;
+                await _aiInsightService.StreamChatAsync(
+                    _config.AiConfig,
+                    systemPrompt,
+                    userPrompt,
+                    chunk =>
+                    {
+                        Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+                        {
+                            sb.Append(chunk);
+                            ReviewSummaryMarkdown = InjectTimeLinks(sb.ToString());
+                        });
+                    },
+                    token,
+                    AiChatProfile.Summary,
+                    enableReasoning: _config.AiConfig.SummaryEnableReasoning,
+                    onOutcome: o => outcome = o);
+
+                var summaryPath = GetReviewSummaryPath(SelectedAudioFile.FullPath);
+                File.WriteAllText(summaryPath, ReviewSummaryMarkdown);
+                var reasoningNote = "";
+                if (outcome?.UsedFallback == true)
+                {
+                    reasoningNote = " (已降级为非思考)";
+                }
+                else if (outcome?.UsedReasoning == true)
+                {
+                    reasoningNote = " (思考已启用)";
+                }
+                else if (_config.AiConfig.SummaryEnableReasoning)
+                {
+                    reasoningNote = " (未启用思考)";
+                }
+
+                ReviewSummaryStatusMessage = $"复盘总结已保存: {Path.GetFileName(summaryPath)}{reasoningNote}";
+            }
+            catch (OperationCanceledException)
+            {
+                ReviewSummaryStatusMessage = "复盘总结已取消";
+            }
+            catch (Exception ex)
+            {
+                ReviewSummaryStatusMessage = $"生成失败: {ex.Message}";
+            }
+            finally
+            {
+                IsReviewSummaryLoading = false;
+            }
+        }
+
+        private string FormatSubtitleForSummary()
+        {
+            var sb = new System.Text.StringBuilder();
+            foreach (var cue in SubtitleCues)
+            {
+                var time = cue.Start.ToString(@"hh\:mm\:ss");
+                sb.AppendLine($"[{time}] {cue.Text}");
+            }
+            return sb.ToString();
+        }
+
+        private static string FormatSubtitleForSummary(List<SubtitleCue> cues)
+        {
+            var sb = new System.Text.StringBuilder();
+            foreach (var cue in cues)
+            {
+                var time = cue.Start.ToString(@"hh\:mm\:ss");
+                sb.AppendLine($"[{time}] {cue.Text}");
+            }
+            return sb.ToString();
+        }
+
+        private void UpdateReviewTimeLinks()
+        {
+            _reviewTimeLinks.Clear();
+
+            if (string.IsNullOrWhiteSpace(ReviewSummaryMarkdown))
+            {
+                return;
+            }
+
+            var lines = ReviewSummaryMarkdown
+                .Split(new[] { "\r\n", "\n" }, StringSplitOptions.RemoveEmptyEntries);
+            var regex = new Regex(@"\[(?<time>(\d{1,2}:)?\d{2}:\d{2})\]");
+
+            foreach (var line in lines)
+            {
+                var match = regex.Match(line);
+                if (!match.Success)
+                {
+                    continue;
+                }
+
+                var timeText = match.Groups["time"].Value;
+                if (!TryParseTimestamp(timeText, out var time))
+                {
+                    continue;
+                }
+
+                var label = line.Trim();
+                _reviewTimeLinks.Add(new ReviewTimeLink
+                {
+                    Time = time,
+                    TimeText = timeText,
+                    Label = label
+                });
+            }
+        }
+
+        private void OnReviewMarkdownLink(object? param)
+        {
+            if (param is not string url || string.IsNullOrWhiteSpace(url))
+            {
+                return;
+            }
+
+            if (TryParseTimeUrl(url, out var time))
+            {
+                SeekToTime(time);
+            }
+        }
+
+        private static bool TryParseTimeUrl(string url, out TimeSpan time)
+        {
+            time = TimeSpan.Zero;
+            if (url.StartsWith("tt://", StringComparison.OrdinalIgnoreCase))
+            {
+                var text = url.Substring("tt://".Length);
+                return TryParseTimestamp(text, out time);
+            }
+
+            if (url.StartsWith("time://", StringComparison.OrdinalIgnoreCase))
+            {
+                var text = url.Substring("time://".Length);
+                return TryParseTimestamp(text, out time);
+            }
+
+            return false;
+        }
+
+        private static bool TryParseTimestamp(string text, out TimeSpan time)
+        {
+            time = TimeSpan.Zero;
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                return false;
+            }
+
+            var parts = text.Split(':');
+            if (parts.Length == 2
+                && int.TryParse(parts[0], out var mm)
+                && int.TryParse(parts[1], out var ss))
+            {
+                time = new TimeSpan(0, mm, ss);
+                return true;
+            }
+
+            if (parts.Length == 3
+                && int.TryParse(parts[0], out var hh)
+                && int.TryParse(parts[1], out var mm2)
+                && int.TryParse(parts[2], out var ss2))
+            {
+                time = new TimeSpan(hh, mm2, ss2);
+                return true;
+            }
+
+            return false;
+        }
+
+        private static string InjectTimeLinks(string markdown)
+        {
+            if (string.IsNullOrWhiteSpace(markdown))
+            {
+                return markdown;
+            }
+
+            var regex = new Regex(@"\[(?<time>(\d{1,2}:)?\d{2}:\d{2})\](?!\()",
+                RegexOptions.Compiled);
+
+            return regex.Replace(markdown, match =>
+            {
+                var timeText = match.Groups["time"].Value;
+                return $"[{timeText}](tt://{timeText})";
+            });
+        }
+
+        private void JumpToReviewTime(object? param)
+        {
+            if (param is ReviewTimeLink link)
+            {
+                SeekToTime(link.Time);
+                return;
+            }
+
+            if (param is TimeSpan time)
+            {
+                SeekToTime(time);
+                return;
+            }
         }
 
         private void ParseSrt(string path)
@@ -766,6 +1415,76 @@ namespace TranslationToolUI.ViewModels
             }
 
             UpdateSubtitleListHeight();
+        }
+
+        private static List<SubtitleCue> ParseSubtitleFileToCues(string path)
+        {
+            if (!File.Exists(path))
+            {
+                return new List<SubtitleCue>();
+            }
+
+            var extension = Path.GetExtension(path).ToLowerInvariant();
+            var lines = File.ReadAllLines(path);
+            var expectsHeader = extension == ".vtt";
+            return ParseSubtitleLinesToList(lines, expectsHeader);
+        }
+
+        private static List<SubtitleCue> ParseSubtitleLinesToList(string[] lines, bool expectsHeader)
+        {
+            var list = new List<SubtitleCue>();
+            var index = 0;
+            if (expectsHeader && index < lines.Length && lines[index].StartsWith("WEBVTT", StringComparison.OrdinalIgnoreCase))
+            {
+                index++;
+            }
+
+            while (index < lines.Length)
+            {
+                var line = lines[index].Trim();
+                if (string.IsNullOrWhiteSpace(line))
+                {
+                    index++;
+                    continue;
+                }
+
+                if (int.TryParse(line, out _))
+                {
+                    index++;
+                    if (index >= lines.Length)
+                    {
+                        break;
+                    }
+                    line = lines[index].Trim();
+                }
+
+                if (!TryParseTimeRange(line, out var start, out var end))
+                {
+                    index++;
+                    continue;
+                }
+
+                index++;
+                var textLines = new List<string>();
+                while (index < lines.Length && !string.IsNullOrWhiteSpace(lines[index]))
+                {
+                    textLines.Add(lines[index].Trim());
+                    index++;
+                }
+
+                var text = string.Join(" ", textLines).Trim();
+                if (!string.IsNullOrWhiteSpace(text))
+                {
+                    list.Add(new SubtitleCue
+                    {
+                        Start = start,
+                        End = end,
+                        Text = text
+                    });
+                }
+            }
+
+            return list;
         }
 
         private void UpdateSubtitleListHeight()
@@ -1436,6 +2155,65 @@ namespace TranslationToolUI.ViewModels
 
         public bool IsInsightEmpty => string.IsNullOrEmpty(InsightMarkdown) && !IsInsightLoading;
 
+        public string ReviewSummaryMarkdown
+        {
+            get => _reviewSummaryMarkdown;
+            set
+            {
+                if (SetProperty(ref _reviewSummaryMarkdown, value))
+                {
+                    OnPropertyChanged(nameof(IsReviewSummaryEmpty));
+                    UpdateReviewTimeLinks();
+                    OnPropertyChanged(nameof(ReviewSummaryLampFill));
+                    OnPropertyChanged(nameof(ReviewSummaryLampStroke));
+                    OnPropertyChanged(nameof(ReviewSummaryLampOpacity));
+                }
+            }
+        }
+
+        public string ReviewSummaryStatusMessage
+        {
+            get => _reviewSummaryStatusMessage;
+            set => SetProperty(ref _reviewSummaryStatusMessage, value);
+        }
+
+        public bool IsReviewSummaryLoading
+        {
+            get => _isReviewSummaryLoading;
+            set
+            {
+                if (SetProperty(ref _isReviewSummaryLoading, value))
+                {
+                    ((RelayCommand)GenerateReviewSummaryCommand).RaiseCanExecuteChanged();
+                    ((RelayCommand)RefreshReviewSummaryCommand).RaiseCanExecuteChanged();
+                    OnPropertyChanged(nameof(ReviewSummaryLampFill));
+                    OnPropertyChanged(nameof(ReviewSummaryLampStroke));
+                    OnPropertyChanged(nameof(ReviewSummaryLampOpacity));
+                }
+            }
+        }
+
+        public bool IsReviewSummaryEmpty => string.IsNullOrWhiteSpace(ReviewSummaryMarkdown) && !IsReviewSummaryLoading;
+
+        public ObservableCollection<ReviewTimeLink> ReviewTimeLinks => _reviewTimeLinks;
+
+        public int UiModeIndex
+        {
+            get => _uiModeIndex;
+            set
+            {
+                if (SetProperty(ref _uiModeIndex, value))
+                {
+                    OnPropertyChanged(nameof(IsLiveMode));
+                    OnPropertyChanged(nameof(IsReviewMode));
+                }
+            }
+        }
+
+        public bool IsLiveMode => UiModeIndex == 0;
+
+        public bool IsReviewMode => UiModeIndex == 1;
+
         public bool IsAutoInsightEnabled
         {
             get => _isAutoInsightEnabled;
@@ -1523,6 +2301,14 @@ namespace TranslationToolUI.ViewModels
         public ICommand ShowAiConfigCommand { get; }
         public ICommand SendPresetInsightCommand { get; }
         public ICommand ToggleAutoInsightCommand { get; }
+        public ICommand GenerateReviewSummaryCommand { get; }
+        public ICommand RefreshReviewSummaryCommand { get; }
+        public ICommand JumpToReviewTimeCommand { get; }
+        public ICommand ReviewMarkdownLinkCommand { get; }
+        public ICommand LoadBatchTasksCommand { get; }
+        public ICommand ClearBatchTasksCommand { get; }
+        public ICommand StartBatchCommand { get; }
+        public ICommand StopBatchCommand { get; }
         private async void StartTranslation()
         {
             if (_translationService == null)
@@ -1869,6 +2655,9 @@ namespace TranslationToolUI.ViewModels
             ((RelayCommand)StartTranslationCommand).RaiseCanExecuteChanged();
             ((RelayCommand)SendInsightCommand).RaiseCanExecuteChanged();
             ((RelayCommand)SendPresetInsightCommand).RaiseCanExecuteChanged();
+            ((RelayCommand)GenerateReviewSummaryCommand).RaiseCanExecuteChanged();
+            ((RelayCommand)RefreshReviewSummaryCommand).RaiseCanExecuteChanged();
+            ((RelayCommand)StartBatchCommand).RaiseCanExecuteChanged();
 
             TriggerSubscriptionValidation();
 
@@ -1916,7 +2705,9 @@ namespace TranslationToolUI.ViewModels
                             InsightMarkdown = sb.ToString();
                         });
                     },
-                    token);
+                    token,
+                    AiChatProfile.Quick,
+                    enableReasoning: false);
             }
             catch (OperationCanceledException)
             {
@@ -1974,6 +2765,9 @@ namespace TranslationToolUI.ViewModels
                 ((RelayCommand)SendInsightCommand).RaiseCanExecuteChanged();
                 ((RelayCommand)SendPresetInsightCommand).RaiseCanExecuteChanged();
                 ((RelayCommand)ToggleAutoInsightCommand).RaiseCanExecuteChanged();
+                ((RelayCommand)GenerateReviewSummaryCommand).RaiseCanExecuteChanged();
+                ((RelayCommand)RefreshReviewSummaryCommand).RaiseCanExecuteChanged();
+                ((RelayCommand)StartBatchCommand).RaiseCanExecuteChanged();
                 StatusMessage = "AI 配置已保存";
             }
         }
