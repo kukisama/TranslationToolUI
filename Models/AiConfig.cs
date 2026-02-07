@@ -47,6 +47,34 @@ namespace TranslationToolUI.Models
             new() { Name = "情绪分析", Prompt = "请对以上翻译记录进行情绪分析，判断对话中各参与者的整体情绪倾向，标注情绪变化的关键节点。" },
         };
 
+        public List<ReviewSheetPreset> ReviewSheets { get; set; } = new()
+        {
+            new()
+            {
+                Name = "总结复盘",
+                FileTag = "summary",
+                Prompt = "请基于字幕内容生成结构化会议总结，包含关键结论、行动项与风险点，并在引用内容时标注时间戳，格式为 [HH:MM:SS]。"
+            },
+            new()
+            {
+                Name = "情绪复盘",
+                FileTag = "emotion",
+                Prompt = "请分析对话情绪走向，指出情绪变化的关键时间点与可能原因，并标注时间戳 [HH:MM:SS]。"
+            },
+            new()
+            {
+                Name = "客户顾虑",
+                FileTag = "customer",
+                Prompt = "请识别客户提出的疑虑、问题与期望后续动作，按主题整理，并标注时间戳 [HH:MM:SS]。"
+            },
+            new()
+            {
+                Name = "知识点复盘",
+                FileTag = "knowledge",
+                Prompt = "请提取关键知识点与术语，并给出简要解释或背景说明，标注时间戳 [HH:MM:SS]。"
+            }
+        };
+
         [JsonIgnore]
         public bool IsValid => !string.IsNullOrWhiteSpace(ApiEndpoint)
                             && !string.IsNullOrWhiteSpace(ApiKey)

@@ -109,11 +109,8 @@ namespace TranslationToolUI.ViewModels
 
         private int _uiModeIndex;
 
-        private string _reviewSummaryMarkdown = "";
-        private string _reviewSummaryStatusMessage = "";
-        private bool _isReviewSummaryLoading;
-        private CancellationTokenSource? _reviewSummaryCts;
-        private readonly ObservableCollection<ReviewTimeLink> _reviewTimeLinks = new();
+        private readonly ObservableCollection<ReviewSheetState> _reviewSheets = new();
+        private ReviewSheetState? _selectedReviewSheet;
 
         private readonly string[] _sourceLanguages = { "zh-CN", "en-US", "ja-JP", "ko-KR", "fr-FR", "de-DE", "es-ES" };
         private readonly string[] _targetLanguages = { "en", "zh-CN", "ja-JP", "ko-KR", "fr-FR", "de-DE", "es-ES" };        public MainWindowViewModel()
@@ -300,13 +297,9 @@ namespace TranslationToolUI.ViewModels
                 canExecute: _ => CanGenerateReviewSummary()
             );
 
-            RefreshReviewSummaryCommand = new RelayCommand(
-                execute: _ => GenerateReviewSummary(),
-                canExecute: _ => CanGenerateReviewSummary()
-            );
-
-            JumpToReviewTimeCommand = new RelayCommand(
-                execute: param => JumpToReviewTime(param)
+            GenerateAllReviewSheetsCommand = new RelayCommand(
+                execute: _ => GenerateAllReviewSheets(),
+                canExecute: _ => CanGenerateAllReviewSheets()
             );
 
             ReviewMarkdownLinkCommand = new RelayCommand(
@@ -394,6 +387,7 @@ namespace TranslationToolUI.ViewModels
 
                     OnPropertyChanged(nameof(IsAiConfigured));
                     OnPropertyChanged(nameof(InsightPresetButtons));
+                    RebuildReviewSheets();
                     ((RelayCommand)SendInsightCommand).RaiseCanExecuteChanged();
                     ((RelayCommand)SendPresetInsightCommand).RaiseCanExecuteChanged();
                     ((RelayCommand)ToggleAutoInsightCommand).RaiseCanExecuteChanged();
@@ -573,9 +567,12 @@ namespace TranslationToolUI.ViewModels
                     return;
                 }
 
+                CancelAllReviewSheetGeneration();
                 LoadSubtitleFilesForAudio(value);
                 LoadAudioForPlayback(value);
-                LoadReviewSummaryForAudio(value);
+                LoadReviewSheetForAudio(value, SelectedReviewSheet);
+                ((RelayCommand)GenerateReviewSummaryCommand).RaiseCanExecuteChanged();
+                ((RelayCommand)GenerateAllReviewSheetsCommand).RaiseCanExecuteChanged();
             }
         }
 
@@ -744,8 +741,11 @@ namespace TranslationToolUI.ViewModels
             _audioFiles.Clear();
             _subtitleFiles.Clear();
             _subtitleCues.Clear();
-            ReviewSummaryMarkdown = "";
-            ReviewSummaryStatusMessage = "";
+            foreach (var sheet in _reviewSheets)
+            {
+                sheet.Markdown = "";
+                sheet.StatusMessage = "";
+            }
 
             var sessionsPath = PathManager.Instance.SessionsPath;
             if (!Directory.Exists(sessionsPath))
@@ -782,7 +782,9 @@ namespace TranslationToolUI.ViewModels
             _batchTasks.Clear();
             foreach (var audio in _audioFiles)
             {
-                var hasAiSummary = File.Exists(GetReviewSummaryPath(audio.FullPath));
+                var summarySheet = GetPrimaryReviewSheet();
+                var hasAiSummary = summarySheet != null
+                    && File.Exists(GetReviewSheetPath(audio.FullPath, summarySheet.FileTag));
                 var hasAiSubtitle = HasAiSubtitle(audio.FullPath);
                 var subtitlePath = GetPreferredSubtitlePath(audio.FullPath);
 
@@ -912,7 +914,11 @@ namespace TranslationToolUI.ViewModels
             }
 
             var systemPrompt = "你是一个会议复盘助手。根据字幕内容生成结构化 Markdown 总结。请输出包含关键结论、行动项和风险点，并在引用内容时标注时间戳，格式为 [HH:MM:SS]。";
-            var userPrompt = $"以下是会议字幕内容:\n\n{FormatSubtitleForSummary(cues)}\n\n---\n\n请生成复盘总结。";
+            var sheet = GetPrimaryReviewSheet();
+            var prompt = sheet != null && !string.IsNullOrWhiteSpace(sheet.Prompt)
+                ? sheet.Prompt.Trim()
+                : "请生成复盘总结。";
+            var userPrompt = $"以下是会议字幕内容:\n\n{FormatSubtitleForSummary(cues)}\n\n---\n\n{prompt}";
 
             try
             {
@@ -932,7 +938,10 @@ namespace TranslationToolUI.ViewModels
                     onOutcome: o => outcome = o);
 
                 var markdown = InjectTimeLinks(sb.ToString());
-                var summaryPath = GetReviewSummaryPath(item.FullPath);
+                var primarySheet = GetPrimaryReviewSheet();
+                var summaryPath = primarySheet == null
+                    ? GetReviewSheetPath(item.FullPath, "summary")
+                    : GetReviewSheetPath(item.FullPath, primarySheet.FileTag);
                 File.WriteAllText(summaryPath, markdown);
                 var note = "完成";
                 if (outcome?.UsedFallback == true)
@@ -997,6 +1006,51 @@ namespace TranslationToolUI.ViewModels
             var aiSrt = Path.Combine(directory, baseName + ".ai.srt");
             var aiVtt = Path.Combine(directory, baseName + ".ai.vtt");
             return File.Exists(aiSrt) || File.Exists(aiVtt);
+        }
+
+        private void RebuildReviewSheets()
+        {
+            var currentTag = SelectedReviewSheet?.FileTag;
+            _reviewSheets.Clear();
+
+            var presets = _config.AiConfig?.ReviewSheets;
+            if (presets == null || presets.Count == 0)
+            {
+                presets = new AiConfig().ReviewSheets;
+            }
+
+            foreach (var preset in presets)
+            {
+                _reviewSheets.Add(ReviewSheetState.FromPreset(preset));
+            }
+
+            SelectedReviewSheet = _reviewSheets.FirstOrDefault(s => s.FileTag == currentTag)
+                                   ?? _reviewSheets.FirstOrDefault();
+        }
+
+        private ReviewSheetState? GetPrimaryReviewSheet()
+        {
+            return _reviewSheets.FirstOrDefault(s => string.Equals(s.FileTag, "summary", StringComparison.OrdinalIgnoreCase))
+                   ?? _reviewSheets.FirstOrDefault();
+        }
+
+        private void OnSelectedReviewSheetPropertyChanged(object? sender, PropertyChangedEventArgs e)
+        {
+            OnPropertyChanged(nameof(ReviewSummaryMarkdown));
+            OnPropertyChanged(nameof(ReviewSummaryStatusMessage));
+            OnPropertyChanged(nameof(IsReviewSummaryLoading));
+            OnPropertyChanged(nameof(IsReviewSummaryEmpty));
+            OnPropertyChanged(nameof(ReviewSummaryLampFill));
+            OnPropertyChanged(nameof(ReviewSummaryLampStroke));
+            OnPropertyChanged(nameof(ReviewSummaryLampOpacity));
+                if (GenerateReviewSummaryCommand is RelayCommand genCmd)
+                {
+                    genCmd.RaiseCanExecuteChanged();
+                }
+                if (GenerateAllReviewSheetsCommand is RelayCommand allCmd)
+                {
+                    allCmd.RaiseCanExecuteChanged();
+                }
         }
 
         private void LoadSubtitleFilesForAudio(MediaFileItem? audioFile)
@@ -1070,80 +1124,146 @@ namespace TranslationToolUI.ViewModels
 
             UpdateSubtitleListHeight();
             ((RelayCommand)GenerateReviewSummaryCommand).RaiseCanExecuteChanged();
-            ((RelayCommand)RefreshReviewSummaryCommand).RaiseCanExecuteChanged();
+            ((RelayCommand)GenerateAllReviewSheetsCommand).RaiseCanExecuteChanged();
         }
 
-        private void LoadReviewSummaryForAudio(MediaFileItem? audioFile)
+        private void LoadReviewSheetForAudio(MediaFileItem? audioFile, ReviewSheetState? sheet)
         {
-            ReviewSummaryMarkdown = "";
-            ReviewSummaryStatusMessage = "";
+            if (sheet != null)
+            {
+                sheet.Markdown = "";
+                sheet.StatusMessage = "";
+                sheet.IsLoading = false;
+            }
 
-            if (audioFile == null || string.IsNullOrWhiteSpace(audioFile.FullPath))
+            if (audioFile == null || string.IsNullOrWhiteSpace(audioFile.FullPath) || sheet == null)
             {
                 return;
             }
 
-            var summaryPath = GetReviewSummaryPath(audioFile.FullPath);
-            if (File.Exists(summaryPath))
+            var sheetPath = GetReviewSheetPath(audioFile.FullPath, sheet.FileTag);
+            if (File.Exists(sheetPath))
             {
-                ReviewSummaryMarkdown = InjectTimeLinks(File.ReadAllText(summaryPath));
-                ReviewSummaryStatusMessage = $"已加载总结: {Path.GetFileName(summaryPath)}";
+                sheet.Markdown = InjectTimeLinks(File.ReadAllText(sheetPath));
+                sheet.StatusMessage = $"已加载: {Path.GetFileName(sheetPath)}";
             }
             else
             {
-                ReviewSummaryStatusMessage = "未找到复盘总结，可生成。";
+                sheet.StatusMessage = "未找到复盘内容，可生成。";
             }
 
             ((RelayCommand)GenerateReviewSummaryCommand).RaiseCanExecuteChanged();
-            ((RelayCommand)RefreshReviewSummaryCommand).RaiseCanExecuteChanged();
+            ((RelayCommand)GenerateAllReviewSheetsCommand).RaiseCanExecuteChanged();
         }
 
-        private static string GetReviewSummaryPath(string audioFilePath)
+        private static string GetReviewSheetPath(string audioFilePath, string fileTag)
         {
             var directory = Path.GetDirectoryName(audioFilePath) ?? PathManager.Instance.SessionsPath;
             var baseName = Path.GetFileNameWithoutExtension(audioFilePath);
-            return Path.Combine(directory, baseName + ".ai.summary.md");
+            var tag = string.IsNullOrWhiteSpace(fileTag) ? "summary" : fileTag.Trim();
+            return Path.Combine(directory, baseName + $".ai.{tag}.md");
+        }
+
+        private void CancelAllReviewSheetGeneration()
+        {
+            foreach (var sheet in _reviewSheets)
+            {
+                sheet.Cts?.Cancel();
+                sheet.Cts = null;
+                sheet.IsLoading = false;
+            }
         }
 
         private bool CanGenerateReviewSummary()
         {
             return IsAiConfigured
                    && SelectedAudioFile != null
+                   && SelectedReviewSheet != null
                    && SubtitleCues.Count > 0
                    && !IsReviewSummaryLoading;
         }
 
         private async void GenerateReviewSummary()
         {
+            if (SelectedReviewSheet == null || SelectedAudioFile == null)
+            {
+                return;
+            }
+
+            var sheet = SelectedReviewSheet;
+            var audioFile = SelectedAudioFile;
+            var cues = SubtitleCues.ToList();
+            await GenerateReviewSheetAsync(sheet, audioFile, cues);
+        }
+
+        private bool CanGenerateAllReviewSheets()
+        {
+            return IsAiConfigured
+                   && SelectedAudioFile != null
+                   && SubtitleCues.Count > 0
+                   && _reviewSheets.Count > 0
+                   && _reviewSheets.Any(sheet => !sheet.IsLoading);
+        }
+
+        private async void GenerateAllReviewSheets()
+        {
+            if (SelectedAudioFile == null || SubtitleCues.Count == 0)
+            {
+                return;
+            }
+
+            var audioFile = SelectedAudioFile;
+            var cues = SubtitleCues.ToList();
+            foreach (var sheet in _reviewSheets)
+            {
+                if (sheet.IsLoading)
+                {
+                    continue;
+                }
+
+                await GenerateReviewSheetAsync(sheet, audioFile, cues);
+            }
+        }
+
+        private async Task GenerateReviewSheetAsync(ReviewSheetState sheet, MediaFileItem audioFile, List<SubtitleCue> cues)
+        {
             if (_config.AiConfig == null || !_config.AiConfig.IsValid)
             {
-                ReviewSummaryStatusMessage = "AI 配置无效，请先配置 AI 服务";
+                sheet.StatusMessage = "AI 配置无效，请先配置 AI 服务";
                 return;
             }
 
-            if (SelectedAudioFile == null)
+            if (audioFile == null || string.IsNullOrWhiteSpace(audioFile.FullPath))
             {
-                ReviewSummaryStatusMessage = "未选择音频文件";
+                sheet.StatusMessage = "未选择音频文件";
                 return;
             }
 
-            if (SubtitleCues.Count == 0)
+            if (cues.Count == 0)
             {
-                ReviewSummaryStatusMessage = "未加载字幕，无法生成总结";
+                sheet.StatusMessage = "未加载字幕，无法生成总结";
                 return;
             }
 
-            _reviewSummaryCts?.Cancel();
-            _reviewSummaryCts = new CancellationTokenSource();
-            var token = _reviewSummaryCts.Token;
+            sheet.Cts?.Cancel();
+            var localCts = new CancellationTokenSource();
+            sheet.Cts = localCts;
+            var token = localCts.Token;
 
-            IsReviewSummaryLoading = true;
-            ReviewSummaryMarkdown = "";
-            ReviewSummaryStatusMessage = "正在生成复盘总结...";
+            sheet.IsLoading = true;
+            sheet.Markdown = "";
+            sheet.StatusMessage = "正在生成复盘内容...";
+            if (GenerateAllReviewSheetsCommand is RelayCommand allStartCmd)
+            {
+                allStartCmd.RaiseCanExecuteChanged();
+            }
 
             var systemPrompt = "你是一个会议复盘助手。根据字幕内容生成结构化 Markdown 总结。请输出包含关键结论、行动项和风险点，并在引用内容时标注时间戳，格式为 [HH:MM:SS]。";
-            var subtitlesText = FormatSubtitleForSummary();
-            var userPrompt = $"以下是会议字幕内容:\n\n{subtitlesText}\n\n---\n\n请生成复盘总结。";
+            var subtitlesText = FormatSubtitleForSummary(cues);
+            var prompt = string.IsNullOrWhiteSpace(sheet.Prompt)
+                ? "请生成复盘总结。"
+                : sheet.Prompt.Trim();
+            var userPrompt = $"以下是会议字幕内容:\n\n{subtitlesText}\n\n---\n\n{prompt}";
 
             try
             {
@@ -1155,10 +1275,15 @@ namespace TranslationToolUI.ViewModels
                     userPrompt,
                     chunk =>
                     {
+                        if (!ReferenceEquals(sheet.Cts, localCts))
+                        {
+                            return;
+                        }
+
                         Avalonia.Threading.Dispatcher.UIThread.Post(() =>
                         {
                             sb.Append(chunk);
-                            ReviewSummaryMarkdown = InjectTimeLinks(sb.ToString());
+                            sheet.Markdown = InjectTimeLinks(sb.ToString());
                         });
                     },
                     token,
@@ -1166,8 +1291,13 @@ namespace TranslationToolUI.ViewModels
                     enableReasoning: _config.AiConfig.SummaryEnableReasoning,
                     onOutcome: o => outcome = o);
 
-                var summaryPath = GetReviewSummaryPath(SelectedAudioFile.FullPath);
-                File.WriteAllText(summaryPath, ReviewSummaryMarkdown);
+                if (!ReferenceEquals(sheet.Cts, localCts))
+                {
+                    return;
+                }
+
+                var summaryPath = GetReviewSheetPath(audioFile.FullPath, sheet.FileTag);
+                File.WriteAllText(summaryPath, sheet.Markdown);
                 var reasoningNote = "";
                 if (outcome?.UsedFallback == true)
                 {
@@ -1182,19 +1312,34 @@ namespace TranslationToolUI.ViewModels
                     reasoningNote = " (未启用思考)";
                 }
 
-                ReviewSummaryStatusMessage = $"复盘总结已保存: {Path.GetFileName(summaryPath)}{reasoningNote}";
+                sheet.StatusMessage = $"复盘内容已保存: {Path.GetFileName(summaryPath)}{reasoningNote}";
             }
             catch (OperationCanceledException)
             {
-                ReviewSummaryStatusMessage = "复盘总结已取消";
+                if (ReferenceEquals(sheet.Cts, localCts))
+                {
+                    sheet.StatusMessage = "复盘内容已取消";
+                }
             }
             catch (Exception ex)
             {
-                ReviewSummaryStatusMessage = $"生成失败: {ex.Message}";
+                if (ReferenceEquals(sheet.Cts, localCts))
+                {
+                    sheet.StatusMessage = $"生成失败: {ex.Message}";
+                }
             }
             finally
             {
-                IsReviewSummaryLoading = false;
+                if (ReferenceEquals(sheet.Cts, localCts))
+                {
+                    sheet.IsLoading = false;
+                    sheet.Cts = null;
+                }
+
+                if (GenerateAllReviewSheetsCommand is RelayCommand allCmd)
+                {
+                    allCmd.RaiseCanExecuteChanged();
+                }
             }
         }
 
@@ -1218,43 +1363,6 @@ namespace TranslationToolUI.ViewModels
                 sb.AppendLine($"[{time}] {cue.Text}");
             }
             return sb.ToString();
-        }
-
-        private void UpdateReviewTimeLinks()
-        {
-            _reviewTimeLinks.Clear();
-
-            if (string.IsNullOrWhiteSpace(ReviewSummaryMarkdown))
-            {
-                return;
-            }
-
-            var lines = ReviewSummaryMarkdown
-                .Split(new[] { "\r\n", "\n" }, StringSplitOptions.RemoveEmptyEntries);
-            var regex = new Regex(@"\[(?<time>(\d{1,2}:)?\d{2}:\d{2})\]");
-
-            foreach (var line in lines)
-            {
-                var match = regex.Match(line);
-                if (!match.Success)
-                {
-                    continue;
-                }
-
-                var timeText = match.Groups["time"].Value;
-                if (!TryParseTimestamp(timeText, out var time))
-                {
-                    continue;
-                }
-
-                var label = line.Trim();
-                _reviewTimeLinks.Add(new ReviewTimeLink
-                {
-                    Time = time,
-                    TimeText = timeText,
-                    Label = label
-                });
-            }
         }
 
         private void OnReviewMarkdownLink(object? param)
@@ -1334,20 +1442,6 @@ namespace TranslationToolUI.ViewModels
             });
         }
 
-        private void JumpToReviewTime(object? param)
-        {
-            if (param is ReviewTimeLink link)
-            {
-                SeekToTime(link.Time);
-                return;
-            }
-
-            if (param is TimeSpan time)
-            {
-                SeekToTime(time);
-                return;
-            }
-        }
 
         private void ParseSrt(string path)
         {
@@ -2155,47 +2249,50 @@ namespace TranslationToolUI.ViewModels
 
         public bool IsInsightEmpty => string.IsNullOrEmpty(InsightMarkdown) && !IsInsightLoading;
 
-        public string ReviewSummaryMarkdown
+        public ObservableCollection<ReviewSheetState> ReviewSheets => _reviewSheets;
+
+        public ReviewSheetState? SelectedReviewSheet
         {
-            get => _reviewSummaryMarkdown;
+            get => _selectedReviewSheet;
             set
             {
-                if (SetProperty(ref _reviewSummaryMarkdown, value))
+                if (ReferenceEquals(_selectedReviewSheet, value))
                 {
-                    OnPropertyChanged(nameof(IsReviewSummaryEmpty));
-                    UpdateReviewTimeLinks();
-                    OnPropertyChanged(nameof(ReviewSummaryLampFill));
-                    OnPropertyChanged(nameof(ReviewSummaryLampStroke));
-                    OnPropertyChanged(nameof(ReviewSummaryLampOpacity));
+                    return;
                 }
+
+                if (_selectedReviewSheet != null)
+                {
+                    _selectedReviewSheet.PropertyChanged -= OnSelectedReviewSheetPropertyChanged;
+                }
+
+                _selectedReviewSheet = value;
+                OnPropertyChanged(nameof(SelectedReviewSheet));
+
+                OnPropertyChanged(nameof(ReviewSummaryMarkdown));
+                OnPropertyChanged(nameof(ReviewSummaryStatusMessage));
+                OnPropertyChanged(nameof(IsReviewSummaryLoading));
+                OnPropertyChanged(nameof(IsReviewSummaryEmpty));
+                OnPropertyChanged(nameof(ReviewSummaryLampFill));
+                OnPropertyChanged(nameof(ReviewSummaryLampStroke));
+                OnPropertyChanged(nameof(ReviewSummaryLampOpacity));
+
+                if (_selectedReviewSheet != null)
+                {
+                    _selectedReviewSheet.PropertyChanged += OnSelectedReviewSheetPropertyChanged;
+                }
+
+                LoadReviewSheetForAudio(SelectedAudioFile, _selectedReviewSheet);
             }
         }
 
-        public string ReviewSummaryStatusMessage
-        {
-            get => _reviewSummaryStatusMessage;
-            set => SetProperty(ref _reviewSummaryStatusMessage, value);
-        }
+        public string ReviewSummaryMarkdown => SelectedReviewSheet?.Markdown ?? "";
 
-        public bool IsReviewSummaryLoading
-        {
-            get => _isReviewSummaryLoading;
-            set
-            {
-                if (SetProperty(ref _isReviewSummaryLoading, value))
-                {
-                    ((RelayCommand)GenerateReviewSummaryCommand).RaiseCanExecuteChanged();
-                    ((RelayCommand)RefreshReviewSummaryCommand).RaiseCanExecuteChanged();
-                    OnPropertyChanged(nameof(ReviewSummaryLampFill));
-                    OnPropertyChanged(nameof(ReviewSummaryLampStroke));
-                    OnPropertyChanged(nameof(ReviewSummaryLampOpacity));
-                }
-            }
-        }
+        public string ReviewSummaryStatusMessage => SelectedReviewSheet?.StatusMessage ?? "";
+
+        public bool IsReviewSummaryLoading => SelectedReviewSheet?.IsLoading ?? false;
 
         public bool IsReviewSummaryEmpty => string.IsNullOrWhiteSpace(ReviewSummaryMarkdown) && !IsReviewSummaryLoading;
-
-        public ObservableCollection<ReviewTimeLink> ReviewTimeLinks => _reviewTimeLinks;
 
         public int UiModeIndex
         {
@@ -2206,6 +2303,8 @@ namespace TranslationToolUI.ViewModels
                 {
                     OnPropertyChanged(nameof(IsLiveMode));
                     OnPropertyChanged(nameof(IsReviewMode));
+                    OnPropertyChanged(nameof(IsLiveModeSelected));
+                    OnPropertyChanged(nameof(IsReviewModeSelected));
                 }
             }
         }
@@ -2213,6 +2312,30 @@ namespace TranslationToolUI.ViewModels
         public bool IsLiveMode => UiModeIndex == 0;
 
         public bool IsReviewMode => UiModeIndex == 1;
+
+        public bool IsLiveModeSelected
+        {
+            get => UiModeIndex == 0;
+            set
+            {
+                if (value)
+                {
+                    UiModeIndex = 0;
+                }
+            }
+        }
+
+        public bool IsReviewModeSelected
+        {
+            get => UiModeIndex == 1;
+            set
+            {
+                if (value)
+                {
+                    UiModeIndex = 1;
+                }
+            }
+        }
 
         public bool IsAutoInsightEnabled
         {
@@ -2302,8 +2425,7 @@ namespace TranslationToolUI.ViewModels
         public ICommand SendPresetInsightCommand { get; }
         public ICommand ToggleAutoInsightCommand { get; }
         public ICommand GenerateReviewSummaryCommand { get; }
-        public ICommand RefreshReviewSummaryCommand { get; }
-        public ICommand JumpToReviewTimeCommand { get; }
+        public ICommand GenerateAllReviewSheetsCommand { get; }
         public ICommand ReviewMarkdownLinkCommand { get; }
         public ICommand LoadBatchTasksCommand { get; }
         public ICommand ClearBatchTasksCommand { get; }
@@ -2650,13 +2772,14 @@ namespace TranslationToolUI.ViewModels
             OnPropertyChanged(nameof(IsAudioDeviceSelectionEnabled));
             OnPropertyChanged(nameof(IsAudioDeviceRefreshEnabled));
             OnPropertyChanged(nameof(IsAiConfigured));
+            RebuildReviewSheets();
 
             ForceUpdateComboBoxSelection();
             ((RelayCommand)StartTranslationCommand).RaiseCanExecuteChanged();
             ((RelayCommand)SendInsightCommand).RaiseCanExecuteChanged();
             ((RelayCommand)SendPresetInsightCommand).RaiseCanExecuteChanged();
             ((RelayCommand)GenerateReviewSummaryCommand).RaiseCanExecuteChanged();
-            ((RelayCommand)RefreshReviewSummaryCommand).RaiseCanExecuteChanged();
+            ((RelayCommand)GenerateAllReviewSheetsCommand).RaiseCanExecuteChanged();
             ((RelayCommand)StartBatchCommand).RaiseCanExecuteChanged();
 
             TriggerSubscriptionValidation();
@@ -2762,11 +2885,12 @@ namespace TranslationToolUI.ViewModels
                 await _configService.SaveConfigAsync(_config);
                 OnPropertyChanged(nameof(IsAiConfigured));
                 OnPropertyChanged(nameof(InsightPresetButtons));
+                RebuildReviewSheets();
                 ((RelayCommand)SendInsightCommand).RaiseCanExecuteChanged();
                 ((RelayCommand)SendPresetInsightCommand).RaiseCanExecuteChanged();
                 ((RelayCommand)ToggleAutoInsightCommand).RaiseCanExecuteChanged();
                 ((RelayCommand)GenerateReviewSummaryCommand).RaiseCanExecuteChanged();
-                ((RelayCommand)RefreshReviewSummaryCommand).RaiseCanExecuteChanged();
+                ((RelayCommand)GenerateAllReviewSheetsCommand).RaiseCanExecuteChanged();
                 ((RelayCommand)StartBatchCommand).RaiseCanExecuteChanged();
                 StatusMessage = "AI 配置已保存";
             }

@@ -14,6 +14,7 @@ namespace TranslationToolUI.Views
     {
         public AiConfig Config { get; private set; }
         private ObservableCollection<InsightPresetButton> _presetButtons = new();
+        private ObservableCollection<ReviewSheetPreset> _reviewSheets = new();
 
         public AiConfigView()
         {
@@ -42,6 +43,9 @@ namespace TranslationToolUI.Views
                     SummaryEnableReasoning = existingConfig.SummaryEnableReasoning,
                     PresetButtons = existingConfig.PresetButtons
                         .Select(b => new InsightPresetButton { Name = b.Name, Prompt = b.Prompt })
+                        .ToList(),
+                    ReviewSheets = existingConfig.ReviewSheets
+                        .Select(s => new ReviewSheetPreset { Name = s.Name, FileTag = s.FileTag, Prompt = s.Prompt })
                         .ToList()
                 }
                 : new AiConfig();
@@ -56,6 +60,7 @@ namespace TranslationToolUI.Views
             CancelButton.Click += (_, _) => Close(false);
             TestButton.Click += TestButton_Click;
             AddPresetButton.Click += AddPresetButton_Click;
+            AddReviewSheetButton.Click += AddReviewSheetButton_Click;
         }
 
         private void LoadConfigValues()
@@ -84,6 +89,10 @@ namespace TranslationToolUI.Views
 
             _presetButtons = new ObservableCollection<InsightPresetButton>(Config.PresetButtons);
             PresetButtonsItemsControl.ItemsSource = _presetButtons;
+
+            _reviewSheets = new ObservableCollection<ReviewSheetPreset>(Config.ReviewSheets
+                .Select(s => new ReviewSheetPreset { Name = s.Name, FileTag = s.FileTag, Prompt = s.Prompt }));
+            ReviewSheetsItemsControl.ItemsSource = _reviewSheets;
         }
 
         private void UpdateProviderFieldsVisibility()
@@ -103,6 +112,24 @@ namespace TranslationToolUI.Views
             if (sender is Button btn && btn.Tag is InsightPresetButton item)
             {
                 _presetButtons.Remove(item);
+            }
+        }
+
+        private void AddReviewSheetButton_Click(object? sender, RoutedEventArgs e)
+        {
+            _reviewSheets.Add(new ReviewSheetPreset
+            {
+                Name = "新复盘",
+                FileTag = "custom",
+                Prompt = ""
+            });
+        }
+
+        private void RemoveReviewSheet_Click(object? sender, RoutedEventArgs e)
+        {
+            if (sender is Button btn && btn.Tag is ReviewSheetPreset item)
+            {
+                _reviewSheets.Remove(item);
             }
         }
 
@@ -162,6 +189,15 @@ namespace TranslationToolUI.Views
             Config.SummaryEnableReasoning = SummaryReasoningCheckBox.IsChecked == true;
             Config.PresetButtons = _presetButtons
                 .Where(b => !string.IsNullOrWhiteSpace(b.Name))
+                .ToList();
+            Config.ReviewSheets = _reviewSheets
+                .Where(s => !string.IsNullOrWhiteSpace(s.Name))
+                .Select(s => new ReviewSheetPreset
+                {
+                    Name = s.Name.Trim(),
+                    FileTag = string.IsNullOrWhiteSpace(s.FileTag) ? "summary" : s.FileTag.Trim(),
+                    Prompt = s.Prompt?.Trim() ?? ""
+                })
                 .ToList();
             Close(true);
         }

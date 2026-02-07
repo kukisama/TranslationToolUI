@@ -9,6 +9,7 @@
         mc:Ignorable="d" d:DesignWidth="800" d:DesignHeight="600"
         x:Class="TranslationToolUI.MainWindow"
         x:DataType="vm:MainWindowViewModel"
+        x:CompileBindings="False"
         Title="Azure 语音实时翻译工具"
         MinWidth="1240" MinHeight="600"
         >
@@ -144,12 +145,14 @@
                     </Border>
                 </StackPanel>
 
-                <StackPanel Orientation="Horizontal" Spacing="6" Margin="16,0,0,0" VerticalAlignment="Center">
+                <StackPanel Orientation="Horizontal" Spacing="8" Margin="16,0,0,0" VerticalAlignment="Center">
                     <TextBlock Text="模式:" VerticalAlignment="Center"/>
-                    <ComboBox MinWidth="140" SelectedIndex="{Binding UiModeIndex, Mode=TwoWay}">
-                        <ComboBoxItem Content="实时会议"/>
-                        <ComboBoxItem Content="复盘/批处理"/>
-                    </ComboBox>
+                    <StackPanel Orientation="Horizontal" Spacing="10">
+                        <RadioButton Content="实时会议" GroupName="UiMode"
+                                     IsChecked="{Binding IsLiveModeSelected, Mode=TwoWay}"/>
+                        <RadioButton Content="复盘/批处理" GroupName="UiMode"
+                                     IsChecked="{Binding IsReviewModeSelected, Mode=TwoWay}"/>
+                    </StackPanel>
                 </StackPanel>
             </StackPanel>
         </Grid>
@@ -390,7 +393,7 @@
             </Grid>
 
             <!-- 复盘/批处理模式 -->
-            <Grid IsVisible="{Binding IsReviewMode}" ColumnDefinitions="280,*,320" ColumnSpacing="10">
+            <Grid IsVisible="{Binding IsReviewMode}" ColumnDefinitions="280,*,6,320" ColumnSpacing="8">
                 <!-- 左侧文件与批处理 -->
                 <Border Grid.Column="0" BorderBrush="#FFE5E7EB" BorderThickness="1" CornerRadius="4" Padding="8">
                     <TabControl>
@@ -469,9 +472,10 @@
                         <StackPanel Grid.Row="0" Spacing="6">
                             <TextBlock Text="音频播放" FontWeight="Bold"/>
                             <StackPanel Orientation="Horizontal" Spacing="6">
-                                <Button Content="▶" Width="34" Command="{Binding PlayAudioCommand}" IsEnabled="{Binding IsPlayEnabled}"/>
-                                <Button Content="⏸" Width="34" Command="{Binding PauseAudioCommand}" IsEnabled="{Binding IsPauseEnabled}"/>
-                                <Button Content="⏹" Width="34" Command="{Binding StopAudioCommand}" IsEnabled="{Binding IsStopEnabled}"/>
+                                <Button Content="▶" Width="34" Command="{Binding PlayAudioCommand}"
+                                        IsEnabled="{Binding IsPlayEnabled}" IsVisible="{Binding IsPlayEnabled}"/>
+                                <Button Content="⏸" Width="34" Command="{Binding PauseAudioCommand}"
+                                        IsEnabled="{Binding IsPauseEnabled}" IsVisible="{Binding IsPauseEnabled}"/>
                                 <TextBlock Text="{Binding PlaybackTimeText}" VerticalAlignment="Center" Foreground="Gray"/>
                             </StackPanel>
                         </StackPanel>
@@ -512,8 +516,13 @@
                     </Grid>
                 </Border>
 
+                <GridSplitter Grid.Column="2" Width="6" Background="#FFE5E7EB"
+                          HorizontalAlignment="Stretch" VerticalAlignment="Stretch"
+                          ResizeDirection="Columns"/>
+
                 <!-- 右侧复盘洞察总结 -->
-                <Border Grid.Column="2" BorderBrush="#FFE5E7EB" BorderThickness="1" CornerRadius="4" Padding="8">
+                <Border Grid.Column="3" BorderBrush="#FFE5E7EB" BorderThickness="1" CornerRadius="4" Padding="8"
+                    MinWidth="240">
                     <Grid RowDefinitions="Auto,*,Auto">
                         <StackPanel Grid.Row="0" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
                             <TextBlock Text="复盘洞察" FontWeight="Bold"/>
@@ -524,27 +533,39 @@
                                      VerticalAlignment="Center"/>
                         </StackPanel>
                         <Border Grid.Row="1" BorderBrush="#FFE5E7EB" BorderThickness="1" CornerRadius="4" Margin="0,8,0,8">
-                            <Grid>
-                                <ScrollViewer IsVisible="{Binding !IsReviewSummaryEmpty}">
-                                    <md:MarkdownScrollViewer Markdown="{Binding ReviewSummaryMarkdown}">
-                                        <md:MarkdownScrollViewer.Engine>
-                                            <md:Markdown HyperlinkCommand="{Binding ReviewMarkdownLinkCommand}" />
-                                        </md:MarkdownScrollViewer.Engine>
-                                    </md:MarkdownScrollViewer>
-                                </ScrollViewer>
-                                <TextBlock Text="选择音频与字幕后生成总结"
-                                           Foreground="Gray" FontSize="12"
-                                           HorizontalAlignment="Center" VerticalAlignment="Center"
-                                           IsVisible="{Binding IsReviewSummaryEmpty}"/>
-                            </Grid>
+                            <TabControl ItemsSource="{Binding ReviewSheets}"
+                                        SelectedItem="{Binding SelectedReviewSheet, Mode=TwoWay}">
+                                <TabControl.ItemTemplate>
+                                    <DataTemplate x:CompileBindings="False">
+                                        <TextBlock Text="{Binding Name}"/>
+                                    </DataTemplate>
+                                </TabControl.ItemTemplate>
+                                <TabControl.ContentTemplate>
+                                    <DataTemplate x:CompileBindings="False">
+                                        <Grid>
+                                            <ScrollViewer IsVisible="{Binding !IsEmpty}">
+                                                <md:MarkdownScrollViewer Markdown="{Binding Markdown}">
+                                                    <md:MarkdownScrollViewer.Engine>
+                                                        <md:Markdown HyperlinkCommand="{Binding $parent[TabControl].DataContext.ReviewMarkdownLinkCommand}" />
+                                                    </md:MarkdownScrollViewer.Engine>
+                                                </md:MarkdownScrollViewer>
+                                            </ScrollViewer>
+                                            <TextBlock Text="选择音频与字幕后生成内容"
+                                                       Foreground="Gray" FontSize="12"
+                                                       HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                       IsVisible="{Binding IsEmpty}"/>
+                                        </Grid>
+                                    </DataTemplate>
+                                </TabControl.ContentTemplate>
+                            </TabControl>
                         </Border>
                         <StackPanel Grid.Row="2" Orientation="Vertical" Spacing="6">
                             <TextBlock Text="{Binding ReviewSummaryStatusMessage}" FontSize="11" Foreground="Gray"/>
                             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="6">
-                                <Button Content="生成总结" Padding="8,4"
+                                <Button Content="生成内容" Padding="8,4"
                                         Command="{Binding GenerateReviewSummaryCommand}"/>
-                                <Button Content="刷新总结" Padding="8,4"
-                                        Command="{Binding RefreshReviewSummaryCommand}"/>
+                                <Button Content="生成全部" Padding="8,4"
+                                    Command="{Binding GenerateAllReviewSheetsCommand}"/>
                             </StackPanel>
                         </StackPanel>
                     </Grid>

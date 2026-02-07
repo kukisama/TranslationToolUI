@@ -65,7 +65,7 @@ public partial class MainWindow : Window
         }
     }
 
-    private void SubtitleCueListBox_DoubleTapped(object? sender, RoutedEventArgs e)
+    private void SubtitleCueListBox_DoubleTapped(object? sender, Avalonia.Input.TappedEventArgs e)
     {
         if (_viewModel == null)
         {
