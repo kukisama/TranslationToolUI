@@ -319,6 +319,12 @@ namespace TranslationToolUI.ViewModels
                     ((RelayCommand)StartTranslationCommand).RaiseCanExecuteChanged();
                     ((RelayCommand)ToggleTranslationCommand).RaiseCanExecuteChanged();
 
+                    OnPropertyChanged(nameof(IsAiConfigured));
+                    OnPropertyChanged(nameof(InsightPresetButtons));
+                    ((RelayCommand)SendInsightCommand).RaiseCanExecuteChanged();
+                    ((RelayCommand)SendPresetInsightCommand).RaiseCanExecuteChanged();
+                    ((RelayCommand)ToggleAutoInsightCommand).RaiseCanExecuteChanged();
+
                     StatusMessage = $"配置已加载，文件位置: {_configService.GetConfigFilePath()}";
 
                     TriggerSubscriptionValidation();
@@ -1425,6 +1431,9 @@ namespace TranslationToolUI.ViewModels
 
         public bool IsAiConfigured => _config.AiConfig?.IsValid == true;
 
+        public List<InsightPresetButton> InsightPresetButtons =>
+            _config.AiConfig?.PresetButtons ?? new List<InsightPresetButton>();
+
         public bool IsInsightEmpty => string.IsNullOrEmpty(InsightMarkdown) && !IsInsightLoading;
 
         public bool IsAutoInsightEnabled
@@ -1961,6 +1970,7 @@ namespace TranslationToolUI.ViewModels
                 _config.AiConfig = configView.Config;
                 await _configService.SaveConfigAsync(_config);
                 OnPropertyChanged(nameof(IsAiConfigured));
+                OnPropertyChanged(nameof(InsightPresetButtons));
                 ((RelayCommand)SendInsightCommand).RaiseCanExecuteChanged();
                 ((RelayCommand)SendPresetInsightCommand).RaiseCanExecuteChanged();
                 ((RelayCommand)ToggleAutoInsightCommand).RaiseCanExecuteChanged();

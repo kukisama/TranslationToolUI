@@ -283,23 +283,20 @@
                             </DockPanel>
 
                             <!-- 预设分析模板按钮 -->
-                            <WrapPanel Grid.Row="1" Margin="8,4" Orientation="Horizontal">
-                                <Button Content="会议摘要" Margin="0,0,6,6" Padding="8,4"
-                                        Command="{Binding SendPresetInsightCommand}"
-                                        CommandParameter="请对以上翻译记录进行会议摘要。总结会议的主要议题、关键讨论内容和结论。"/>
-                                <Button Content="知识点提取" Margin="0,0,6,6" Padding="8,4"
-                                        Command="{Binding SendPresetInsightCommand}"
-                                        CommandParameter="请从以上翻译记录中提取核心知识点和专业术语，按主题分类整理。"/>
-                                <Button Content="客户投诉识别" Margin="0,0,6,6" Padding="8,4"
-                                        Command="{Binding SendPresetInsightCommand}"
-                                        CommandParameter="请识别以上翻译记录中是否存在客户投诉、不满或负面反馈，列出具体内容和建议的应对方式。"/>
-                                <Button Content="行动项提取" Margin="0,0,6,6" Padding="8,4"
-                                        Command="{Binding SendPresetInsightCommand}"
-                                        CommandParameter="请从以上翻译记录中提取所有行动项(Action Items)，包括待办事项、分工安排、承诺和截止时间。"/>
-                                <Button Content="情绪分析" Margin="0,0,6,6" Padding="8,4"
-                                        Command="{Binding SendPresetInsightCommand}"
-                                        CommandParameter="请对以上翻译记录进行情绪分析，判断对话中各参与者的整体情绪倾向，标注情绪变化的关键节点。"/>
-                            </WrapPanel>
+                            <ItemsControl Grid.Row="1" ItemsSource="{Binding InsightPresetButtons}" Margin="8,4">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate>
+                                        <WrapPanel Orientation="Horizontal"/>
+                                    </ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate x:CompileBindings="False">
+                                        <Button Content="{Binding Name}" Margin="0,0,6,6" Padding="8,4"
+                                                Command="{Binding $parent[ItemsControl].DataContext.SendPresetInsightCommand}"
+                                                CommandParameter="{Binding Prompt}"/>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
 
                             <!-- 自定义输入框 + 发送/停止 -->
                             <Grid Grid.Row="2" ColumnDefinitions="*,Auto,Auto" Margin="8,4">
@@ -317,7 +314,7 @@
                             <Border Grid.Row="3" Margin="8,4" Padding="8,6"
                                     Background="#FFF8FAFC" BorderBrush="#FFE2E8F0"
                                     BorderThickness="1" CornerRadius="4">
-                                <Grid ColumnDefinitions="Auto,Auto,Auto,Auto,*,Auto">
+                                <Grid ColumnDefinitions="Auto,Auto,Auto,Auto,Auto,Auto">
                                     <TextBlock Grid.Column="0" Text="自动洞察:" FontSize="11"
                                                VerticalAlignment="Center" Margin="0,0,8,0"/>
                                     <ComboBox Grid.Column="1" MinWidth="130"
@@ -329,13 +326,12 @@
                                     </ComboBox>
                                     <TextBlock Grid.Column="2" Text="间隔(秒):" FontSize="11"
                                                VerticalAlignment="Center" Margin="10,0,4,0"/>
-                                    <NumericUpDown Grid.Column="3" Value="{Binding AutoInsightIntervalSeconds}"
-                                                   Minimum="10" Maximum="300" Width="90"
-                                                   FormatString="F0" VerticalAlignment="Center"
-                                                   IsEnabled="{Binding !IsAutoInsightEnabled}"/>
+                                    <TextBox Grid.Column="3" Text="{Binding AutoInsightIntervalSeconds, Mode=TwoWay}"
+                                             Width="120" Padding="6,4" VerticalAlignment="Center"
+                                             IsEnabled="{Binding !IsAutoInsightEnabled}"/>
                                     <TextBox Grid.Column="4" Text="{Binding AutoInsightPrompt, Mode=TwoWay}"
                                              Watermark="自动分析使用的提示词..."
-                                             Padding="6,4" Margin="10,0,0,0"
+                                             Padding="6,4" Margin="10,0,0,0" MaxWidth="260"
                                              VerticalAlignment="Center"
                                              IsEnabled="{Binding !IsAutoInsightEnabled}"/>
                                     <Button Grid.Column="5"

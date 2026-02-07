@@ -3,6 +3,9 @@ using Avalonia.Interactivity;
 using TranslationToolUI.Models;
 using TranslationToolUI.Services;
 using System;
+using System.Collections.Generic;
+using System.Collections.ObjectModel;
+using System.Linq;
 using System.Threading;
 
 namespace TranslationToolUI.Views
@@ -10,6 +13,7 @@ namespace TranslationToolUI.Views
     public partial class AiConfigView : Window
     {
         public AiConfig Config { get; private set; }
+        private ObservableCollection<InsightPresetButton> _presetButtons = new();
 
         public AiConfigView()
         {
@@ -30,7 +34,10 @@ namespace TranslationToolUI.Views
                     ApiKey = existingConfig.ApiKey,
                     ModelName = existingConfig.ModelName,
                     DeploymentName = existingConfig.DeploymentName,
-                    ApiVersion = existingConfig.ApiVersion
+                    ApiVersion = existingConfig.ApiVersion,
+                    PresetButtons = existingConfig.PresetButtons
+                        .Select(b => new InsightPresetButton { Name = b.Name, Prompt = b.Prompt })
+                        .ToList()
                 }
                 : new AiConfig();
             LoadConfigValues();
@@ -43,6 +50,7 @@ namespace TranslationToolUI.Views
             SaveButton.Click += SaveButton_Click;
             CancelButton.Click += (_, _) => Close(false);
             TestButton.Click += TestButton_Click;
+            AddPresetButton.Click += AddPresetButton_Click;
         }
 
         private void LoadConfigValues()
@@ -57,6 +65,9 @@ namespace TranslationToolUI.Views
                 ? "2024-02-01"
                 : Config.ApiVersion;
             UpdateProviderFieldsVisibility();
+
+            _presetButtons = new ObservableCollection<InsightPresetButton>(Config.PresetButtons);
+            PresetButtonsItemsControl.ItemsSource = _presetButtons;
         }
 
         private void UpdateProviderFieldsVisibility()
@@ -64,6 +75,19 @@ namespace TranslationToolUI.Views
             var isAzure = ProviderTypeComboBox.SelectedIndex == 1;
             AzureFieldsPanel.IsVisible = isAzure;
             ModelNamePanel.IsVisible = !isAzure;
+        }
+
+        private void AddPresetButton_Click(object? sender, RoutedEventArgs e)
+        {
+            _presetButtons.Add(new InsightPresetButton { Name = "新按钮", Prompt = "" });
+        }
+
+        private void RemovePresetButton_Click(object? sender, RoutedEventArgs e)
+        {
+            if (sender is Button btn && btn.Tag is InsightPresetButton item)
+            {
+                _presetButtons.Remove(item);
+            }
         }
 
         private void SaveButton_Click(object? sender, RoutedEventArgs e)
@@ -76,6 +100,9 @@ namespace TranslationToolUI.Views
             Config.ModelName = ModelNameTextBox.Text?.Trim() ?? "";
             Config.DeploymentName = DeploymentNameTextBox.Text?.Trim() ?? "";
             Config.ApiVersion = ApiVersionTextBox.Text?.Trim() ?? "2024-02-01";
+            Config.PresetButtons = _presetButtons
+                .Where(b => !string.IsNullOrWhiteSpace(b.Name))
+                .ToList();
             Close(true);
         }
 
