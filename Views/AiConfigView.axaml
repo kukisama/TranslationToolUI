@@ -1,0 +1,75 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d" d:DesignWidth="500" d:DesignHeight="460"
+        x:Class="TranslationToolUI.Views.AiConfigView"
+        Title="AI 服务配置"
+        Width="500" Height="460"
+        WindowStartupLocation="CenterOwner">
+
+    <Grid RowDefinitions="Auto,*,Auto" Margin="20">
+        <TextBlock Grid.Row="0" Text="AI 洞察服务配置" FontSize="18"
+                   FontWeight="Bold" Margin="0,0,0,20"/>
+
+        <ScrollViewer Grid.Row="1">
+            <StackPanel Spacing="12">
+                <StackPanel Spacing="5">
+                    <TextBlock Text="服务类型"/>
+                    <ComboBox x:Name="ProviderTypeComboBox" MinWidth="280">
+                        <ComboBoxItem Content="OpenAI 兼容 (OpenAI / DeepSeek / Ollama 等)"/>
+                        <ComboBoxItem Content="Azure OpenAI"/>
+                    </ComboBox>
+                </StackPanel>
+
+                <StackPanel Spacing="5">
+                    <TextBlock Text="API 端点"/>
+                    <TextBox x:Name="ApiEndpointTextBox"
+                             Watermark="例如: https://api.openai.com"/>
+                    <TextBlock FontSize="10" Foreground="Gray"
+                               Text="无需包含 /v1/chat/completions 路径"/>
+                </StackPanel>
+
+                <StackPanel Spacing="5">
+                    <TextBlock Text="API 密钥"/>
+                    <TextBox x:Name="ApiKeyTextBox"
+                             Watermark="sk-..."
+                             PasswordChar="*"
+                             RevealPassword="{Binding IsChecked, ElementName=ShowApiKeyCheckBox}"/>
+                    <CheckBox x:Name="ShowApiKeyCheckBox" Content="显示密钥"
+                              FontSize="10" Margin="0,2,0,0"/>
+                </StackPanel>
+
+                <StackPanel x:Name="ModelNamePanel" Spacing="5">
+                    <TextBlock Text="模型名称"/>
+                    <TextBox x:Name="ModelNameTextBox"
+                             Watermark="例如: gpt-4o-mini"/>
+                </StackPanel>
+
+                <StackPanel x:Name="AzureFieldsPanel" Spacing="10" IsVisible="False">
+                    <StackPanel Spacing="5">
+                        <TextBlock Text="部署名称"/>
+                        <TextBox x:Name="DeploymentNameTextBox"
+                                 Watermark="Azure OpenAI 部署名"/>
+                    </StackPanel>
+                    <StackPanel Spacing="5">
+                        <TextBlock Text="API 版本"/>
+                        <TextBox x:Name="ApiVersionTextBox"
+                                 Watermark="例如: 2024-02-01"
+                                 Text="2024-02-01"/>
+                    </StackPanel>
+                </StackPanel>
+
+                <TextBlock x:Name="StatusTextBlock" FontSize="11" Foreground="Gray"
+                           TextWrapping="Wrap" Margin="0,4,0,0"/>
+            </StackPanel>
+        </ScrollViewer>
+
+        <StackPanel Grid.Row="2" Orientation="Horizontal"
+                    HorizontalAlignment="Right" Spacing="10" Margin="0,20,0,0">
+            <Button x:Name="TestButton" Content="测试连接" Width="100"/>
+            <Button x:Name="SaveButton" Content="保存" Width="80"/>
+            <Button x:Name="CancelButton" Content="取消" Width="80"/>
+        </StackPanel>
+    </Grid>
+</Window>

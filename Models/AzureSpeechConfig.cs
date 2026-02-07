@@ -53,6 +53,8 @@ namespace TranslationToolUI.Models
         public bool ExportSrtSubtitles { get; set; } = false;
         public bool ExportVttSubtitles { get; set; } = false;
 
+        public AiConfig? AiConfig { get; set; }
+
         [JsonIgnore]
         public string SessionDirectory => PathManager.Instance.SessionsPath;
 

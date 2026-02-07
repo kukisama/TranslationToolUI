@@ -5,6 +5,7 @@
         xmlns:vm="using:TranslationToolUI.ViewModels"
         xmlns:models="using:TranslationToolUI.Models"
         xmlns:controls="using:TranslationToolUI.Controls"
+        xmlns:md="clr-namespace:Markdown.Avalonia;assembly=Markdown.Avalonia"
         mc:Ignorable="d" d:DesignWidth="800" d:DesignHeight="600"
         x:Class="TranslationToolUI.MainWindow"
         x:DataType="vm:MainWindowViewModel"
@@ -266,9 +267,112 @@
                         </Grid>
                     </TabItem>
                     <TabItem Header="洞察">
-                        <Grid>
-                            <TextBlock Text="洞察功能规划中" Foreground="Gray"
-                                       HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        <Grid RowDefinitions="Auto,Auto,Auto,Auto,*,Auto">
+                            <!-- AI 配置按钮 + 状态 -->
+                            <DockPanel Grid.Row="0" Margin="8,8,8,4">
+                                <Button Content="AI 配置" Command="{Binding ShowAiConfigCommand}"
+                                        DockPanel.Dock="Left" Padding="8,4"/>
+                                <TextBlock Text="未配置 AI 服务" Foreground="Orange"
+                                           VerticalAlignment="Center" Margin="10,0,0,0"
+                                           FontSize="11"
+                                           IsVisible="{Binding !IsAiConfigured}"/>
+                                <TextBlock Text="AI 服务已就绪" Foreground="Green"
+                                           VerticalAlignment="Center" Margin="10,0,0,0"
+                                           FontSize="11"
+                                           IsVisible="{Binding IsAiConfigured}"/>
+                            </DockPanel>
+
+                            <!-- 预设分析模板按钮 -->
+                            <WrapPanel Grid.Row="1" Margin="8,4" Orientation="Horizontal">
+                                <Button Content="会议摘要" Margin="0,0,6,6" Padding="8,4"
+                                        Command="{Binding SendPresetInsightCommand}"
+                                        CommandParameter="请对以上翻译记录进行会议摘要。总结会议的主要议题、关键讨论内容和结论。"/>
+                                <Button Content="知识点提取" Margin="0,0,6,6" Padding="8,4"
+                                        Command="{Binding SendPresetInsightCommand}"
+                                        CommandParameter="请从以上翻译记录中提取核心知识点和专业术语，按主题分类整理。"/>
+                                <Button Content="客户投诉识别" Margin="0,0,6,6" Padding="8,4"
+                                        Command="{Binding SendPresetInsightCommand}"
+                                        CommandParameter="请识别以上翻译记录中是否存在客户投诉、不满或负面反馈，列出具体内容和建议的应对方式。"/>
+                                <Button Content="行动项提取" Margin="0,0,6,6" Padding="8,4"
+                                        Command="{Binding SendPresetInsightCommand}"
+                                        CommandParameter="请从以上翻译记录中提取所有行动项(Action Items)，包括待办事项、分工安排、承诺和截止时间。"/>
+                                <Button Content="情绪分析" Margin="0,0,6,6" Padding="8,4"
+                                        Command="{Binding SendPresetInsightCommand}"
+                                        CommandParameter="请对以上翻译记录进行情绪分析，判断对话中各参与者的整体情绪倾向，标注情绪变化的关键节点。"/>
+                            </WrapPanel>
+
+                            <!-- 自定义输入框 + 发送/停止 -->
+                            <Grid Grid.Row="2" ColumnDefinitions="*,Auto,Auto" Margin="8,4">
+                                <TextBox Grid.Column="0" Text="{Binding InsightUserInput, Mode=TwoWay}"
+                                         Watermark="输入自定义分析问题..." Padding="6,4"
+                                         AcceptsReturn="False"/>
+                                <Button Grid.Column="1" Content="发送" Margin="6,0,0,0" Padding="12,4"
+                                        Command="{Binding SendInsightCommand}"/>
+                                <Button Grid.Column="2" Content="停止" Margin="6,0,0,0" Padding="12,4"
+                                        Command="{Binding StopInsightCommand}"
+                                        IsVisible="{Binding IsInsightLoading}"/>
+                            </Grid>
+
+                            <!-- 自动循环洞察 -->
+                            <Border Grid.Row="3" Margin="8,4" Padding="8,6"
+                                    Background="#FFF8FAFC" BorderBrush="#FFE2E8F0"
+                                    BorderThickness="1" CornerRadius="4">
+                                <Grid ColumnDefinitions="Auto,Auto,Auto,Auto,*,Auto">
+                                    <TextBlock Grid.Column="0" Text="自动洞察:" FontSize="11"
+                                               VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                    <ComboBox Grid.Column="1" MinWidth="130"
+                                              SelectedIndex="{Binding AutoInsightModeIndex, Mode=TwoWay}"
+                                              IsEnabled="{Binding !IsAutoInsightEnabled}"
+                                              VerticalAlignment="Center">
+                                        <ComboBoxItem Content="定时循环"/>
+                                        <ComboBoxItem Content="新数据触发"/>
+                                    </ComboBox>
+                                    <TextBlock Grid.Column="2" Text="间隔(秒):" FontSize="11"
+                                               VerticalAlignment="Center" Margin="10,0,4,0"/>
+                                    <NumericUpDown Grid.Column="3" Value="{Binding AutoInsightIntervalSeconds}"
+                                                   Minimum="10" Maximum="300" Width="90"
+                                                   FormatString="F0" VerticalAlignment="Center"
+                                                   IsEnabled="{Binding !IsAutoInsightEnabled}"/>
+                                    <TextBox Grid.Column="4" Text="{Binding AutoInsightPrompt, Mode=TwoWay}"
+                                             Watermark="自动分析使用的提示词..."
+                                             Padding="6,4" Margin="10,0,0,0"
+                                             VerticalAlignment="Center"
+                                             IsEnabled="{Binding !IsAutoInsightEnabled}"/>
+                                    <Button Grid.Column="5"
+                                            Content="{Binding AutoInsightToggleText}"
+                                            Command="{Binding ToggleAutoInsightCommand}"
+                                            Padding="10,4" Margin="6,0,0,0"
+                                            VerticalAlignment="Center"/>
+                                </Grid>
+                            </Border>
+
+                            <!-- Markdown 渲染结果区 -->
+                            <Border Grid.Row="4" Margin="8,4" BorderBrush="#FFE5E7EB"
+                                    BorderThickness="1" CornerRadius="4">
+                                <Grid>
+                                    <ScrollViewer IsVisible="{Binding !IsInsightEmpty}">
+                                        <md:MarkdownScrollViewer Markdown="{Binding InsightMarkdown}"/>
+                                    </ScrollViewer>
+                                    <!-- 加载指示器 -->
+                                    <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                IsVisible="{Binding IsInsightLoading}">
+                                        <TextBlock Text="AI 正在分析..." Foreground="Gray"
+                                                   FontSize="12" HorizontalAlignment="Center"/>
+                                    </StackPanel>
+                                    <!-- 空状态提示 -->
+                                    <TextBlock Text="选择预设模板或输入问题开始分析"
+                                               Foreground="Gray" FontSize="12"
+                                               HorizontalAlignment="Center" VerticalAlignment="Center"
+                                               IsVisible="{Binding IsInsightEmpty}"/>
+                                </Grid>
+                            </Border>
+
+                            <!-- 清除按钮 -->
+                            <StackPanel Grid.Row="5" Orientation="Horizontal"
+                                        HorizontalAlignment="Right" Margin="8,4,8,8">
+                                <Button Content="清除结果" Padding="8,4"
+                                        Command="{Binding ClearInsightCommand}"/>
+                            </StackPanel>
                         </Grid>
                     </TabItem>
                 </TabControl>
