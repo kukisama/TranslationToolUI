@@ -1,10 +1,10 @@
-# TranslationToolUI：补充说明（面向维护者/发布者）
+# 译见 Pro：补充说明（面向维护者/发布者）
 
 这份文档用来承载 README 不必展开的细节：依赖、平台取舍、构建期工具、内容更新方式、发布建议等。
 
 ## 这是什么
 
-TranslationToolUI 是一个主要展示 Azure Speech 能力的桌面工具：
+译见 Pro 是一个主要展示 Azure Speech 能力的桌面工具：
 
 - 采集音频（麦克风 / 系统回环 Loopback）
 - 推送到 Azure Speech 做识别与翻译
@@ -25,6 +25,25 @@ TranslationToolUI 是一个主要展示 Azure Speech 能力的桌面工具：
 - WASAPI Loopback 是 Windows 能力：把“系统正在播放的声音”作为输入源
 - WAV → MP3 转码依赖 Windows Media Foundation 的编码器能力；不同 Windows 版本/精简系统可能存在差异
 - 代码整体按跨平台习惯组织，但目前主要在 Windows 上验证；其它平台请先测试关键链路
+
+## 运行要求
+
+- .NET 10（开发用 SDK；运行用 Desktop Runtime）
+- Azure Speech Services 订阅（Key + Region）
+
+## 快速开始（开发/本地运行）
+
+```bash
+dotnet restore
+dotnet run
+```
+
+首次运行按界面提示填写 Azure Speech 的订阅信息，并选择输入来源与设备。
+
+## 平台与限制（务必先读）
+
+- WASAPI Loopback 与 WAV→MP3（Media Foundation）主要面向 Windows
+- Windows on ARM：依赖层面支持 `win-arm64`，但建议真机验证音频链路（录音/环回/识别）
 
 ## 依赖与版本
 

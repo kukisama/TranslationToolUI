@@ -1,8 +1,8 @@
-# TranslationToolUI
+# 译见 Pro
 
 一个主要展示 Azure Speech 能力的桌面工具：把声音变成可读字幕。
 
-TranslationToolUI 会采集音频（麦克风 / 系统回环），推送到 Azure Speech 做识别与翻译，并实时显示中间结果与最终结果；可选同步录音，结束后自动转成 MP3。
+译见 Pro 会采集音频（麦克风 / 系统回环），推送到 Azure Speech 做识别与翻译，并实时显示中间结果与最终结果；可选同步录音，结束后自动转成 MP3。
 
 ## 功能概览
 

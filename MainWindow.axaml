@@ -10,7 +10,7 @@
         x:Class="TranslationToolUI.MainWindow"
         x:DataType="vm:MainWindowViewModel"
         x:CompileBindings="False"
-        Title="Azure 语音实时翻译工具"
+        Title="译见 Pro"
         MinWidth="1240" MinHeight="600"
         >
 
@@ -62,7 +62,7 @@
         <Grid RowDefinitions="Auto,Auto,*,Auto">
         <!-- 顶部工具栏 -->
         <Grid Grid.Row="0" ColumnDefinitions="Auto,*" Margin="10">
-            <TextBlock Grid.Column="0" Text="Azure 语音实时翻译工具" FontSize="18" FontWeight="Bold" VerticalAlignment="Center" Margin="0,0,20,0"/>
+            <TextBlock Grid.Column="0" Text="译见 Pro" FontSize="18" FontWeight="Bold" VerticalAlignment="Center" Margin="0,0,20,0"/>
                   <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="5">
                 <Button Content="配置" Command="{Binding ShowConfigCommand}" Padding="10,5" 
                         IsEnabled="{Binding IsConfigurationEnabled}"/>
