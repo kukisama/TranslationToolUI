@@ -45,7 +45,13 @@ namespace TranslationToolUI.Views
                         .Select(b => new InsightPresetButton { Name = b.Name, Prompt = b.Prompt })
                         .ToList(),
                     ReviewSheets = existingConfig.ReviewSheets
-                        .Select(s => new ReviewSheetPreset { Name = s.Name, FileTag = s.FileTag, Prompt = s.Prompt })
+                        .Select(s => new ReviewSheetPreset
+                        {
+                            Name = s.Name,
+                            FileTag = s.FileTag,
+                            Prompt = s.Prompt,
+                            IncludeInBatch = s.IncludeInBatch
+                        })
                         .ToList()
                 }
                 : new AiConfig();
@@ -91,7 +97,13 @@ namespace TranslationToolUI.Views
             PresetButtonsItemsControl.ItemsSource = _presetButtons;
 
             _reviewSheets = new ObservableCollection<ReviewSheetPreset>(Config.ReviewSheets
-                .Select(s => new ReviewSheetPreset { Name = s.Name, FileTag = s.FileTag, Prompt = s.Prompt }));
+                .Select(s => new ReviewSheetPreset
+                {
+                    Name = s.Name,
+                    FileTag = s.FileTag,
+                    Prompt = s.Prompt,
+                    IncludeInBatch = s.IncludeInBatch
+                }));
             ReviewSheetsItemsControl.ItemsSource = _reviewSheets;
         }
 
@@ -121,7 +133,8 @@ namespace TranslationToolUI.Views
             {
                 Name = "新复盘",
                 FileTag = "custom",
-                Prompt = ""
+                Prompt = "",
+                IncludeInBatch = true
             });
         }
 
@@ -196,7 +209,8 @@ namespace TranslationToolUI.Views
                 {
                     Name = s.Name.Trim(),
                     FileTag = string.IsNullOrWhiteSpace(s.FileTag) ? "summary" : s.FileTag.Trim(),
-                    Prompt = s.Prompt?.Trim() ?? ""
+                    Prompt = s.Prompt?.Trim() ?? "",
+                    IncludeInBatch = s.IncludeInBatch
                 })
                 .ToList();
             Close(true);
@@ -250,21 +264,39 @@ namespace TranslationToolUI.Views
             TestButton.Content = "测试中...";
             StatusTextBlock.Text = "正在连接...";
             StatusTextBlock.Foreground = Avalonia.Media.Brushes.Gray;
+            ReasoningOutputTextBox.Text = "";
 
             try
             {
                 var service = new AiInsightService();
                 using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
                 var received = false;
+                var reasoningReceived = false;
+                var reasoningBuilder = new System.Text.StringBuilder();
 
                 await service.StreamChatAsync(
                     testConfig,
                     "You are a helpful assistant.",
-                    "Say hi in one word.",
+                    "Provide one short answer and think step-by-step.",
                     chunk => { received = true; },
                     cts.Token,
-                    AiChatProfile.Quick,
-                    enableReasoning: false);
+                    AiChatProfile.Summary,
+                    enableReasoning: testConfig.SummaryEnableReasoning,
+                    onOutcome: null,
+                    onReasoningChunk: chunk =>
+                    {
+                        reasoningReceived = true;
+                        reasoningBuilder.Append(chunk);
+                    });
+
+                if (reasoningReceived)
+                {
+                    ReasoningOutputTextBox.Text = reasoningBuilder.ToString();
+                }
+                else if (testConfig.SummaryEnableReasoning)
+                {
+                    ReasoningOutputTextBox.Text = "未收到思考内容。";
+                }
 
                 if (received)
                 {

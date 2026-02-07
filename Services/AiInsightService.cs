@@ -32,7 +32,8 @@ namespace TranslationToolUI.Services
             CancellationToken cancellationToken,
             AiChatProfile profile = AiChatProfile.Quick,
             bool enableReasoning = false,
-            Action<AiRequestOutcome>? onOutcome = null)
+            Action<AiRequestOutcome>? onOutcome = null,
+            Action<string>? onReasoningChunk = null)
         {
             using var response = await SendRequestAsync(
                 config,
@@ -65,7 +66,7 @@ namespace TranslationToolUI.Services
                             UsedReasoning = false,
                             UsedFallback = true
                         });
-                        await StreamResponseAsync(fallbackResponse, onChunk, cancellationToken);
+                        await StreamResponseAsync(fallbackResponse, onChunk, onReasoningChunk, cancellationToken);
                         return;
                     }
 
@@ -85,7 +86,7 @@ namespace TranslationToolUI.Services
                 UsedFallback = false
             });
 
-            await StreamResponseAsync(response, onChunk, cancellationToken);
+            await StreamResponseAsync(response, onChunk, onReasoningChunk, cancellationToken);
         }
 
         private static async Task<HttpResponseMessage> SendRequestAsync(
@@ -124,6 +125,7 @@ namespace TranslationToolUI.Services
         private static async Task StreamResponseAsync(
             HttpResponseMessage response,
             Action<string> onChunk,
+            Action<string>? onReasoningChunk,
             CancellationToken cancellationToken)
         {
             using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
@@ -151,6 +153,11 @@ namespace TranslationToolUI.Services
                     if (!firstChoice.TryGetProperty("delta", out var delta))
                         continue;
 
+                    if (TryReadReasoning(delta, out var reasoningText) && onReasoningChunk != null)
+                    {
+                        onReasoningChunk(reasoningText);
+                    }
+
                     if (delta.TryGetProperty("content", out var contentElem))
                     {
                         var text = contentElem.GetString();
@@ -165,6 +172,49 @@ namespace TranslationToolUI.Services
                     // skip unparseable lines
                 }
             }
+        }
+
+        private static bool TryReadReasoning(JsonElement delta, out string text)
+        {
+            text = "";
+
+            if (delta.TryGetProperty("reasoning", out var reasoningElem))
+            {
+                return TryExtractReasoningText(reasoningElem, out text);
+            }
+
+            if (delta.TryGetProperty("reasoning_content", out var reasoningContentElem))
+            {
+                return TryExtractReasoningText(reasoningContentElem, out text);
+            }
+
+            if (delta.TryGetProperty("thinking", out var thinkingElem))
+            {
+                return TryExtractReasoningText(thinkingElem, out text);
+            }
+
+            return false;
+        }
+
+        private static bool TryExtractReasoningText(JsonElement element, out string text)
+        {
+            text = "";
+
+            if (element.ValueKind == JsonValueKind.String)
+            {
+                text = element.GetString() ?? "";
+                return !string.IsNullOrEmpty(text);
+            }
+
+            if (element.ValueKind == JsonValueKind.Object
+                && element.TryGetProperty("text", out var textElem)
+                && textElem.ValueKind == JsonValueKind.String)
+            {
+                text = textElem.GetString() ?? "";
+                return !string.IsNullOrEmpty(text);
+            }
+
+            return false;
         }
 
         private static string BuildUrl(AiConfig config, AiChatProfile profile)

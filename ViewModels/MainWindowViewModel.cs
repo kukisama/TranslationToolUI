@@ -61,10 +61,13 @@ namespace TranslationToolUI.ViewModels
         private readonly ObservableCollection<MediaFileItem> _subtitleFiles;
         private readonly ObservableCollection<SubtitleCue> _subtitleCues;
         private readonly ObservableCollection<BatchTaskItem> _batchTasks;
+        private readonly ObservableCollection<BatchQueueItem> _batchQueueItems;
         private int _batchConcurrencyLimit = 5;
         private bool _isBatchRunning;
         private CancellationTokenSource? _batchCts;
         private string _batchStatusMessage = "";
+        private string _batchQueueStatusText = "";
+        private Task? _batchQueueRunnerTask;
         private MediaFileItem? _selectedAudioFile;
         private MediaFileItem? _selectedSubtitleFile;
         private SubtitleCue? _selectedSubtitleCue;
@@ -125,6 +128,8 @@ namespace TranslationToolUI.ViewModels
             _subtitleFiles = new ObservableCollection<MediaFileItem>();
             _subtitleCues = new ObservableCollection<SubtitleCue>();
             _batchTasks = new ObservableCollection<BatchTaskItem>();
+            _batchQueueItems = new ObservableCollection<BatchQueueItem>();
+            _batchQueueStatusText = "队列为空";
             _subtitleCues.CollectionChanged += (_, _) => UpdateSubtitleListHeight();
             _batchTasks.CollectionChanged += (_, _) =>
             {
@@ -137,6 +142,7 @@ namespace TranslationToolUI.ViewModels
                     startCmd.RaiseCanExecuteChanged();
                 }
             };
+            _batchQueueItems.CollectionChanged += (_, _) => UpdateBatchQueueStatusText();
 
             _playbackTimer = new DispatcherTimer(TimeSpan.FromMilliseconds(200), DispatcherPriority.Background, (_, _) =>
             {
@@ -324,6 +330,10 @@ namespace TranslationToolUI.ViewModels
                 execute: _ => StopBatchProcessing(),
                 canExecute: _ => IsBatchRunning
             );
+
+            CancelBatchQueueItemCommand = new RelayCommand(
+                execute: param => CancelBatchQueueItem(param as BatchQueueItem)
+            );
         }
 
         public ICommand ToggleTranslationCommand { get; }
@@ -477,6 +487,8 @@ namespace TranslationToolUI.ViewModels
 
         public ObservableCollection<BatchTaskItem> BatchTasks => _batchTasks;
 
+        public ObservableCollection<BatchQueueItem> BatchQueueItems => _batchQueueItems;
+
         public int BatchConcurrencyLimit
         {
             get => _batchConcurrencyLimit;
@@ -507,6 +519,12 @@ namespace TranslationToolUI.ViewModels
         {
             get => _batchStatusMessage;
             set => SetProperty(ref _batchStatusMessage, value);
+        }
+
+        public string BatchQueueStatusText
+        {
+            get => _batchQueueStatusText;
+            private set => SetProperty(ref _batchQueueStatusText, value);
         }
 
         public IBrush ReviewSummaryLampFill
@@ -779,14 +797,23 @@ namespace TranslationToolUI.ViewModels
                 RefreshAudioLibrary();
             }
 
+            var batchSheets = GetBatchReviewSheets();
             _batchTasks.Clear();
             foreach (var audio in _audioFiles)
             {
-                var summarySheet = GetPrimaryReviewSheet();
-                var hasAiSummary = summarySheet != null
-                    && File.Exists(GetReviewSheetPath(audio.FullPath, summarySheet.FileTag));
+                var totalSheets = batchSheets.Count;
+                var completedSheets = 0;
+                foreach (var sheet in batchSheets)
+                {
+                    if (File.Exists(GetReviewSheetPath(audio.FullPath, sheet.FileTag)))
+                    {
+                        completedSheets++;
+                    }
+                }
+                var hasAiSummary = totalSheets > 0 && completedSheets >= totalSheets;
                 var hasAiSubtitle = HasAiSubtitle(audio.FullPath);
                 var subtitlePath = GetPreferredSubtitlePath(audio.FullPath);
+                var pendingSheets = Math.Max(totalSheets - completedSheets, 0);
 
                 _batchTasks.Add(new BatchTaskItem
                 {
@@ -796,7 +823,14 @@ namespace TranslationToolUI.ViewModels
                     Progress = 0,
                     HasAiSubtitle = hasAiSubtitle,
                     HasAiSummary = hasAiSummary,
-                    StatusMessage = string.IsNullOrWhiteSpace(subtitlePath) ? "缺少字幕" : "待处理"
+                    StatusMessage = string.IsNullOrWhiteSpace(subtitlePath) ? "缺少字幕" : "待处理",
+                    ReviewTotal = totalSheets,
+                    ReviewCompleted = completedSheets,
+                    ReviewFailed = 0,
+                    ReviewPending = pendingSheets,
+                    ReviewStatusText = totalSheets == 0
+                        ? "复盘:未勾选"
+                        : $"复盘 {completedSheets}/{totalSheets}"
                 });
             }
 
@@ -804,6 +838,149 @@ namespace TranslationToolUI.ViewModels
                 ? "未找到可批处理的音频文件"
                 : $"已载入 {_batchTasks.Count} 条批处理任务";
             BatchStatusMessage = "";
+        }
+
+        private List<ReviewSheetPreset> GetBatchReviewSheets()
+        {
+            var sheets = _config.AiConfig?.ReviewSheets
+                ?.Where(s => s.IncludeInBatch)
+                .ToList();
+
+            return sheets ?? new List<ReviewSheetPreset>();
+        }
+
+        private void UpdateBatchQueueStatusText()
+        {
+            var total = _batchQueueItems.Count;
+            var completed = _batchQueueItems.Count(item => item.Status == BatchTaskStatus.Completed);
+            var running = _batchQueueItems.Count(item => item.Status == BatchTaskStatus.Running);
+            var failed = _batchQueueItems.Count(item => item.Status == BatchTaskStatus.Failed);
+            var pending = Math.Max(total - completed - running - failed, 0);
+
+            BatchQueueStatusText = total == 0
+                ? "队列为空"
+                : $"队列 {completed}/{total} 完成，运行 {running}，等待 {pending}，失败 {failed}";
+        }
+
+        private void EnqueueReviewSheetsForAudio(MediaFileItem audioFile, IEnumerable<ReviewSheetState> sheets)
+        {
+            var subtitlePath = GetPreferredSubtitlePath(audioFile.FullPath);
+            var hasSubtitle = !string.IsNullOrWhiteSpace(subtitlePath) && File.Exists(subtitlePath);
+            if (!hasSubtitle)
+            {
+                foreach (var sheet in sheets)
+                {
+                    sheet.StatusMessage = "缺少字幕";
+                }
+                return;
+            }
+
+            foreach (var sheet in sheets)
+            {
+                var sheetPath = GetReviewSheetPath(audioFile.FullPath, sheet.FileTag);
+                if (File.Exists(sheetPath))
+                {
+                    continue;
+                }
+
+                var existsInQueue = _batchQueueItems.Any(item =>
+                    string.Equals(item.FullPath, audioFile.FullPath, StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(item.SheetTag, sheet.FileTag, StringComparison.OrdinalIgnoreCase)
+                    && item.Status is BatchTaskStatus.Pending or BatchTaskStatus.Running);
+
+                if (existsInQueue)
+                {
+                    continue;
+                }
+
+                _batchQueueItems.Add(new BatchQueueItem
+                {
+                    FileName = audioFile.Name,
+                    FullPath = audioFile.FullPath,
+                    SheetName = sheet.Name,
+                    SheetTag = sheet.FileTag,
+                    Prompt = sheet.Prompt,
+                    Status = BatchTaskStatus.Pending,
+                    Progress = 0,
+                    StatusMessage = "待处理"
+                });
+
+                sheet.StatusMessage = "已加入队列";
+            }
+
+            UpdateBatchQueueStatusText();
+        }
+
+        private void StartBatchQueueRunner(string statusMessage)
+        {
+            if (_batchQueueRunnerTask != null && !_batchQueueRunnerTask.IsCompleted)
+            {
+                return;
+            }
+
+            if (_batchQueueItems.Count == 0)
+            {
+                return;
+            }
+
+            _batchCts?.Cancel();
+            _batchCts = new CancellationTokenSource();
+            var token = _batchCts.Token;
+
+            IsBatchRunning = true;
+            BatchStatusMessage = statusMessage;
+
+            _batchQueueRunnerTask = Task.Run(async () =>
+            {
+                var running = new List<Task>();
+                var cueCache = new Dictionary<string, List<SubtitleCue>>();
+                var cueLock = new object();
+
+                try
+                {
+                    while (!token.IsCancellationRequested)
+                    {
+                        running.RemoveAll(t => t.IsCompleted);
+
+                        while (running.Count < BatchConcurrencyLimit)
+                        {
+                            var next = await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
+                                _batchQueueItems.FirstOrDefault(item => item.Status == BatchTaskStatus.Pending));
+
+                            if (next == null)
+                            {
+                                break;
+                            }
+
+                            var parent = await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
+                                BatchTasks.FirstOrDefault(x => x.FullPath == next.FullPath));
+
+                            running.Add(Task.Run(() =>
+                                ProcessBatchQueueItem(next, parent, token, cueCache, cueLock), token));
+                        }
+
+                        if (running.Count == 0)
+                        {
+                            break;
+                        }
+
+                        var finished = await Task.WhenAny(running);
+                        running.Remove(finished);
+                    }
+                }
+                catch (OperationCanceledException)
+                {
+                    // ignore cancellation
+                }
+
+                Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+                {
+                    IsBatchRunning = false;
+                    BatchStatusMessage = token.IsCancellationRequested
+                        ? "批处理已停止"
+                        : "批处理完成";
+                });
+            }, token);
         }
 
         private void ClearBatchTasks()
@@ -832,92 +1009,130 @@ namespace TranslationToolUI.ViewModels
                 return;
             }
 
+            var batchSheets = GetBatchReviewSheets();
+            if (batchSheets.Count == 0)
+            {
+                BatchStatusMessage = "未勾选批处理复盘模板";
+                return;
+            }
+
             _batchCts?.Cancel();
-            _batchCts = new CancellationTokenSource();
-            var token = _batchCts.Token;
             IsBatchRunning = true;
             BatchStatusMessage = "批处理已开始";
 
-            _ = Task.Run(async () =>
+            _batchQueueItems.Clear();
+            var batchItemLookup = BatchTasks.ToDictionary(item => item.FullPath, item => item);
+            foreach (var batchItem in BatchTasks)
             {
-                var semaphore = new SemaphoreSlim(BatchConcurrencyLimit, BatchConcurrencyLimit);
-                var tasks = new List<Task>();
-
-                foreach (var taskItem in BatchTasks.ToList())
+                var subtitlePath = GetPreferredSubtitlePath(batchItem.FullPath);
+                var hasSubtitle = !string.IsNullOrWhiteSpace(subtitlePath) && File.Exists(subtitlePath);
+                if (!hasSubtitle)
                 {
-                    if (token.IsCancellationRequested)
+                    UpdateBatchItem(batchItem, BatchTaskStatus.Failed, 0, "缺少字幕");
+                    batchItem.ReviewTotal = batchSheets.Count;
+                    batchItem.ReviewCompleted = 0;
+                    batchItem.ReviewFailed = 0;
+                    batchItem.ReviewPending = batchSheets.Count;
+                    batchItem.ReviewStatusText = "复盘:缺少字幕";
+                    continue;
+                }
+
+                var completed = 0;
+                foreach (var sheet in batchSheets)
+                {
+                    if (File.Exists(GetReviewSheetPath(batchItem.FullPath, sheet.FileTag)))
                     {
-                        break;
+                        completed++;
+                    }
+                }
+
+                var pending = Math.Max(batchSheets.Count - completed, 0);
+                batchItem.ReviewTotal = batchSheets.Count;
+                batchItem.ReviewCompleted = completed;
+                batchItem.ReviewFailed = 0;
+                batchItem.ReviewPending = pending;
+                batchItem.ReviewStatusText = batchSheets.Count == 0
+                    ? "复盘:未勾选"
+                    : $"复盘 {completed}/{batchSheets.Count}";
+
+                if (pending == 0)
+                {
+                    UpdateBatchItem(batchItem, BatchTaskStatus.Completed, 1, "已存在");
+                    batchItem.HasAiSummary = true;
+                    continue;
+                }
+
+                foreach (var sheet in batchSheets)
+                {
+                    if (File.Exists(GetReviewSheetPath(batchItem.FullPath, sheet.FileTag)))
+                    {
+                        continue;
                     }
 
-                    tasks.Add(Task.Run(async () =>
+                    _batchQueueItems.Add(new BatchQueueItem
                     {
-                        await semaphore.WaitAsync(token);
-                        try
-                        {
-                            await ProcessBatchTask(taskItem, token);
-                        }
-                        finally
-                        {
-                            semaphore.Release();
-                        }
-                    }, token));
+                        FileName = batchItem.FileName,
+                        FullPath = batchItem.FullPath,
+                        SheetName = sheet.Name,
+                        SheetTag = sheet.FileTag,
+                        Prompt = sheet.Prompt,
+                        Status = BatchTaskStatus.Pending,
+                        Progress = 0,
+                        StatusMessage = "待处理"
+                    });
                 }
+            }
 
-                try
-                {
-                    await Task.WhenAll(tasks);
-                }
-                catch (OperationCanceledException)
-                {
-                    // ignore cancellation
-                }
-
-                Avalonia.Threading.Dispatcher.UIThread.Post(() =>
-                {
-                    IsBatchRunning = false;
-                    BatchStatusMessage = token.IsCancellationRequested
-                        ? "批处理已停止"
-                        : "批处理完成";
-                });
-            }, token);
+            StartBatchQueueRunner("批处理已开始");
         }
 
         private void StopBatchProcessing()
         {
             _batchCts?.Cancel();
+            foreach (var item in _batchQueueItems)
+            {
+                item.Cts?.Cancel();
+            }
             BatchStatusMessage = "正在停止批处理...";
         }
 
-        private async Task ProcessBatchTask(BatchTaskItem item, CancellationToken token)
+        private async Task ProcessBatchQueueItem(
+            BatchQueueItem queueItem,
+            BatchTaskItem? parentItem,
+            CancellationToken token,
+            Dictionary<string, List<SubtitleCue>> cueCache,
+            object cueLock)
         {
-            if (item.HasAiSummary)
+            if (!_batchQueueItems.Contains(queueItem))
             {
-                UpdateBatchItem(item, BatchTaskStatus.Completed, 1, "已存在");
                 return;
             }
 
-            var subtitlePath = GetPreferredSubtitlePath(item.FullPath);
-            if (string.IsNullOrWhiteSpace(subtitlePath) || !File.Exists(subtitlePath))
+            queueItem.Cts?.Cancel();
+            queueItem.Cts = CancellationTokenSource.CreateLinkedTokenSource(token);
+            var localToken = queueItem.Cts.Token;
+
+            UpdateQueueItem(queueItem, BatchTaskStatus.Running, 0.1, "生成中");
+            if (parentItem != null)
             {
-                UpdateBatchItem(item, BatchTaskStatus.Failed, 0, "缺少字幕");
-                return;
+                UpdateBatchItem(parentItem, BatchTaskStatus.Running, parentItem.Progress, "生成中");
             }
 
-            UpdateBatchItem(item, BatchTaskStatus.Running, 0.1, "生成中");
-
-            var cues = ParseSubtitleFileToCues(subtitlePath);
+            var cues = GetBatchCues(queueItem.FullPath, cueCache, cueLock);
             if (cues.Count == 0)
             {
-                UpdateBatchItem(item, BatchTaskStatus.Failed, 0, "字幕为空");
+                UpdateQueueItem(queueItem, BatchTaskStatus.Failed, 0, "字幕为空");
+                if (parentItem != null)
+                {
+                    UpdateBatchReviewProgress(parentItem, BatchTaskStatus.Failed);
+                }
                 return;
             }
 
             var systemPrompt = "你是一个会议复盘助手。根据字幕内容生成结构化 Markdown 总结。请输出包含关键结论、行动项和风险点，并在引用内容时标注时间戳，格式为 [HH:MM:SS]。";
-            var sheet = GetPrimaryReviewSheet();
-            var prompt = sheet != null && !string.IsNullOrWhiteSpace(sheet.Prompt)
-                ? sheet.Prompt.Trim()
-                : "请生成复盘总结。";
+            var prompt = string.IsNullOrWhiteSpace(queueItem.Prompt)
+                ? "请生成复盘总结。"
+                : queueItem.Prompt.Trim();
             var userPrompt = $"以下是会议字幕内容:\n\n{FormatSubtitleForSummary(cues)}\n\n---\n\n{prompt}";
 
             try
@@ -932,21 +1147,18 @@ namespace TranslationToolUI.ViewModels
                     {
                         sb.Append(chunk);
                     },
-                    token,
+                    localToken,
                     AiChatProfile.Summary,
                     enableReasoning: _config.AiConfig!.SummaryEnableReasoning,
                     onOutcome: o => outcome = o);
 
                 var markdown = InjectTimeLinks(sb.ToString());
-                var primarySheet = GetPrimaryReviewSheet();
-                var summaryPath = primarySheet == null
-                    ? GetReviewSheetPath(item.FullPath, "summary")
-                    : GetReviewSheetPath(item.FullPath, primarySheet.FileTag);
+                var summaryPath = GetReviewSheetPath(queueItem.FullPath, queueItem.SheetTag);
                 File.WriteAllText(summaryPath, markdown);
                 var note = "完成";
                 if (outcome?.UsedFallback == true)
                 {
-                    note = "完成(降级)";
+                    note = "完成(非思考,已降级)";
                 }
                 else if (outcome?.UsedReasoning == true)
                 {
@@ -956,21 +1168,134 @@ namespace TranslationToolUI.ViewModels
                 {
                     note = "完成(非思考)";
                 }
-                UpdateBatchItem(item, BatchTaskStatus.Completed, 1, note);
 
-                Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+                UpdateQueueItem(queueItem, BatchTaskStatus.Completed, 1, note);
+                if (parentItem != null)
                 {
-                    item.HasAiSummary = true;
-                });
+                    UpdateBatchReviewProgress(parentItem, BatchTaskStatus.Completed);
+                }
             }
             catch (OperationCanceledException)
             {
-                UpdateBatchItem(item, BatchTaskStatus.Failed, 0, "已取消");
+                UpdateQueueItem(queueItem, BatchTaskStatus.Failed, 0, "已取消");
+                if (parentItem != null)
+                {
+                    UpdateBatchReviewProgress(parentItem, BatchTaskStatus.Failed);
+                }
             }
             catch (Exception ex)
             {
-                UpdateBatchItem(item, BatchTaskStatus.Failed, 0, $"失败: {ex.Message}");
+                UpdateQueueItem(queueItem, BatchTaskStatus.Failed, 0, $"失败: {ex.Message}");
+                if (parentItem != null)
+                {
+                    UpdateBatchReviewProgress(parentItem, BatchTaskStatus.Failed);
+                }
             }
+        }
+
+        private List<SubtitleCue> GetBatchCues(
+            string audioPath,
+            Dictionary<string, List<SubtitleCue>> cueCache,
+            object cueLock)
+        {
+            lock (cueLock)
+            {
+                if (cueCache.TryGetValue(audioPath, out var cached))
+                {
+                    return cached;
+                }
+            }
+
+            var subtitlePath = GetPreferredSubtitlePath(audioPath);
+            if (string.IsNullOrWhiteSpace(subtitlePath) || !File.Exists(subtitlePath))
+            {
+                return new List<SubtitleCue>();
+            }
+
+            var cues = ParseSubtitleFileToCues(subtitlePath);
+            lock (cueLock)
+            {
+                cueCache[audioPath] = cues;
+            }
+
+            return cues;
+        }
+
+        private void UpdateBatchReviewProgress(BatchTaskItem item, BatchTaskStatus sheetStatus)
+        {
+            Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+            {
+                if (sheetStatus == BatchTaskStatus.Completed)
+                {
+                    item.ReviewCompleted++;
+                }
+                else if (sheetStatus == BatchTaskStatus.Failed)
+                {
+                    item.ReviewFailed++;
+                }
+
+                item.ReviewPending = Math.Max(item.ReviewTotal - item.ReviewCompleted - item.ReviewFailed, 0);
+                if (item.ReviewTotal > 0)
+                {
+                    item.ReviewStatusText = $"复盘 {item.ReviewCompleted}/{item.ReviewTotal}";
+                }
+                else
+                {
+                    item.ReviewStatusText = "复盘:未勾选";
+                }
+
+                var progress = item.ReviewTotal == 0
+                    ? 1
+                    : (double)(item.ReviewCompleted + item.ReviewFailed) / item.ReviewTotal;
+                var finished = item.ReviewPending == 0;
+                var status = finished
+                    ? (item.ReviewFailed > 0 ? BatchTaskStatus.Failed : BatchTaskStatus.Completed)
+                    : BatchTaskStatus.Running;
+                var statusMessage = finished
+                    ? (item.ReviewFailed > 0 ? "完成(含失败)" : "完成")
+                    : "生成中";
+
+                item.HasAiSummary = item.ReviewTotal > 0 && item.ReviewCompleted >= item.ReviewTotal;
+                UpdateBatchItem(item, status, progress, statusMessage);
+            });
+        }
+
+        private void UpdateQueueItem(BatchQueueItem item, BatchTaskStatus status, double progress, string message)
+        {
+            Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+            {
+                if (!_batchQueueItems.Contains(item))
+                {
+                    return;
+                }
+
+                item.Status = status;
+                item.Progress = progress;
+                item.StatusMessage = message;
+                UpdateBatchQueueStatusText();
+            });
+        }
+
+        private void CancelBatchQueueItem(BatchQueueItem? item)
+        {
+            if (item == null)
+            {
+                return;
+            }
+
+            item.Cts?.Cancel();
+            UpdateQueueItem(item, BatchTaskStatus.Failed, item.Progress, "已取消");
+
+            var parent = BatchTasks.FirstOrDefault(x => x.FullPath == item.FullPath);
+            if (parent != null)
+            {
+                UpdateBatchReviewProgress(parent, BatchTaskStatus.Failed);
+            }
+
+            Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+            {
+                _batchQueueItems.Remove(item);
+            });
         }
 
         private void UpdateBatchItem(BatchTaskItem item, BatchTaskStatus status, double progress, string message)
@@ -1212,17 +1537,8 @@ namespace TranslationToolUI.ViewModels
                 return;
             }
 
-            var audioFile = SelectedAudioFile;
-            var cues = SubtitleCues.ToList();
-            foreach (var sheet in _reviewSheets)
-            {
-                if (sheet.IsLoading)
-                {
-                    continue;
-                }
-
-                await GenerateReviewSheetAsync(sheet, audioFile, cues);
-            }
+            EnqueueReviewSheetsForAudio(SelectedAudioFile, _reviewSheets);
+            StartBatchQueueRunner("复盘已加入队列");
         }
 
         private async Task GenerateReviewSheetAsync(ReviewSheetState sheet, MediaFileItem audioFile, List<SubtitleCue> cues)
@@ -2431,6 +2747,7 @@ namespace TranslationToolUI.ViewModels
         public ICommand ClearBatchTasksCommand { get; }
         public ICommand StartBatchCommand { get; }
         public ICommand StopBatchCommand { get; }
+        public ICommand CancelBatchQueueItemCommand { get; }
         private async void StartTranslation()
         {
             if (_translationService == null)

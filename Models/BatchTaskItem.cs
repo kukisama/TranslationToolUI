@@ -19,6 +19,11 @@ namespace TranslationToolUI.Models
         private bool _hasAiSubtitle;
         private bool _hasAiSummary;
         private string _statusMessage = "";
+        private int _reviewTotal;
+        private int _reviewCompleted;
+        private int _reviewFailed;
+        private int _reviewPending;
+        private string _reviewStatusText = "";
 
         public string FileName
         {
@@ -60,6 +65,36 @@ namespace TranslationToolUI.Models
         {
             get => _statusMessage;
             set => SetProperty(ref _statusMessage, value, nameof(StatusMessage));
+        }
+
+        public int ReviewTotal
+        {
+            get => _reviewTotal;
+            set => SetProperty(ref _reviewTotal, value, nameof(ReviewTotal));
+        }
+
+        public int ReviewCompleted
+        {
+            get => _reviewCompleted;
+            set => SetProperty(ref _reviewCompleted, value, nameof(ReviewCompleted));
+        }
+
+        public int ReviewFailed
+        {
+            get => _reviewFailed;
+            set => SetProperty(ref _reviewFailed, value, nameof(ReviewFailed));
+        }
+
+        public int ReviewPending
+        {
+            get => _reviewPending;
+            set => SetProperty(ref _reviewPending, value, nameof(ReviewPending));
+        }
+
+        public string ReviewStatusText
+        {
+            get => _reviewStatusText;
+            set => SetProperty(ref _reviewStatusText, value, nameof(ReviewStatusText));
         }
 
         public event PropertyChangedEventHandler? PropertyChanged;

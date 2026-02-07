@@ -438,10 +438,9 @@
                                                     <TextBlock Text="{Binding FileName}" TextTrimming="CharacterEllipsis"/>
                                                     <StackPanel Orientation="Horizontal" Spacing="6">
                                                         <TextBlock Text="{Binding StatusMessage}" FontSize="10" Foreground="Gray"/>
-                                                        <TextBlock Text="AI字幕" FontSize="10" Foreground="Gray"
+                                                        <TextBlock Text="{Binding ReviewStatusText}" FontSize="10" Foreground="Gray"/>
+                                                        <TextBlock Text="字幕" FontSize="10" Foreground="Gray"
                                                                    IsVisible="{Binding HasAiSubtitle}"/>
-                                                        <TextBlock Text="AI总结" FontSize="10" Foreground="Gray"
-                                                                   IsVisible="{Binding HasAiSummary}"/>
                                                     </StackPanel>
                                                     <ProgressBar Minimum="0" Maximum="1" Height="4"
                                                                  Value="{Binding Progress}"/>
@@ -450,6 +449,31 @@
                                         </ListBox.ItemTemplate>
                                     </ListBox>
                                 </Border>
+                                <TextBlock Text="队列池" FontSize="11" Foreground="Gray"/>
+                                <Border BorderBrush="#FFE5E7EB" BorderThickness="1" CornerRadius="4" Padding="6">
+                                    <ListBox ItemsSource="{Binding BatchQueueItems}" Height="160">
+                                        <ListBox.ItemTemplate>
+                                            <DataTemplate x:CompileBindings="False">
+                                                <Grid ColumnDefinitions="*,Auto" Margin="0,2">
+                                                    <StackPanel Spacing="2">
+                                                        <TextBlock Text="{Binding FileName}" TextTrimming="CharacterEllipsis"/>
+                                                        <StackPanel Orientation="Horizontal" Spacing="6">
+                                                            <TextBlock Text="{Binding SheetName}" FontSize="10" Foreground="Gray"/>
+                                                            <TextBlock Text="{Binding StatusMessage}" FontSize="10" Foreground="Gray"/>
+                                                        </StackPanel>
+                                                        <ProgressBar Minimum="0" Maximum="1" Height="4"
+                                                                     Value="{Binding Progress}"/>
+                                                    </StackPanel>
+                                                    <Button Grid.Column="1" Content="取消" Padding="6,2" FontSize="11"
+                                                            Command="{Binding $parent[ListBox].DataContext.CancelBatchQueueItemCommand}"
+                                                            CommandParameter="{Binding}"
+                                                            IsVisible="{Binding CanCancel}"/>
+                                                </Grid>
+                                            </DataTemplate>
+                                        </ListBox.ItemTemplate>
+                                    </ListBox>
+                                </Border>
+                                <TextBlock Text="{Binding BatchQueueStatusText}" Foreground="Gray" FontSize="10"/>
                                 <StackPanel Orientation="Horizontal" Spacing="6">
                                     <TextBlock Text="并发数" VerticalAlignment="Center"/>
                                     <TextBox Width="80" Text="{Binding BatchConcurrencyLimit, Mode=TwoWay}"/>
