@@ -53,10 +53,21 @@ namespace TranslationToolUI.Models
         public bool ExportSrtSubtitles { get; set; } = false;
         public bool ExportVttSubtitles { get; set; } = false;
 
+        public string? SessionDirectoryOverride { get; set; }
+
+        public const string DefaultBatchAudioContainerName = "translationtoolui-audio";
+        public const string DefaultBatchResultContainerName = "translationtoolui-results";
+
+        public string BatchStorageConnectionString { get; set; } = "";
+        public string BatchAudioContainerName { get; set; } = DefaultBatchAudioContainerName;
+        public string BatchResultContainerName { get; set; } = DefaultBatchResultContainerName;
+
         public AiConfig? AiConfig { get; set; }
 
         [JsonIgnore]
-        public string SessionDirectory => PathManager.Instance.SessionsPath;
+        public string SessionDirectory => string.IsNullOrWhiteSpace(SessionDirectoryOverride)
+            ? PathManager.Instance.SessionsPath
+            : SessionDirectoryOverride;
 
         public AzureSpeechConfig()
         {

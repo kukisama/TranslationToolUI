@@ -64,7 +64,7 @@
         <Grid Grid.Row="0" ColumnDefinitions="Auto,*" Margin="10">
             <TextBlock Grid.Column="0" Text="译见 Pro" FontSize="18" FontWeight="Bold" VerticalAlignment="Center" Margin="0,0,20,0"/>
                   <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="5">
-                <Button Content="配置" Command="{Binding ShowConfigCommand}" Padding="10,5" 
+                <Button Content="配置中心" Command="{Binding ShowConfigCommand}" Padding="10,5" 
                         IsEnabled="{Binding IsConfigurationEnabled}"/>
             <Button Content="清空历史" Command="{Binding ClearHistoryCommand}" Padding="10,5"
                 IsVisible="{Binding IsLiveMode}"/>
@@ -285,19 +285,17 @@
                         </TabItem>
                         <TabItem Header="洞察">
                             <Grid RowDefinitions="Auto,Auto,Auto,Auto,*,Auto">
-                                <!-- AI 配置按钮 + 状态 -->
-                                <DockPanel Grid.Row="0" Margin="8,8,8,4">
-                                    <Button Content="AI 配置" Command="{Binding ShowAiConfigCommand}"
-                                            DockPanel.Dock="Left" Padding="8,4"/>
+                                <!-- AI 状态 -->
+                                <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="8,8,8,4" Spacing="10">
                                     <TextBlock Text="未配置 AI 服务" Foreground="Orange"
-                                               VerticalAlignment="Center" Margin="10,0,0,0"
+                                               VerticalAlignment="Center"
                                                FontSize="11"
                                                IsVisible="{Binding !IsAiConfigured}"/>
                                     <TextBlock Text="AI 服务已就绪" Foreground="Green"
-                                               VerticalAlignment="Center" Margin="10,0,0,0"
+                                               VerticalAlignment="Center"
                                                FontSize="11"
                                                IsVisible="{Binding IsAiConfigured}"/>
-                                </DockPanel>
+                                </StackPanel>
 
                                 <!-- 预设分析模板按钮 -->
                                 <ItemsControl Grid.Row="1" ItemsSource="{Binding InsightPresetButtons}" Margin="8,4">
@@ -420,6 +418,20 @@
                                         </DataTemplate>
                                     </ListBox.ItemTemplate>
                                 </ListBox>
+                                <StackPanel Spacing="6">
+                                    <StackPanel Orientation="Horizontal" Spacing="6">
+                                    <Button Content="转写生成 speech 字幕" Padding="6,3"
+                                            Command="{Binding GenerateSpeechSubtitleCommand}"/>
+                                        <Button Content="极速批量转写" Padding="6,3"
+                                            Command="{Binding GenerateBatchSpeechSubtitleCommand}"/>
+                                    <Button Content="取消" Padding="6,3"
+                                        Command="{Binding CancelSpeechSubtitleCommand}"
+                                        IsEnabled="{Binding IsSpeechSubtitleGenerating}"/>
+                                    <ProgressBar Width="80" Height="6" IsIndeterminate="True"
+                                             IsVisible="{Binding IsSpeechSubtitleGenerating}"/>
+                                    </StackPanel>
+                                    <TextBlock Text="{Binding SpeechSubtitleStatusMessage}" FontSize="10" Foreground="Gray"/>
+                                </StackPanel>
                             </StackPanel>
                         </TabItem>
                         <TabItem Header="批处理">

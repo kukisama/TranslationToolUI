@@ -25,6 +25,7 @@ namespace TranslationToolUI.Services
                     var config = JsonSerializer.Deserialize<AzureSpeechConfig>(json);
                     if (config != null)
                     {
+                        PathManager.Instance.SetSessionsPath(config.SessionDirectoryOverride);
                         return config;
                     }
                 }
@@ -35,6 +36,7 @@ namespace TranslationToolUI.Services
             }
 
             var defaultConfig = new AzureSpeechConfig();
+            PathManager.Instance.SetSessionsPath(defaultConfig.SessionDirectoryOverride);
             await SaveConfigAsync(defaultConfig);
             return defaultConfig;
         }

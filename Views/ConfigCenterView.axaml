@@ -1,0 +1,389 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:models="using:TranslationToolUI.Models"
+        mc:Ignorable="d" d:DesignWidth="980" d:DesignHeight="720"
+        x:Class="TranslationToolUI.Views.ConfigCenterView"
+        Title="配置中心"
+        Width="980" Height="720"
+        WindowStartupLocation="CenterOwner">
+
+    <Grid RowDefinitions="Auto,*,Auto" Margin="16">
+        <TextBlock Grid.Row="0" Text="配置中心" FontSize="18" FontWeight="Bold" Margin="0,0,0,12"/>
+
+        <TabControl Grid.Row="1" TabStripPlacement="Left">
+            <TabItem Header="订阅与鉴权">
+                <ScrollViewer>
+                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                        <Border Grid.Column="0" BorderBrush="Gray" BorderThickness="1" Margin="0,0,10,0">
+                            <Grid RowDefinitions="Auto,*">
+                                <TextBlock Grid.Row="0" Text="订阅列表" FontWeight="Bold" Margin="10,10,10,5"/>
+                                <ListBox Grid.Row="1" x:Name="SubscriptionListBox" Margin="10"
+                                         SelectionMode="Single">
+                                    <ListBox.ItemTemplate>
+                                        <DataTemplate DataType="models:AzureSubscription">
+                                            <StackPanel Orientation="Vertical" Margin="5">
+                                                <TextBlock Text="{Binding Name}" FontWeight="Bold"/>
+                                                <TextBlock Text="{Binding ServiceRegion}" FontSize="12" Foreground="Gray"/>
+                                                <TextBlock Text="密钥: **********************" FontSize="10" Foreground="DarkGray"/>
+                                            </StackPanel>
+                                        </DataTemplate>
+                                    </ListBox.ItemTemplate>
+                                </ListBox>
+                            </Grid>
+                        </Border>
+
+                        <StackPanel Grid.Column="1" Spacing="10" MinWidth="320">
+                            <TextBlock Text="订阅配置" FontWeight="Bold"/>
+
+                            <StackPanel Spacing="5">
+                                <TextBlock Text="订阅名称"/>
+                                <TextBox x:Name="SubscriptionNameTextBox" Watermark="例如：生产环境、测试环境"/>
+                            </StackPanel>
+
+                            <StackPanel Spacing="5">
+                                <TextBlock Text="订阅密钥"/>
+                                <TextBox x:Name="SubscriptionKeyTextBox"
+                                         Watermark="输入 Azure 语音服务订阅密钥"
+                                         MaxWidth="280"
+                                         Width="280"
+                                         PasswordChar="*"
+                                         RevealPassword="{Binding IsChecked, ElementName=ShowPasswordCheckBox}"/>
+                                <CheckBox x:Name="ShowPasswordCheckBox" Content="显示密钥" FontSize="10" Margin="0,2,0,0"/>
+                            </StackPanel>
+
+                            <StackPanel Spacing="5">
+                                <TextBlock Text="服务区域"/>
+                                <ComboBox x:Name="RegionComboBox">
+                                    <ComboBoxItem Tag="southeastasia" Content="东南亚（新加坡）"/>
+                                    <ComboBoxItem Tag="eastasia" Content="东亚（香港）"/>
+                                    <ComboBoxItem Tag="eastus" Content="美国东部"/>
+                                    <ComboBoxItem Tag="westus" Content="美国西部"/>
+                                    <ComboBoxItem Tag="westeurope" Content="西欧"/>
+                                    <ComboBoxItem Tag="northeurope" Content="北欧"/>
+                                    <ComboBoxItem Tag="japaneast" Content="日本东部"/>
+                                    <ComboBoxItem Tag="koreacentral" Content="韩国中部"/>
+                                </ComboBox>
+                            </StackPanel>
+
+                            <StackPanel Orientation="Horizontal" Spacing="5" Margin="0,20,0,0">
+                                <Button x:Name="AddButton" Content="添加" Width="60"/>
+                                <Button x:Name="UpdateButton" Content="更新" Width="60"/>
+                                <Button x:Name="DeleteButton" Content="删除" Width="60"/>
+                                <Button x:Name="SpeechTestButton" Content="测试" Width="60"/>
+                            </StackPanel>
+                        </StackPanel>
+                    </Grid>
+                </ScrollViewer>
+            </TabItem>
+
+            <TabItem Header="输入与识别">
+                <ScrollViewer>
+                    <StackPanel Spacing="12">
+                        <TextBlock Text="识别策略" FontWeight="Bold"/>
+
+                        <CheckBox x:Name="FilterModalParticlesCheckBox" Content="过滤语气助词" IsChecked="True"/>
+
+                        <StackPanel Spacing="5">
+                            <TextBlock Text="最大历史记录数量"/>
+                            <NumericUpDown x:Name="MaxHistoryItemsNumeric" Value="15" Minimum="5" Maximum="100" Width="120" FormatString="F0"/>
+                        </StackPanel>
+
+                        <StackPanel Spacing="5">
+                            <TextBlock Text="实时字幕最大长度"/>
+                            <NumericUpDown x:Name="RealtimeMaxLengthNumeric" Value="150" Minimum="50" Maximum="500" Width="120" FormatString="F0"/>
+                        </StackPanel>
+
+                        <StackPanel Spacing="5">
+                            <TextBlock Text="Chunk 时长 (ms)"/>
+                            <NumericUpDown x:Name="ChunkDurationMsNumeric" Value="200" Minimum="20" Maximum="2000" Width="120" FormatString="F0"/>
+                            <TextBlock FontSize="10" Foreground="Gray" Text="默认 200ms；可改为 500ms（延迟更高）" TextWrapping="Wrap"/>
+                        </StackPanel>
+
+                        <Separator Margin="0,8,0,8"/>
+
+                        <TextBlock Text="静音超时" FontWeight="Bold"/>
+
+                        <CheckBox x:Name="EnableAutoTimeoutCheckBox" Content="启用静音超时" IsChecked="True"/>
+
+                        <StackPanel Spacing="5">
+                            <TextBlock Text="初始静音超时 (秒)"/>
+                            <NumericUpDown x:Name="InitialSilenceTimeoutSecondsNumeric" Value="25" Minimum="1" Maximum="300" Width="120" FormatString="F0"/>
+                            <TextBlock FontSize="10" Foreground="Gray" Text="未检测到语音的等待时间" TextWrapping="Wrap"/>
+                        </StackPanel>
+
+                        <StackPanel Spacing="5">
+                            <TextBlock Text="断句静音超时 (秒)"/>
+                            <NumericUpDown x:Name="EndSilenceTimeoutSecondsNumeric" Value="1" Minimum="1" Maximum="30" Width="120" FormatString="F0"/>
+                            <TextBlock FontSize="10" Foreground="Gray" Text="识别到语音后，判定一句结束的等待时间" TextWrapping="Wrap"/>
+                        </StackPanel>
+
+                        <Separator Margin="0,8,0,8"/>
+
+                        <TextBlock Text="无回显重连" FontWeight="Bold"/>
+
+                        <CheckBox x:Name="EnableNoResponseRestartCheckBox" Content="有音频输入但无回显时自动重连" IsChecked="False"/>
+
+                        <StackPanel Spacing="5">
+                            <TextBlock Text="无回显阈值 (秒)"/>
+                            <NumericUpDown x:Name="NoResponseRestartSecondsNumeric" Value="3" Minimum="1" Maximum="30" Width="120" FormatString="F0"/>
+                            <TextBlock FontSize="10" Foreground="Gray" Text="连续 N 秒无中间/最终结果且检测到音频活动时触发" TextWrapping="Wrap"/>
+                        </StackPanel>
+
+                        <StackPanel Spacing="5">
+                            <TextBlock Text="音频活动阈值"/>
+                            <NumericUpDown x:Name="AudioActivityThresholdNumeric" Value="600" Minimum="50" Maximum="8000" Width="120" FormatString="F0"/>
+                            <TextBlock FontSize="10" Foreground="Gray" Text="PCM 16-bit 幅度阈值；越大越不敏感" TextWrapping="Wrap"/>
+                        </StackPanel>
+
+                        <StackPanel Spacing="5">
+                            <TextBlock Text="电平显示放大倍数"/>
+                            <NumericUpDown x:Name="AudioLevelGainNumeric" Value="2" Minimum="0.5" Maximum="10" Width="120" FormatString="F1"/>
+                            <TextBlock FontSize="10" Foreground="Gray" Text="仅影响电平显示，不影响识别" TextWrapping="Wrap"/>
+                        </StackPanel>
+
+                        <CheckBox x:Name="ShowReconnectMarkerCheckBox" Content="在字幕中显示 *触发重连* 提示" IsChecked="True"/>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+
+            <TabItem Header="录音与存储">
+                <ScrollViewer>
+                    <StackPanel Spacing="12">
+                        <TextBlock Text="录音设置" FontWeight="Bold"/>
+
+                        <StackPanel Spacing="8">
+                            <CheckBox x:Name="EnableRecordingCheckBox" Content="边翻译边录音（停止后转 MP3）" IsChecked="True"/>
+
+                            <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+                                <TextBlock Text="MP3 码率 (kbps)" VerticalAlignment="Center"/>
+                                <NumericUpDown x:Name="RecordingMp3BitrateNumeric" Value="96" Minimum="32" Maximum="320" Width="120" FormatString="F0"/>
+                            </StackPanel>
+
+                            <CheckBox x:Name="DeleteWavAfterMp3CheckBox" Content="MP3 生成成功后删除 WAV（转码失败会保留 WAV）" IsChecked="True"/>
+                        </StackPanel>
+
+                        <Separator Margin="0,8,0,8"/>
+
+                        <TextBlock Text="会话目录" FontWeight="Bold"/>
+
+                        <StackPanel Spacing="5">
+                            <TextBlock Text="会话记录保存目录"/>
+                            <Grid ColumnDefinitions="*,Auto">
+                                <TextBox x:Name="SessionDirectoryTextBox" Grid.Column="0" MaxWidth="280"
+                                         Watermark="留空使用默认目录"/>
+                                <Button x:Name="BrowseButton" Grid.Column="1" Content="..." Margin="5,0,0,0" Width="30"/>
+                            </Grid>
+                            <TextBlock FontSize="10" Foreground="Gray" Text="默认目录不变，可选择自定义路径" TextWrapping="Wrap"/>
+                        </StackPanel>
+
+                        <Separator Margin="0,8,0,8"/>
+
+                        <TextBlock Text="批量转写" FontWeight="Bold"/>
+
+                        <StackPanel Spacing="5">
+                            <TextBlock Text="存储账号连接字符串"/>
+                            <TextBox x:Name="BatchStorageConnectionStringTextBox"
+                                     Watermark="DefaultEndpointsProtocol=https;AccountName=...;AccountKey=..."/>
+                            <TextBlock FontSize="10" Foreground="Gray"
+                                       Text="程序会自动创建容器并上传音频/结果" TextWrapping="Wrap"/>
+                        </StackPanel>
+
+                        <StackPanel Spacing="5">
+                            <TextBlock Text="音频容器名 (可选)"/>
+                            <TextBox x:Name="BatchAudioContainerTextBox"
+                                     Watermark="translationtoolui-audio"/>
+                        </StackPanel>
+
+                        <StackPanel Spacing="5">
+                            <TextBlock Text="结果容器名 (可选)"/>
+                            <TextBox x:Name="BatchResultContainerTextBox"
+                                     Watermark="translationtoolui-results"/>
+                        </StackPanel>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+
+            <TabItem Header="字幕与文本">
+                <ScrollViewer>
+                    <StackPanel Spacing="12">
+                        <TextBlock Text="字幕输出" FontWeight="Bold"/>
+
+                        <StackPanel Spacing="6">
+                            <CheckBox x:Name="ExportSrtCheckBox" Content="生成 SRT 字幕" IsChecked="False"/>
+                            <CheckBox x:Name="ExportVttCheckBox" Content="生成 VTT 字幕" IsChecked="False"/>
+                            <TextBlock FontSize="10" Foreground="Gray" Text="字幕与录音同目录保存，可同时勾选" TextWrapping="Wrap"/>
+                        </StackPanel>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+
+            <TabItem Header="AI 基础">
+                <ScrollViewer>
+                    <StackPanel Spacing="12">
+                        <StackPanel Spacing="5">
+                            <TextBlock Text="服务类型"/>
+                            <ComboBox x:Name="ProviderTypeComboBox" MinWidth="280">
+                                <ComboBoxItem Content="OpenAI 兼容 (OpenAI / DeepSeek / Ollama 等)"/>
+                                <ComboBoxItem Content="Azure OpenAI"/>
+                            </ComboBox>
+                        </StackPanel>
+
+                        <StackPanel Spacing="5">
+                            <TextBlock Text="API 端点"/>
+                            <TextBox x:Name="ApiEndpointTextBox"
+                                     Watermark="例如: https://api.openai.com"/>
+                            <TextBlock FontSize="10" Foreground="Gray"
+                                       Text="无需包含 /v1/chat/completions 路径"/>
+                        </StackPanel>
+
+                        <StackPanel Spacing="5">
+                            <TextBlock Text="API 密钥"/>
+                            <TextBox x:Name="ApiKeyTextBox"
+                                     Watermark="sk-..."
+                                     PasswordChar="*"
+                                     RevealPassword="{Binding IsChecked, ElementName=ShowApiKeyCheckBox}"/>
+                            <CheckBox x:Name="ShowApiKeyCheckBox" Content="显示密钥"
+                                      FontSize="10" Margin="0,2,0,0"/>
+                        </StackPanel>
+
+                        <StackPanel x:Name="ModelNamePanel" Spacing="8">
+                            <TextBlock Text="模型名称 (OpenAI 兼容)"/>
+                            <StackPanel Spacing="4">
+                                <TextBlock Text="快速应答模型 (默认)" FontSize="11" Foreground="Gray"/>
+                                <TextBox x:Name="QuickModelNameTextBox"
+                                         Watermark="例如: gpt-5.2-chat"/>
+                            </StackPanel>
+                            <StackPanel Spacing="4">
+                                <TextBlock Text="总结模型" FontSize="11" Foreground="Gray"/>
+                                <TextBox x:Name="SummaryModelNameTextBox"
+                                         Watermark="例如: gpt-5.2"/>
+                            </StackPanel>
+                        </StackPanel>
+
+                        <StackPanel x:Name="AzureFieldsPanel" Spacing="10" IsVisible="False">
+                            <StackPanel Spacing="5">
+                                <TextBlock Text="快速应答部署名称 (默认)"/>
+                                <TextBox x:Name="QuickDeploymentNameTextBox"
+                                         Watermark="Azure OpenAI 快速应答部署名"/>
+                            </StackPanel>
+                            <StackPanel Spacing="5">
+                                <TextBlock Text="总结部署名称"/>
+                                <TextBox x:Name="SummaryDeploymentNameTextBox"
+                                         Watermark="Azure OpenAI 总结部署名"/>
+                            </StackPanel>
+                            <StackPanel Spacing="5">
+                                <TextBlock Text="API 版本"/>
+                                <TextBox x:Name="ApiVersionTextBox"
+                                         Watermark="例如: 2024-02-01"
+                                         Text="2024-02-01"/>
+                            </StackPanel>
+                        </StackPanel>
+
+                        <StackPanel Spacing="5">
+                            <CheckBox x:Name="SummaryReasoningCheckBox"
+                                      Content="总结模型开启思考"
+                                      FontSize="11"/>
+                            <TextBlock FontSize="10" Foreground="Gray"
+                                       Text="仅在支持思考/推理的模型上开启"/>
+                        </StackPanel>
+
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <Button x:Name="AiTestButton" Content="测试连接" Width="100"/>
+                            <TextBlock x:Name="StatusTextBlock" FontSize="11" Foreground="Gray"
+                                       TextWrapping="Wrap"/>
+                        </StackPanel>
+
+                        <StackPanel Spacing="4">
+                            <TextBlock Text="思考内容(测试)" FontSize="11" Foreground="Gray"/>
+                            <TextBox x:Name="ReasoningOutputTextBox" AcceptsReturn="True" Height="120"
+                                     TextWrapping="Wrap" IsReadOnly="True"/>
+                        </StackPanel>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+
+            <TabItem Header="洞察">
+                <ScrollViewer>
+                    <StackPanel Spacing="12">
+                        <Border BorderBrush="#FFE2E8F0" BorderThickness="0,1,0,0" Padding="0,12,0,0" Margin="0,0,0,0">
+                            <StackPanel Spacing="8">
+                                <TextBlock Text="洞察预设按钮配置" FontSize="14" FontWeight="SemiBold"/>
+                                <TextBlock Text="自定义按钮的名称和对应的提示词" FontSize="11" Foreground="Gray"/>
+                                <ItemsControl x:Name="PresetButtonsItemsControl">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate x:CompileBindings="False">
+                                            <Grid ColumnDefinitions="Auto,120,Auto,*,Auto" Margin="0,4">
+                                                <TextBlock Grid.Column="0" Text="名称:" FontSize="11"
+                                                           VerticalAlignment="Center" Margin="0,0,6,0"/>
+                                                <TextBox Grid.Column="1" Text="{Binding Name, Mode=TwoWay}"
+                                                         Padding="4,3" VerticalAlignment="Center"/>
+                                                <TextBlock Grid.Column="2" Text="提示词:" FontSize="11"
+                                                           VerticalAlignment="Center" Margin="10,0,6,0"/>
+                                                <TextBox Grid.Column="3" Text="{Binding Prompt, Mode=TwoWay}"
+                                                         Padding="4,3" VerticalAlignment="Center"/>
+                                                <Button Grid.Column="4" Content="删除" Margin="6,0,0,0" Padding="6,2"
+                                                        FontSize="11" Click="RemovePresetButton_Click"
+                                                        Tag="{Binding}"/>
+                                            </Grid>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                                <Button x:Name="AddPresetButton" Content="+ 添加按钮" Padding="8,4"
+                                        FontSize="11" HorizontalAlignment="Left"/>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+
+            <TabItem Header="复盘">
+                <ScrollViewer>
+                    <StackPanel Spacing="12">
+                        <Border BorderBrush="#FFE2E8F0" BorderThickness="0,1,0,0" Padding="0,12,0,0" Margin="0,0,0,0">
+                            <StackPanel Spacing="8">
+                                <TextBlock Text="复盘洞察模板配置" FontSize="14" FontWeight="SemiBold"/>
+                                <TextBlock Text="配置复盘 sheet 名称、文件标记和提示词" FontSize="11" Foreground="Gray"/>
+                                <ItemsControl x:Name="ReviewSheetsItemsControl">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate x:CompileBindings="False">
+                                            <Grid ColumnDefinitions="Auto,120,Auto,90,Auto,70,Auto,*,Auto" Margin="0,4">
+                                                <TextBlock Grid.Column="0" Text="名称:" FontSize="11"
+                                                           VerticalAlignment="Center" Margin="0,0,6,0"/>
+                                                <TextBox Grid.Column="1" Text="{Binding Name, Mode=TwoWay}"
+                                                         Padding="4,3" VerticalAlignment="Center"/>
+                                                <TextBlock Grid.Column="2" Text="标记:" FontSize="11"
+                                                           VerticalAlignment="Center" Margin="10,0,6,0"/>
+                                                <TextBox Grid.Column="3" Text="{Binding FileTag, Mode=TwoWay}"
+                                                         Padding="4,3" VerticalAlignment="Center"/>
+                                                <TextBlock Grid.Column="4" Text="批处理:" FontSize="11"
+                                                           VerticalAlignment="Center" Margin="10,0,6,0"/>
+                                                <CheckBox Grid.Column="5" IsChecked="{Binding IncludeInBatch, Mode=TwoWay}"
+                                                          VerticalAlignment="Center"/>
+                                                <TextBlock Grid.Column="6" Text="提示词:" FontSize="11"
+                                                           VerticalAlignment="Center" Margin="10,0,6,0"/>
+                                                <TextBox Grid.Column="7" Text="{Binding Prompt, Mode=TwoWay}"
+                                                         Padding="4,3" VerticalAlignment="Center"/>
+                                                <Button Grid.Column="8" Content="删除" Margin="6,0,0,0" Padding="6,2"
+                                                        FontSize="11" Click="RemoveReviewSheet_Click"
+                                                        Tag="{Binding}"/>
+                                            </Grid>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                                <Button x:Name="AddReviewSheetButton" Content="+ 添加复盘 sheet" Padding="8,4"
+                                        FontSize="11" HorizontalAlignment="Left"/>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+        </TabControl>
+
+        <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="10" Margin="0,16,0,0">
+            <Button x:Name="SaveButton" Content="保存" Width="100"/>
+            <Button x:Name="CancelButton" Content="取消" Width="100"/>
+        </StackPanel>
+    </Grid>
+</Window>

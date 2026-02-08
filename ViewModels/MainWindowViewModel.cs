@@ -19,7 +19,15 @@ using TranslationToolUI.Services.Audio;
 using System.IO;
 using System.Diagnostics;
 using System.Net.Http;
+using System.Text.Json;
 using NAudio.Wave;
+using Microsoft.CognitiveServices.Speech;
+using Microsoft.CognitiveServices.Speech.Audio;
+using Microsoft.CognitiveServices.Speech.Transcription;
+using Azure.Storage.Blobs;
+using Azure.Storage.Blobs.Models;
+using Azure.Storage.Sas;
+using System.Xml;
 
 namespace TranslationToolUI.ViewModels
 {
@@ -110,10 +118,16 @@ namespace TranslationToolUI.ViewModels
         private DispatcherTimer? _autoInsightTimer;
         private int _lastAutoInsightHistoryCount;
 
+        private bool _isSpeechSubtitleGenerating;
+        private string _speechSubtitleStatusMessage = "";
+        private CancellationTokenSource? _speechSubtitleCts;
+
         private int _uiModeIndex;
 
         private readonly ObservableCollection<ReviewSheetState> _reviewSheets = new();
         private ReviewSheetState? _selectedReviewSheet;
+
+        private static readonly HttpClient SpeechBatchHttpClient = new();
 
         private readonly string[] _sourceLanguages = { "zh-CN", "en-US", "ja-JP", "ko-KR", "fr-FR", "de-DE", "es-ES" };
         private readonly string[] _targetLanguages = { "en", "zh-CN", "ja-JP", "ko-KR", "fr-FR", "de-DE", "es-ES" };        public MainWindowViewModel()
@@ -334,6 +348,21 @@ namespace TranslationToolUI.ViewModels
             CancelBatchQueueItemCommand = new RelayCommand(
                 execute: param => CancelBatchQueueItem(param as BatchQueueItem)
             );
+
+            GenerateSpeechSubtitleCommand = new RelayCommand(
+                execute: _ => GenerateSpeechSubtitle(),
+                canExecute: _ => CanGenerateSpeechSubtitle()
+            );
+
+            CancelSpeechSubtitleCommand = new RelayCommand(
+                execute: _ => CancelSpeechSubtitle(),
+                canExecute: _ => IsSpeechSubtitleGenerating
+            );
+
+            GenerateBatchSpeechSubtitleCommand = new RelayCommand(
+                execute: _ => GenerateBatchSpeechSubtitle(),
+                canExecute: _ => CanGenerateBatchSpeechSubtitle()
+            );
         }
 
         public ICommand ToggleTranslationCommand { get; }
@@ -401,6 +430,14 @@ namespace TranslationToolUI.ViewModels
                     ((RelayCommand)SendInsightCommand).RaiseCanExecuteChanged();
                     ((RelayCommand)SendPresetInsightCommand).RaiseCanExecuteChanged();
                     ((RelayCommand)ToggleAutoInsightCommand).RaiseCanExecuteChanged();
+                    if (GenerateSpeechSubtitleCommand is RelayCommand speechCmd)
+                    {
+                        speechCmd.RaiseCanExecuteChanged();
+                    }
+                    if (GenerateBatchSpeechSubtitleCommand is RelayCommand batchCmd)
+                    {
+                        batchCmd.RaiseCanExecuteChanged();
+                    }
 
                     StatusMessage = $"配置已加载，文件位置: {_configService.GetConfigFilePath()}";
 
@@ -527,6 +564,35 @@ namespace TranslationToolUI.ViewModels
             private set => SetProperty(ref _batchQueueStatusText, value);
         }
 
+        public bool IsSpeechSubtitleGenerating
+        {
+            get => _isSpeechSubtitleGenerating;
+            private set
+            {
+                if (SetProperty(ref _isSpeechSubtitleGenerating, value))
+                {
+                    if (GenerateSpeechSubtitleCommand is RelayCommand cmd)
+                    {
+                        cmd.RaiseCanExecuteChanged();
+                    }
+                    if (GenerateBatchSpeechSubtitleCommand is RelayCommand batchCmd)
+                    {
+                        batchCmd.RaiseCanExecuteChanged();
+                    }
+                    if (CancelSpeechSubtitleCommand is RelayCommand cancelCmd)
+                    {
+                        cancelCmd.RaiseCanExecuteChanged();
+                    }
+                }
+            }
+        }
+
+        public string SpeechSubtitleStatusMessage
+        {
+            get => _speechSubtitleStatusMessage;
+            private set => SetProperty(ref _speechSubtitleStatusMessage, value);
+        }
+
         public IBrush ReviewSummaryLampFill
         {
             get
@@ -591,6 +657,14 @@ namespace TranslationToolUI.ViewModels
                 LoadReviewSheetForAudio(value, SelectedReviewSheet);
                 ((RelayCommand)GenerateReviewSummaryCommand).RaiseCanExecuteChanged();
                 ((RelayCommand)GenerateAllReviewSheetsCommand).RaiseCanExecuteChanged();
+                if (GenerateSpeechSubtitleCommand is RelayCommand speechCmd)
+                {
+                    speechCmd.RaiseCanExecuteChanged();
+                }
+                if (GenerateBatchSpeechSubtitleCommand is RelayCommand batchCmd)
+                {
+                    batchCmd.RaiseCanExecuteChanged();
+                }
             }
         }
 
@@ -1315,6 +1389,7 @@ namespace TranslationToolUI.ViewModels
 
             var candidates = new[]
             {
+                Path.Combine(directory, baseName + ".speech.vtt"),
                 Path.Combine(directory, baseName + ".ai.srt"),
                 Path.Combine(directory, baseName + ".ai.vtt"),
                 Path.Combine(directory, baseName + ".srt"),
@@ -1395,6 +1470,16 @@ namespace TranslationToolUI.ViewModels
 
             foreach (var candidate in candidateBases)
             {
+                var speechVtt = Path.Combine(directory, candidate + ".speech.vtt");
+                if (File.Exists(speechVtt))
+                {
+                    _subtitleFiles.Add(new MediaFileItem
+                    {
+                        Name = Path.GetFileName(speechVtt),
+                        FullPath = speechVtt
+                    });
+                }
+
                 var srtPath = Path.Combine(directory, candidate + ".srt");
                 if (File.Exists(srtPath))
                 {
@@ -1539,6 +1624,817 @@ namespace TranslationToolUI.ViewModels
 
             EnqueueReviewSheetsForAudio(SelectedAudioFile, _reviewSheets);
             StartBatchQueueRunner("复盘已加入队列");
+        }
+
+        private bool CanGenerateSpeechSubtitle()
+        {
+            if (IsSpeechSubtitleGenerating)
+            {
+                return false;
+            }
+
+            if (SelectedAudioFile == null || string.IsNullOrWhiteSpace(SelectedAudioFile.FullPath))
+            {
+                return false;
+            }
+
+            if (!File.Exists(SelectedAudioFile.FullPath))
+            {
+                return false;
+            }
+
+            var subscription = _config.GetActiveSubscription();
+            return subscription?.IsValid() == true && !string.IsNullOrWhiteSpace(_config.SourceLanguage);
+        }
+
+        private async void GenerateSpeechSubtitle()
+        {
+            if (!CanGenerateSpeechSubtitle())
+            {
+                SpeechSubtitleStatusMessage = "订阅或音频不可用";
+                return;
+            }
+
+            var audioFile = SelectedAudioFile;
+            if (audioFile == null)
+            {
+                return;
+            }
+
+            _speechSubtitleCts?.Cancel();
+            _speechSubtitleCts = new CancellationTokenSource();
+            var token = _speechSubtitleCts.Token;
+
+            IsSpeechSubtitleGenerating = true;
+            SpeechSubtitleStatusMessage = "正在转写...";
+
+            try
+            {
+                var cues = await TranscribeSpeechToCuesAsync(audioFile.FullPath, token);
+                if (cues.Count == 0)
+                {
+                    SpeechSubtitleStatusMessage = "未识别到有效文本";
+                    return;
+                }
+
+                var outputPath = GetSpeechSubtitlePath(audioFile.FullPath);
+                WriteVttFile(outputPath, cues);
+
+                SpeechSubtitleStatusMessage = $"speech 字幕已生成: {Path.GetFileName(outputPath)}";
+                LoadSubtitleFilesForAudio(audioFile);
+            }
+            catch (OperationCanceledException)
+            {
+                SpeechSubtitleStatusMessage = "转写已取消";
+            }
+            catch (Exception ex)
+            {
+                SpeechSubtitleStatusMessage = $"转写失败: {ex.Message}";
+            }
+            finally
+            {
+                IsSpeechSubtitleGenerating = false;
+                _speechSubtitleCts?.Dispose();
+                _speechSubtitleCts = null;
+            }
+        }
+
+        private bool CanGenerateBatchSpeechSubtitle()
+        {
+            if (IsSpeechSubtitleGenerating)
+            {
+                return false;
+            }
+
+            if (SelectedAudioFile == null || string.IsNullOrWhiteSpace(SelectedAudioFile.FullPath))
+            {
+                return false;
+            }
+
+            if (!File.Exists(SelectedAudioFile.FullPath))
+            {
+                return false;
+            }
+
+            if (string.IsNullOrWhiteSpace(_config.BatchStorageConnectionString))
+            {
+                return false;
+            }
+
+            var subscription = _config.GetActiveSubscription();
+            return subscription?.IsValid() == true && !string.IsNullOrWhiteSpace(_config.SourceLanguage);
+        }
+
+        private async void GenerateBatchSpeechSubtitle()
+        {
+            if (!CanGenerateBatchSpeechSubtitle())
+            {
+                SpeechSubtitleStatusMessage = "请配置批量转写的存储连接字符串";
+                return;
+            }
+
+            var audioFile = SelectedAudioFile;
+            if (audioFile == null)
+            {
+                return;
+            }
+
+            _speechSubtitleCts?.Cancel();
+            _speechSubtitleCts = new CancellationTokenSource();
+            var token = _speechSubtitleCts.Token;
+
+            IsSpeechSubtitleGenerating = true;
+            SpeechSubtitleStatusMessage = "批量转写：上传音频...";
+
+            BlobClient? uploadedBlob = null;
+            BlobContainerClient? resultContainer = null;
+
+            try
+            {
+                var (audioContainer, outputContainer) = await GetBatchContainersAsync(
+                    _config.BatchStorageConnectionString,
+                    _config.BatchAudioContainerName,
+                    _config.BatchResultContainerName,
+                    token);
+
+                resultContainer = outputContainer;
+
+                uploadedBlob = await UploadAudioToBlobAsync(
+                    audioFile.FullPath,
+                    audioContainer,
+                    token);
+
+                var contentUrl = CreateBlobReadSasUri(uploadedBlob, TimeSpan.FromHours(24));
+
+                SpeechSubtitleStatusMessage = "批量转写：提交任务...";
+
+                var subscription = _config.GetActiveSubscription();
+                if (subscription == null)
+                {
+                    throw new InvalidOperationException("语音订阅未配置");
+                }
+
+                var (cues, transcriptionJson) = await BatchTranscribeSpeechToCuesAsync(
+                    contentUrl,
+                    _config.SourceLanguage,
+                    subscription,
+                    token,
+                    status => SpeechSubtitleStatusMessage = status);
+
+                if (cues.Count == 0)
+                {
+                    SpeechSubtitleStatusMessage = "未识别到有效文本";
+                    return;
+                }
+
+                var outputPath = GetSpeechSubtitlePath(audioFile.FullPath);
+                WriteVttFile(outputPath, cues);
+
+                if (resultContainer != null)
+                {
+                    var baseName = Path.GetFileNameWithoutExtension(audioFile.FullPath);
+                    await UploadTextToBlobAsync(resultContainer, baseName + ".speech.vtt", File.ReadAllText(outputPath), "text/vtt", token);
+                    await UploadTextToBlobAsync(resultContainer, baseName + ".speech.json", transcriptionJson, "application/json", token);
+                }
+
+                SpeechSubtitleStatusMessage = $"speech 字幕已生成: {Path.GetFileName(outputPath)}";
+                LoadSubtitleFilesForAudio(audioFile);
+            }
+            catch (OperationCanceledException)
+            {
+                SpeechSubtitleStatusMessage = "批量转写已取消";
+            }
+            catch (Exception ex)
+            {
+                SpeechSubtitleStatusMessage = $"批量转写失败: {ex.Message}";
+            }
+            finally
+            {
+                IsSpeechSubtitleGenerating = false;
+                _speechSubtitleCts?.Dispose();
+                _speechSubtitleCts = null;
+            }
+        }
+
+        private static async Task<(BlobContainerClient Audio, BlobContainerClient Result)> GetBatchContainersAsync(
+            string connectionString,
+            string audioContainerName,
+            string resultContainerName,
+            CancellationToken token)
+        {
+            var serviceClient = new BlobServiceClient(connectionString);
+            var normalizedAudio = NormalizeContainerName(audioContainerName, AzureSpeechConfig.DefaultBatchAudioContainerName);
+            var normalizedResult = NormalizeContainerName(resultContainerName, AzureSpeechConfig.DefaultBatchResultContainerName);
+
+            var audioContainer = serviceClient.GetBlobContainerClient(normalizedAudio);
+            await audioContainer.CreateIfNotExistsAsync(PublicAccessType.None, cancellationToken: token);
+
+            var resultContainer = serviceClient.GetBlobContainerClient(normalizedResult);
+            await resultContainer.CreateIfNotExistsAsync(PublicAccessType.None, cancellationToken: token);
+
+            return (audioContainer, resultContainer);
+        }
+
+        private static string NormalizeContainerName(string? name, string fallback)
+        {
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                return fallback;
+            }
+
+            var normalized = new string(name.Trim().ToLowerInvariant()
+                .Select(ch => char.IsLetterOrDigit(ch) ? ch : '-')
+                .ToArray());
+
+            normalized = normalized.Trim('-');
+            if (normalized.Length < 3)
+            {
+                return fallback;
+            }
+
+            if (normalized.Length > 63)
+            {
+                normalized = normalized.Substring(0, 63).Trim('-');
+            }
+
+            return string.IsNullOrWhiteSpace(normalized) ? fallback : normalized;
+        }
+
+        private static async Task<BlobClient> UploadAudioToBlobAsync(
+            string audioPath,
+            BlobContainerClient container,
+            CancellationToken token)
+        {
+            var fileName = Path.GetFileName(audioPath);
+            var timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+            var blobName = $"{Path.GetFileNameWithoutExtension(fileName)}_{timestamp}{Path.GetExtension(fileName)}";
+
+            var blobClient = container.GetBlobClient(blobName);
+            using var stream = File.OpenRead(audioPath);
+            await blobClient.UploadAsync(stream, overwrite: true, cancellationToken: token);
+            await blobClient.SetHttpHeadersAsync(new BlobHttpHeaders
+            {
+                ContentType = GetAudioContentType(audioPath)
+            }, cancellationToken: token);
+            return blobClient;
+        }
+
+        private static Uri CreateBlobReadSasUri(BlobClient blobClient, TimeSpan validFor)
+        {
+            if (!blobClient.CanGenerateSasUri)
+            {
+                throw new InvalidOperationException("无法生成 SAS URL，请确保使用存储账号连接字符串");
+            }
+
+            var builder = new BlobSasBuilder
+            {
+                BlobContainerName = blobClient.BlobContainerName,
+                BlobName = blobClient.Name,
+                Resource = "b",
+                ExpiresOn = DateTimeOffset.UtcNow.Add(validFor)
+            };
+
+            builder.SetPermissions(BlobSasPermissions.Read);
+            return blobClient.GenerateSasUri(builder);
+        }
+
+        private static string GetAudioContentType(string audioPath)
+        {
+            var extension = Path.GetExtension(audioPath).ToLowerInvariant();
+            return extension switch
+            {
+                ".wav" => "audio/wav",
+                ".mp3" => "audio/mpeg",
+                ".m4a" => "audio/mp4",
+                _ => "application/octet-stream"
+            };
+        }
+
+        private static async Task UploadTextToBlobAsync(
+            BlobContainerClient container,
+            string blobName,
+            string content,
+            string contentType,
+            CancellationToken token)
+        {
+            var blobClient = container.GetBlobClient(blobName);
+            using var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(content));
+            await blobClient.UploadAsync(stream, overwrite: true, cancellationToken: token);
+            await blobClient.SetHttpHeadersAsync(new BlobHttpHeaders
+            {
+                ContentType = contentType
+            }, cancellationToken: token);
+        }
+
+        private static async Task<(List<SubtitleCue> Cues, string TranscriptionJson)> BatchTranscribeSpeechToCuesAsync(
+            Uri contentUrl,
+            string locale,
+            AzureSubscription subscription,
+            CancellationToken token,
+            Action<string> onStatus)
+        {
+            var endpoint = $"https://{subscription.ServiceRegion}.api.cognitive.microsoft.com/speechtotext/v3.1/transcriptions";
+            var requestBody = new
+            {
+                displayName = $"Batch-{DateTime.Now:yyyyMMdd_HHmmss}",
+                locale = locale,
+                contentUrls = new[] { contentUrl.ToString() },
+                properties = new
+                {
+                    diarizationEnabled = true,
+                    wordLevelTimestampsEnabled = true,
+                    punctuationMode = "DictatedAndAutomatic",
+                    profanityFilterMode = "Masked"
+                }
+            };
+
+            using var request = new HttpRequestMessage(HttpMethod.Post, endpoint);
+            request.Headers.Add("Ocp-Apim-Subscription-Key", subscription.SubscriptionKey);
+            request.Content = new StringContent(JsonSerializer.Serialize(requestBody), System.Text.Encoding.UTF8, "application/json");
+
+            using var response = await SpeechBatchHttpClient.SendAsync(request, token);
+            if (!response.IsSuccessStatusCode)
+            {
+                var detail = await response.Content.ReadAsStringAsync(token);
+                throw new InvalidOperationException($"创建批量转写失败: {response.StatusCode} {detail}");
+            }
+
+            var statusUrl = response.Headers.Location?.ToString();
+            if (string.IsNullOrWhiteSpace(statusUrl))
+            {
+                var body = await response.Content.ReadAsStringAsync(token);
+                using var doc = JsonDocument.Parse(body);
+                if (doc.RootElement.TryGetProperty("self", out var selfElement))
+                {
+                    statusUrl = selfElement.GetString();
+                }
+            }
+
+            if (string.IsNullOrWhiteSpace(statusUrl))
+            {
+                throw new InvalidOperationException("未获取到批量转写状态地址");
+            }
+
+            string? lastStatusJson = null;
+            while (true)
+            {
+                token.ThrowIfCancellationRequested();
+                using var statusRequest = new HttpRequestMessage(HttpMethod.Get, statusUrl);
+                statusRequest.Headers.Add("Ocp-Apim-Subscription-Key", subscription.SubscriptionKey);
+
+                using var statusResponse = await SpeechBatchHttpClient.SendAsync(statusRequest, token);
+                var statusBody = await statusResponse.Content.ReadAsStringAsync(token);
+                lastStatusJson = statusBody;
+
+                if (!statusResponse.IsSuccessStatusCode)
+                {
+                    throw new InvalidOperationException($"查询批量转写状态失败: {statusResponse.StatusCode} {statusBody}");
+                }
+
+                using var statusDoc = JsonDocument.Parse(statusBody);
+                var status = statusDoc.RootElement.TryGetProperty("status", out var statusElement)
+                    ? statusElement.GetString()
+                    : "";
+
+                if (string.Equals(status, "Succeeded", StringComparison.OrdinalIgnoreCase))
+                {
+                    onStatus("批量转写：已完成，整理字幕...");
+                    break;
+                }
+
+                if (string.Equals(status, "Failed", StringComparison.OrdinalIgnoreCase))
+                {
+                    var errorMessage = "批量转写失败";
+                    if (statusDoc.RootElement.TryGetProperty("error", out var errorElement) &&
+                        errorElement.TryGetProperty("message", out var messageElement))
+                    {
+                        errorMessage = messageElement.GetString() ?? errorMessage;
+                    }
+
+                    throw new InvalidOperationException(errorMessage);
+                }
+
+                onStatus($"批量转写：{status}...");
+                await Task.Delay(TimeSpan.FromSeconds(5), token);
+            }
+
+            var filesUrl = statusUrl.TrimEnd('/') + "/files";
+            if (!string.IsNullOrWhiteSpace(lastStatusJson))
+            {
+                using var statusDoc = JsonDocument.Parse(lastStatusJson);
+                if (statusDoc.RootElement.TryGetProperty("links", out var linksElement) &&
+                    linksElement.TryGetProperty("files", out var filesElement))
+                {
+                    filesUrl = filesElement.GetString() ?? filesUrl;
+                }
+            }
+
+            using var filesRequest = new HttpRequestMessage(HttpMethod.Get, filesUrl);
+            filesRequest.Headers.Add("Ocp-Apim-Subscription-Key", subscription.SubscriptionKey);
+
+            using var filesResponse = await SpeechBatchHttpClient.SendAsync(filesRequest, token);
+            var filesBody = await filesResponse.Content.ReadAsStringAsync(token);
+            if (!filesResponse.IsSuccessStatusCode)
+            {
+                throw new InvalidOperationException($"获取批量转写文件列表失败: {filesResponse.StatusCode} {filesBody}");
+            }
+
+            var transcriptionUrl = ExtractTranscriptionContentUrl(filesBody);
+            if (string.IsNullOrWhiteSpace(transcriptionUrl))
+            {
+                throw new InvalidOperationException("未找到批量转写结果文件");
+            }
+
+            var transcriptionJson = await SpeechBatchHttpClient.GetStringAsync(transcriptionUrl, token);
+            var cues = ParseBatchTranscriptionToCues(transcriptionJson);
+            return (cues, transcriptionJson);
+        }
+
+        private static string? ExtractTranscriptionContentUrl(string filesJson)
+        {
+            using var doc = JsonDocument.Parse(filesJson);
+            if (!doc.RootElement.TryGetProperty("values", out var values) || values.ValueKind != JsonValueKind.Array)
+            {
+                return null;
+            }
+
+            foreach (var item in values.EnumerateArray())
+            {
+                var kind = item.TryGetProperty("kind", out var kindElement) ? kindElement.GetString() : "";
+                if (!string.Equals(kind, "Transcription", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                if (item.TryGetProperty("links", out var linksElement) &&
+                    linksElement.TryGetProperty("contentUrl", out var contentElement))
+                {
+                    return contentElement.GetString();
+                }
+            }
+
+            return null;
+        }
+
+        private static List<SubtitleCue> ParseBatchTranscriptionToCues(string transcriptionJson)
+        {
+            var list = new List<SubtitleCue>();
+            using var doc = JsonDocument.Parse(transcriptionJson);
+            if (!doc.RootElement.TryGetProperty("recognizedPhrases", out var phrases) || phrases.ValueKind != JsonValueKind.Array)
+            {
+                return list;
+            }
+
+            foreach (var phrase in phrases.EnumerateArray())
+            {
+                if (!TryParseBatchOffsetDuration(phrase, out var start, out var end))
+                {
+                    continue;
+                }
+
+                var text = ExtractPhraseText(phrase);
+                if (string.IsNullOrWhiteSpace(text))
+                {
+                    continue;
+                }
+
+                var speaker = phrase.TryGetProperty("speaker", out var speakerElement)
+                    ? speakerElement.ToString()
+                    : "";
+                var speakerLabel = string.IsNullOrWhiteSpace(speaker) ? "Speaker" : $"Speaker {speaker}";
+
+                list.Add(new SubtitleCue
+                {
+                    Start = start,
+                    End = end,
+                    Text = $"{speakerLabel}: {text}"
+                });
+            }
+
+            return list.OrderBy(c => c.Start).ToList();
+        }
+
+        private static string ExtractPhraseText(JsonElement phrase)
+        {
+            if (phrase.TryGetProperty("nBest", out var nbest) && nbest.ValueKind == JsonValueKind.Array && nbest.GetArrayLength() > 0)
+            {
+                var first = nbest[0];
+                if (first.TryGetProperty("display", out var displayElement))
+                {
+                    return displayElement.GetString() ?? "";
+                }
+                if (first.TryGetProperty("lexical", out var lexicalElement))
+                {
+                    return lexicalElement.GetString() ?? "";
+                }
+            }
+
+            if (phrase.TryGetProperty("display", out var directDisplay))
+            {
+                return directDisplay.GetString() ?? "";
+            }
+
+            return "";
+        }
+
+        private static bool TryParseBatchOffsetDuration(JsonElement phrase, out TimeSpan start, out TimeSpan end)
+        {
+            start = TimeSpan.Zero;
+            end = TimeSpan.Zero;
+
+            if (TryGetTimeValue(phrase, "offsetInTicks", out var offsetTicks) &&
+                TryGetTimeValue(phrase, "durationInTicks", out var durationTicks))
+            {
+                start = offsetTicks;
+                end = start + durationTicks;
+                return true;
+            }
+
+            if (TryGetTimeValue(phrase, "offset", out var offset) &&
+                TryGetTimeValue(phrase, "duration", out var duration))
+            {
+                start = offset;
+                end = start + duration;
+                return true;
+            }
+
+            return false;
+        }
+
+        private static bool TryGetTimeValue(JsonElement element, string propertyName, out TimeSpan value)
+        {
+            value = TimeSpan.Zero;
+            if (!element.TryGetProperty(propertyName, out var prop))
+            {
+                return false;
+            }
+
+            if (prop.ValueKind == JsonValueKind.Number && prop.TryGetInt64(out var ticks))
+            {
+                value = TimeSpan.FromTicks(Math.Max(0, ticks));
+                return true;
+            }
+
+            if (prop.ValueKind == JsonValueKind.String)
+            {
+                var text = prop.GetString();
+                if (string.IsNullOrWhiteSpace(text))
+                {
+                    return false;
+                }
+
+                if (text.StartsWith("PT", StringComparison.OrdinalIgnoreCase))
+                {
+                    try
+                    {
+                        value = XmlConvert.ToTimeSpan(text);
+                        return true;
+                    }
+                    catch
+                    {
+                        return false;
+                    }
+                }
+
+                if (TimeSpan.TryParse(text, out var parsed))
+                {
+                    value = parsed;
+                    return true;
+                }
+
+                if (long.TryParse(text, out var parsedTicks))
+                {
+                    value = TimeSpan.FromTicks(Math.Max(0, parsedTicks));
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private void CancelSpeechSubtitle()
+        {
+            _speechSubtitleCts?.Cancel();
+        }
+
+        private static string GetSpeechSubtitlePath(string audioFilePath)
+        {
+            var directory = Path.GetDirectoryName(audioFilePath) ?? PathManager.Instance.SessionsPath;
+            var baseName = Path.GetFileNameWithoutExtension(audioFilePath);
+            return Path.Combine(directory, baseName + ".speech.vtt");
+        }
+
+        private async Task<List<SubtitleCue>> TranscribeSpeechToCuesAsync(string audioPath, CancellationToken token)
+        {
+            var subscription = _config.GetActiveSubscription();
+            if (subscription == null || !subscription.IsValid())
+            {
+                throw new InvalidOperationException("语音订阅未配置");
+            }
+
+            if (!File.Exists(audioPath))
+            {
+                throw new FileNotFoundException("未找到音频文件", audioPath);
+            }
+
+            var speechConfig = SpeechConfig.FromSubscription(subscription.SubscriptionKey, subscription.ServiceRegion);
+            speechConfig.SpeechRecognitionLanguage = _config.SourceLanguage;
+
+            var cues = new List<SubtitleCue>();
+            var cueLock = new object();
+            var fallbackCursor = TimeSpan.Zero;
+            var completed = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            using var audioConfig = CreateTranscriptionAudioConfig(audioPath, token, out var feedTask);
+            using var transcriber = new ConversationTranscriber(speechConfig, audioConfig);
+
+            transcriber.Transcribed += (_, e) =>
+            {
+                if (e.Result.Reason != ResultReason.RecognizedSpeech)
+                {
+                    return;
+                }
+
+                var text = e.Result.Text?.Trim();
+                if (string.IsNullOrWhiteSpace(text))
+                {
+                    return;
+                }
+
+                var speakerId = string.IsNullOrWhiteSpace(e.Result.SpeakerId)
+                    ? "Speaker"
+                    : $"Speaker {e.Result.SpeakerId}";
+                TimeSpan start;
+                TimeSpan end;
+                if (!TryGetTranscriptionTiming(e.Result, out start, out end))
+                {
+                    lock (cueLock)
+                    {
+                        start = fallbackCursor;
+                        end = start + TimeSpan.FromSeconds(2);
+                        fallbackCursor = end;
+                    }
+                }
+
+                var cue = new SubtitleCue
+                {
+                    Start = start,
+                    End = end,
+                    Text = $"{speakerId}: {text}"
+                };
+
+                lock (cueLock)
+                {
+                    cues.Add(cue);
+                }
+            };
+
+            transcriber.Canceled += (_, e) =>
+            {
+                completed.TrySetException(new InvalidOperationException($"转写取消: {e.Reason}, {e.ErrorDetails}"));
+            };
+
+            transcriber.SessionStopped += (_, _) => completed.TrySetResult(true);
+
+            token.Register(() => completed.TrySetCanceled(token));
+
+            await transcriber.StartTranscribingAsync();
+            if (feedTask != null)
+            {
+                await feedTask;
+            }
+
+            try
+            {
+                await completed.Task;
+            }
+            finally
+            {
+                await transcriber.StopTranscribingAsync();
+            }
+
+            lock (cueLock)
+            {
+                return cues.OrderBy(c => c.Start).ToList();
+            }
+        }
+
+        private static bool TryGetTranscriptionTiming(ConversationTranscriptionResult result, out TimeSpan start, out TimeSpan end)
+        {
+            start = TimeSpan.Zero;
+            end = TimeSpan.Zero;
+
+            var json = result.Properties.GetProperty(PropertyId.SpeechServiceResponse_JsonResult);
+            if (string.IsNullOrWhiteSpace(json))
+            {
+                return false;
+            }
+
+            try
+            {
+                using var doc = System.Text.Json.JsonDocument.Parse(json);
+                if (!TryReadOffsetDuration(doc.RootElement, out var offset, out var duration))
+                {
+                    return false;
+                }
+
+                start = TimeSpan.FromTicks(Math.Max(0, offset));
+                end = start + TimeSpan.FromTicks(Math.Max(0, duration));
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static bool TryReadOffsetDuration(System.Text.Json.JsonElement root, out long offset, out long duration)
+        {
+            offset = 0;
+            duration = 0;
+
+            if (root.TryGetProperty("Offset", out var offsetElement) &&
+                root.TryGetProperty("Duration", out var durationElement) &&
+                offsetElement.TryGetInt64(out offset) &&
+                durationElement.TryGetInt64(out duration))
+            {
+                return true;
+            }
+
+            if (root.TryGetProperty("NBest", out var nbest) &&
+                nbest.ValueKind == System.Text.Json.JsonValueKind.Array &&
+                nbest.GetArrayLength() > 0)
+            {
+                var first = nbest[0];
+                if (first.TryGetProperty("Offset", out var nbOffset) &&
+                    first.TryGetProperty("Duration", out var nbDuration) &&
+                    nbOffset.TryGetInt64(out offset) &&
+                    nbDuration.TryGetInt64(out duration))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static AudioConfig CreateTranscriptionAudioConfig(string audioPath, CancellationToken token, out Task? feedTask)
+        {
+            var streamFormat = AudioStreamFormat.GetWaveFormatPCM(16000, 16, 1);
+            var pushStream = AudioInputStream.CreatePushStream(streamFormat);
+            var audioConfig = AudioConfig.FromStreamInput(pushStream);
+
+            feedTask = Task.Run(() =>
+            {
+                try
+                {
+                    using var reader = new AudioFileReader(audioPath);
+                    using var resampler = new MediaFoundationResampler(reader, new WaveFormat(16000, 16, 1))
+                    {
+                        ResamplerQuality = 60
+                    };
+
+                    var buffer = new byte[3200];
+                    int read;
+                    while (!token.IsCancellationRequested && (read = resampler.Read(buffer, 0, buffer.Length)) > 0)
+                    {
+                        pushStream.Write(buffer, read);
+                    }
+                }
+                finally
+                {
+                    pushStream.Close();
+                }
+            });
+
+            return audioConfig;
+        }
+
+        private static void WriteVttFile(string outputPath, List<SubtitleCue> cues)
+        {
+            var directory = Path.GetDirectoryName(outputPath);
+            if (!string.IsNullOrWhiteSpace(directory) && !Directory.Exists(directory))
+            {
+                Directory.CreateDirectory(directory);
+            }
+
+            using var writer = new StreamWriter(outputPath, false, new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+            writer.WriteLine("WEBVTT");
+            writer.WriteLine();
+
+            var index = 1;
+            foreach (var cue in cues)
+            {
+                writer.WriteLine(index++);
+                writer.WriteLine($"{FormatVttTime(cue.Start)} --> {FormatVttTime(cue.End)}");
+                writer.WriteLine(cue.Text);
+                writer.WriteLine();
+            }
+        }
+
+        private static string FormatVttTime(TimeSpan time)
+        {
+            return time.ToString(@"hh\:mm\:ss\.fff");
         }
 
         private async Task GenerateReviewSheetAsync(ReviewSheetState sheet, MediaFileItem audioFile, List<SubtitleCue> cues)
@@ -2748,6 +3644,9 @@ namespace TranslationToolUI.ViewModels
         public ICommand StartBatchCommand { get; }
         public ICommand StopBatchCommand { get; }
         public ICommand CancelBatchQueueItemCommand { get; }
+        public ICommand GenerateSpeechSubtitleCommand { get; } = null!;
+        public ICommand CancelSpeechSubtitleCommand { get; } = null!;
+        public ICommand GenerateBatchSpeechSubtitleCommand { get; } = null!;
         private async void StartTranslation()
         {
             if (_translationService == null)
@@ -2830,7 +3729,7 @@ namespace TranslationToolUI.ViewModels
             if (_mainWindow == null)
                 return;
 
-            var configView = new ConfigView(_config);
+            var configView = new ConfigCenterView(_config);
 
             configView.ConfigurationUpdated += OnConfigurationUpdated;
 
@@ -2857,6 +3756,15 @@ namespace TranslationToolUI.ViewModels
                     _translationService.UpdateConfig(_config);
                 }
 
+                OnPropertyChanged(nameof(IsAiConfigured));
+                OnPropertyChanged(nameof(InsightPresetButtons));
+                RebuildReviewSheets();
+                ((RelayCommand)SendInsightCommand).RaiseCanExecuteChanged();
+                ((RelayCommand)SendPresetInsightCommand).RaiseCanExecuteChanged();
+                ((RelayCommand)ToggleAutoInsightCommand).RaiseCanExecuteChanged();
+                ((RelayCommand)GenerateReviewSummaryCommand).RaiseCanExecuteChanged();
+                ((RelayCommand)GenerateAllReviewSheetsCommand).RaiseCanExecuteChanged();
+                ((RelayCommand)StartBatchCommand).RaiseCanExecuteChanged();
                 ((RelayCommand)StartTranslationCommand).RaiseCanExecuteChanged();
             }
         }
@@ -3098,6 +4006,14 @@ namespace TranslationToolUI.ViewModels
             ((RelayCommand)GenerateReviewSummaryCommand).RaiseCanExecuteChanged();
             ((RelayCommand)GenerateAllReviewSheetsCommand).RaiseCanExecuteChanged();
             ((RelayCommand)StartBatchCommand).RaiseCanExecuteChanged();
+            if (GenerateSpeechSubtitleCommand is RelayCommand speechCmd)
+            {
+                speechCmd.RaiseCanExecuteChanged();
+            }
+            if (GenerateBatchSpeechSubtitleCommand is RelayCommand batchCmd)
+            {
+                batchCmd.RaiseCanExecuteChanged();
+            }
 
             TriggerSubscriptionValidation();
 
@@ -3191,26 +4107,7 @@ namespace TranslationToolUI.ViewModels
 
         private async Task ShowAiConfig()
         {
-            if (_mainWindow == null) return;
-
-            var configView = new AiConfigView(_config.AiConfig);
-            var result = await configView.ShowDialog<bool>(_mainWindow);
-
-            if (result)
-            {
-                _config.AiConfig = configView.Config;
-                await _configService.SaveConfigAsync(_config);
-                OnPropertyChanged(nameof(IsAiConfigured));
-                OnPropertyChanged(nameof(InsightPresetButtons));
-                RebuildReviewSheets();
-                ((RelayCommand)SendInsightCommand).RaiseCanExecuteChanged();
-                ((RelayCommand)SendPresetInsightCommand).RaiseCanExecuteChanged();
-                ((RelayCommand)ToggleAutoInsightCommand).RaiseCanExecuteChanged();
-                ((RelayCommand)GenerateReviewSummaryCommand).RaiseCanExecuteChanged();
-                ((RelayCommand)GenerateAllReviewSheetsCommand).RaiseCanExecuteChanged();
-                ((RelayCommand)StartBatchCommand).RaiseCanExecuteChanged();
-                StatusMessage = "AI 配置已保存";
-            }
+            await ShowConfig();
         }
 
         private void ToggleAutoInsight()

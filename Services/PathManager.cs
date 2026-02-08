@@ -14,7 +14,8 @@ namespace TranslationToolUI.Services
         
         public string AppDataPath { get; }
         
-        public string SessionsPath { get; }
+        public string SessionsPath { get; private set; }
+        public string DefaultSessionsPath { get; }
         
         public string ConfigFilePath { get; }
         
@@ -27,7 +28,8 @@ namespace TranslationToolUI.Services
         private PathManager()
         {
             AppDataPath = GetPlatformAppDataPath();
-            SessionsPath = Path.Combine(AppDataPath, "Sessions");
+            DefaultSessionsPath = Path.Combine(AppDataPath, "Sessions");
+            SessionsPath = DefaultSessionsPath;
             ConfigFilePath = Path.Combine(AppDataPath, "config.json");
             LogsPath = Path.Combine(AppDataPath, "Logs");
             CachePath = Path.Combine(AppDataPath, "Cache");
@@ -102,6 +104,34 @@ namespace TranslationToolUI.Services
             catch (Exception ex)
             {
                 System.Diagnostics.Debug.WriteLine($"创建目录失败: {ex.Message}");
+            }
+        }
+
+        public void SetSessionsPath(string? customPath)
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(customPath))
+                {
+                    SessionsPath = DefaultSessionsPath;
+                }
+                else
+                {
+                    var normalized = customPath.Trim();
+                    if (!Path.IsPathRooted(normalized))
+                    {
+                        normalized = Path.Combine(AppDataPath, normalized);
+                    }
+
+                    SessionsPath = Path.GetFullPath(normalized);
+                }
+
+                Directory.CreateDirectory(SessionsPath);
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"更新会话目录失败: {ex.Message}");
+                SessionsPath = DefaultSessionsPath;
             }
         }
         
