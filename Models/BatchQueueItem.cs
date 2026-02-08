@@ -3,6 +3,12 @@ using System.Threading;
 
 namespace TranslationToolUI.Models
 {
+    public enum BatchQueueItemType
+    {
+        ReviewSheet,
+        SpeechSubtitle
+    }
+
     public class BatchQueueItem : INotifyPropertyChanged
     {
         private string _fileName = "";
@@ -10,6 +16,7 @@ namespace TranslationToolUI.Models
         private string _sheetName = "";
         private string _sheetTag = "";
         private string _prompt = "";
+        private BatchQueueItemType _queueType = BatchQueueItemType.ReviewSheet;
         private BatchTaskStatus _status = BatchTaskStatus.Pending;
         private double _progress;
         private string _statusMessage = "";
@@ -42,6 +49,12 @@ namespace TranslationToolUI.Models
         {
             get => _prompt;
             set => SetProperty(ref _prompt, value, nameof(Prompt));
+        }
+
+        public BatchQueueItemType QueueType
+        {
+            get => _queueType;
+            set => SetProperty(ref _queueType, value, nameof(QueueType));
         }
 
         public BatchTaskStatus Status

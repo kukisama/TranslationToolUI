@@ -1,6 +1,8 @@
 using Avalonia.Controls;
 using Avalonia.Interactivity;
 using Avalonia.Platform.Storage;
+using Azure.Storage.Blobs;
+using Azure.Storage.Blobs.Models;
 using Microsoft.CognitiveServices.Speech;
 using Microsoft.CognitiveServices.Speech.Translation;
 using System;
@@ -97,6 +99,7 @@ namespace TranslationToolUI.Views
             UpdateButton.Click += UpdateButton_Click;
             DeleteButton.Click += DeleteButton_Click;
             SpeechTestButton.Click += SpeechTestButton_Click;
+            BatchStorageValidateButton.Click += BatchStorageValidateButton_Click;
             SubscriptionListBox.SelectionChanged += SubscriptionListBox_SelectionChanged;
             SubscriptionListBox.DoubleTapped += SubscriptionListBox_DoubleTapped;
             SubscriptionListBox.PointerPressed += SubscriptionListBox_PointerPressed;
@@ -145,8 +148,8 @@ namespace TranslationToolUI.Views
 
             SessionDirectoryTextBox.Text = PathManager.Instance.SessionsPath;
             BatchStorageConnectionStringTextBox.Text = "";
-            BatchAudioContainerTextBox.Text = AzureSpeechConfig.DefaultBatchAudioContainerName;
-            BatchResultContainerTextBox.Text = AzureSpeechConfig.DefaultBatchResultContainerName;
+            BatchStorageValidateStatusTextBlock.Text = "";
+            BatchLogLevelComboBox.SelectedIndex = 0;
         }
 
         private void LoadConfigValues()
@@ -180,8 +183,15 @@ namespace TranslationToolUI.Views
 
             SessionDirectoryTextBox.Text = _config.SessionDirectory;
             BatchStorageConnectionStringTextBox.Text = _config.BatchStorageConnectionString;
-            BatchAudioContainerTextBox.Text = _config.BatchAudioContainerName;
-            BatchResultContainerTextBox.Text = _config.BatchResultContainerName;
+            BatchStorageValidateStatusTextBlock.Text = _config.BatchStorageIsValid
+                ? "已验证存储账号"
+                : "";
+            BatchLogLevelComboBox.SelectedIndex = _config.BatchLogLevel switch
+            {
+                BatchLogLevel.FailuresOnly => 1,
+                BatchLogLevel.SuccessAndFailure => 2,
+                _ => 0
+            };
         }
 
         private void LoadAiConfigValues()
@@ -532,6 +542,62 @@ namespace TranslationToolUI.Views
             return await _subscriptionValidator.ValidateAsync(subscription, CancellationToken.None);
         }
 
+        private async void BatchStorageValidateButton_Click(object? sender, RoutedEventArgs e)
+        {
+            BatchStorageValidateButton.IsEnabled = false;
+            BatchStorageValidateButton.Content = "验证中...";
+
+            try
+            {
+                var connectionString = BatchStorageConnectionStringTextBox.Text?.Trim() ?? "";
+                var (isValid, message) = await ValidateBatchStorageAsync(connectionString, CancellationToken.None);
+                BatchStorageValidateStatusTextBlock.Text = message;
+                _config.BatchStorageIsValid = isValid;
+                if (isValid && !_config.UseSpeechSubtitleForReview)
+                {
+                    _config.UseSpeechSubtitleForReview = true;
+                }
+            }
+            catch (Exception ex)
+            {
+                BatchStorageValidateStatusTextBlock.Text = $"验证失败: {ex.Message}";
+                _config.BatchStorageIsValid = false;
+            }
+            finally
+            {
+                BatchStorageValidateButton.IsEnabled = true;
+                BatchStorageValidateButton.Content = "验证";
+            }
+        }
+
+        private static async Task<(bool IsValid, string Message)> ValidateBatchStorageAsync(
+            string connectionString,
+            CancellationToken token)
+        {
+            if (string.IsNullOrWhiteSpace(connectionString))
+            {
+                return (false, "请填写存储账号连接字符串");
+            }
+
+            try
+            {
+                var serviceClient = new BlobServiceClient(connectionString);
+                await serviceClient.GetAccountInfoAsync(token);
+
+                var audioContainer = serviceClient.GetBlobContainerClient(AzureSpeechConfig.DefaultBatchAudioContainerName);
+                await audioContainer.CreateIfNotExistsAsync(PublicAccessType.None, cancellationToken: token);
+
+                var resultContainer = serviceClient.GetBlobContainerClient(AzureSpeechConfig.DefaultBatchResultContainerName);
+                await resultContainer.CreateIfNotExistsAsync(PublicAccessType.None, cancellationToken: token);
+
+                return (true, "存储账号验证成功，可用");
+            }
+            catch (Exception ex)
+            {
+                return (false, $"存储账号验证失败: {ex.Message}");
+            }
+        }
+
         private void ClearEditor()
         {
             SubscriptionNameTextBox.Text = "";
@@ -609,6 +675,7 @@ namespace TranslationToolUI.Views
 
             try
             {
+                var previousStorageValid = _config.BatchStorageIsValid;
                 var validSubscriptions = new List<AzureSubscription>();
                 var invalidSubscriptions = "";
 
@@ -687,12 +754,33 @@ namespace TranslationToolUI.Views
                 _config.ExportVttSubtitles = ExportVttCheckBox.IsChecked ?? false;
 
                 _config.BatchStorageConnectionString = BatchStorageConnectionStringTextBox.Text?.Trim() ?? "";
-                _config.BatchAudioContainerName = string.IsNullOrWhiteSpace(BatchAudioContainerTextBox.Text)
-                    ? AzureSpeechConfig.DefaultBatchAudioContainerName
-                    : BatchAudioContainerTextBox.Text.Trim();
-                _config.BatchResultContainerName = string.IsNullOrWhiteSpace(BatchResultContainerTextBox.Text)
-                    ? AzureSpeechConfig.DefaultBatchResultContainerName
-                    : BatchResultContainerTextBox.Text.Trim();
+                _config.BatchAudioContainerName = AzureSpeechConfig.DefaultBatchAudioContainerName;
+                _config.BatchResultContainerName = AzureSpeechConfig.DefaultBatchResultContainerName;
+                _config.BatchLogLevel = BatchLogLevelComboBox.SelectedIndex switch
+                {
+                    1 => BatchLogLevel.FailuresOnly,
+                    2 => BatchLogLevel.SuccessAndFailure,
+                    _ => BatchLogLevel.Off
+                };
+
+                if (string.IsNullOrWhiteSpace(_config.BatchStorageConnectionString))
+                {
+                    _config.BatchStorageIsValid = false;
+                    _config.UseSpeechSubtitleForReview = false;
+                    BatchStorageValidateStatusTextBlock.Text = "";
+                }
+                else
+                {
+                    var (storageValid, storageMessage) = await ValidateBatchStorageAsync(
+                        _config.BatchStorageConnectionString,
+                        CancellationToken.None);
+                    _config.BatchStorageIsValid = storageValid;
+                    BatchStorageValidateStatusTextBlock.Text = storageMessage;
+                    if (storageValid && !previousStorageValid && !_config.UseSpeechSubtitleForReview)
+                    {
+                        _config.UseSpeechSubtitleForReview = true;
+                    }
+                }
 
                 var sessionDir = SessionDirectoryTextBox.Text?.Trim() ?? "";
                 var defaultDir = PathManager.Instance.DefaultSessionsPath;
@@ -708,7 +796,7 @@ namespace TranslationToolUI.Views
 
                 ConfigurationUpdated?.Invoke(this, _config);
 
-                ShowMessage($"✓ 配置保存成功！共保存了 {validSubscriptions.Count} 个有效订阅。");
+                ShowMessage($"✓ 配置保存成功！共保存了 {validSubscriptions.Count} 个有效订阅。\n{BatchStorageValidateStatusTextBlock.Text}");
                 Close(true);
             }
             finally

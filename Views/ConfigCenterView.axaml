@@ -184,22 +184,26 @@
 
                         <StackPanel Spacing="5">
                             <TextBlock Text="存储账号连接字符串"/>
-                            <TextBox x:Name="BatchStorageConnectionStringTextBox"
-                                     Watermark="DefaultEndpointsProtocol=https;AccountName=...;AccountKey=..."/>
+                            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6">
+                                <TextBox x:Name="BatchStorageConnectionStringTextBox" Grid.Column="0"
+                                         Watermark="DefaultEndpointsProtocol=https;AccountName=...;AccountKey=..."/>
+                                <Button x:Name="BatchStorageValidateButton" Grid.Column="1" Content="验证" Width="60"/>
+                            </Grid>
+                            <TextBlock x:Name="BatchStorageValidateStatusTextBlock" FontSize="10" Foreground="Gray"
+                                       TextWrapping="Wrap"/>
                             <TextBlock FontSize="10" Foreground="Gray"
-                                       Text="程序会自动创建容器并上传音频/结果" TextWrapping="Wrap"/>
+                                       Text="默认使用内置容器名称，会自动创建并上传音频/结果" TextWrapping="Wrap"/>
                         </StackPanel>
 
                         <StackPanel Spacing="5">
-                            <TextBlock Text="音频容器名 (可选)"/>
-                            <TextBox x:Name="BatchAudioContainerTextBox"
-                                     Watermark="translationtoolui-audio"/>
-                        </StackPanel>
-
-                        <StackPanel Spacing="5">
-                            <TextBlock Text="结果容器名 (可选)"/>
-                            <TextBox x:Name="BatchResultContainerTextBox"
-                                     Watermark="translationtoolui-results"/>
+                            <TextBlock Text="批处理日志"/>
+                            <ComboBox x:Name="BatchLogLevelComboBox" MinWidth="220">
+                                <ComboBoxItem Content="关闭"/>
+                                <ComboBoxItem Content="仅失败"/>
+                                <ComboBoxItem Content="成功 + 失败"/>
+                            </ComboBox>
+                            <TextBlock FontSize="10" Foreground="Gray"
+                                       Text="日志保存到会话目录，文件后缀为 .log" TextWrapping="Wrap"/>
                         </StackPanel>
                     </StackPanel>
                 </ScrollViewer>

@@ -418,20 +418,7 @@
                                         </DataTemplate>
                                     </ListBox.ItemTemplate>
                                 </ListBox>
-                                <StackPanel Spacing="6">
-                                    <StackPanel Orientation="Horizontal" Spacing="6">
-                                    <Button Content="转写生成 speech 字幕" Padding="6,3"
-                                            Command="{Binding GenerateSpeechSubtitleCommand}"/>
-                                        <Button Content="极速批量转写" Padding="6,3"
-                                            Command="{Binding GenerateBatchSpeechSubtitleCommand}"/>
-                                    <Button Content="取消" Padding="6,3"
-                                        Command="{Binding CancelSpeechSubtitleCommand}"
-                                        IsEnabled="{Binding IsSpeechSubtitleGenerating}"/>
-                                    <ProgressBar Width="80" Height="6" IsIndeterminate="True"
-                                             IsVisible="{Binding IsSpeechSubtitleGenerating}"/>
-                                    </StackPanel>
-                                    <TextBlock Text="{Binding SpeechSubtitleStatusMessage}" FontSize="10" Foreground="Gray"/>
-                                </StackPanel>
+                                <TextBlock Text="Speech 字幕将在复盘/批处理中按需自动生成" FontSize="10" Foreground="Gray"/>
                             </StackPanel>
                         </TabItem>
                         <TabItem Header="批处理">
@@ -491,12 +478,29 @@
                                     <TextBox Width="80" Text="{Binding BatchConcurrencyLimit, Mode=TwoWay}"/>
                                 </StackPanel>
                                 <StackPanel Orientation="Horizontal" Spacing="6">
-                                    <Button Content="开始处理" Padding="8,4"
+                                    <Button Content="{Binding BatchStartButtonText}" Padding="8,4"
                                             Command="{Binding StartBatchCommand}"/>
                                     <Button Content="停止" Padding="8,4"
                                             Command="{Binding StopBatchCommand}"/>
                                 </StackPanel>
                                 <TextBlock Text="{Binding BatchStatusMessage}" Foreground="Gray" FontSize="11"/>
+                            </StackPanel>
+                        </TabItem>
+                        <TabItem Header="复盘设置">
+                            <StackPanel Spacing="10">
+                                <TextBlock Text="Speech 字幕" FontWeight="Bold"/>
+                                <CheckBox Content="根据音频生成 speech 字幕（更准确，区分讲话人）"
+                                          IsChecked="{Binding UseSpeechSubtitleForReview, Mode=TwoWay}"
+                                          IsEnabled="{Binding IsSpeechSubtitleOptionEnabled}"/>
+                                <TextBlock Text="{Binding SpeechSubtitleOptionStatusText}" FontSize="10" Foreground="Gray"/>
+                                <StackPanel Orientation="Horizontal" Spacing="6"
+                                            IsVisible="{Binding IsSpeechSubtitleGenerating}">
+                                    <ProgressBar Width="120" Height="6" IsIndeterminate="True"/>
+                                    <Button Content="取消" Padding="6,3"
+                                            Command="{Binding CancelSpeechSubtitleCommand}"
+                                            IsEnabled="{Binding IsSpeechSubtitleGenerating}"/>
+                                </StackPanel>
+                                <TextBlock Text="{Binding SpeechSubtitleStatusMessage}" FontSize="10" Foreground="Gray"/>
                             </StackPanel>
                         </TabItem>
                     </TabControl>

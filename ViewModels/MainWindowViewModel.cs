@@ -76,6 +76,9 @@ namespace TranslationToolUI.ViewModels
         private string _batchStatusMessage = "";
         private string _batchQueueStatusText = "";
         private Task? _batchQueueRunnerTask;
+        private List<ReviewSheetPreset> _batchReviewSheetSnapshot = new();
+        private string? _batchLogFilePath;
+        private readonly object _batchLogLock = new();
         private MediaFileItem? _selectedAudioFile;
         private MediaFileItem? _selectedSubtitleFile;
         private SubtitleCue? _selectedSubtitleCue;
@@ -155,6 +158,7 @@ namespace TranslationToolUI.ViewModels
                 {
                     startCmd.RaiseCanExecuteChanged();
                 }
+                OnPropertyChanged(nameof(BatchStartButtonText));
             };
             _batchQueueItems.CollectionChanged += (_, _) => UpdateBatchQueueStatusText();
 
@@ -426,6 +430,11 @@ namespace TranslationToolUI.ViewModels
 
                     OnPropertyChanged(nameof(IsAiConfigured));
                     OnPropertyChanged(nameof(InsightPresetButtons));
+                    NormalizeSpeechSubtitleOption();
+                    OnPropertyChanged(nameof(IsSpeechSubtitleOptionEnabled));
+                    OnPropertyChanged(nameof(UseSpeechSubtitleForReview));
+                    OnPropertyChanged(nameof(SpeechSubtitleOptionStatusText));
+                    OnPropertyChanged(nameof(BatchStartButtonText));
                     RebuildReviewSheets();
                     ((RelayCommand)SendInsightCommand).RaiseCanExecuteChanged();
                     ((RelayCommand)SendPresetInsightCommand).RaiseCanExecuteChanged();
@@ -583,6 +592,14 @@ namespace TranslationToolUI.ViewModels
                     {
                         cancelCmd.RaiseCanExecuteChanged();
                     }
+                    if (GenerateReviewSummaryCommand is RelayCommand genCmd)
+                    {
+                        genCmd.RaiseCanExecuteChanged();
+                    }
+                    if (GenerateAllReviewSheetsCommand is RelayCommand allCmd)
+                    {
+                        allCmd.RaiseCanExecuteChanged();
+                    }
                 }
             }
         }
@@ -592,6 +609,53 @@ namespace TranslationToolUI.ViewModels
             get => _speechSubtitleStatusMessage;
             private set => SetProperty(ref _speechSubtitleStatusMessage, value);
         }
+
+        public bool IsSpeechSubtitleOptionEnabled => _config.BatchStorageIsValid
+            && !string.IsNullOrWhiteSpace(_config.BatchStorageConnectionString);
+
+        public bool UseSpeechSubtitleForReview
+        {
+            get => _config.UseSpeechSubtitleForReview;
+            set
+            {
+                if (_config.UseSpeechSubtitleForReview == value)
+                {
+                    return;
+                }
+
+                _config.UseSpeechSubtitleForReview = value;
+                OnPropertyChanged(nameof(UseSpeechSubtitleForReview));
+                OnPropertyChanged(nameof(BatchStartButtonText));
+                if (GenerateReviewSummaryCommand is RelayCommand genCmd)
+                {
+                    genCmd.RaiseCanExecuteChanged();
+                }
+                if (GenerateAllReviewSheetsCommand is RelayCommand allCmd)
+                {
+                    allCmd.RaiseCanExecuteChanged();
+                }
+                if (StartBatchCommand is RelayCommand startCmd)
+                {
+                    startCmd.RaiseCanExecuteChanged();
+                }
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        await _configService.SaveConfigAsync(_config);
+                    }
+                    catch
+                    {
+                    }
+                });
+            }
+        }
+
+        public string SpeechSubtitleOptionStatusText => IsSpeechSubtitleOptionEnabled
+            ? "存储账号已验证，允许生成 speech 字幕"
+            : "未验证存储账号，已禁用该选项";
+
+        public string BatchStartButtonText => GetBatchStartButtonText();
 
         public IBrush ReviewSummaryLampFill
         {
@@ -885,9 +949,26 @@ namespace TranslationToolUI.ViewModels
                     }
                 }
                 var hasAiSummary = totalSheets > 0 && completedSheets >= totalSheets;
+                var requireSpeech = ShouldGenerateSpeechSubtitleForReview;
+                var hasSpeechSubtitle = HasSpeechSubtitle(audio.FullPath);
+                var subtitlePath = requireSpeech
+                    ? (hasSpeechSubtitle ? GetSpeechSubtitlePath(audio.FullPath) : "")
+                    : GetPreferredSubtitlePath(audio.FullPath);
+                var hasSubtitle = requireSpeech
+                    ? hasSpeechSubtitle
+                    : !string.IsNullOrWhiteSpace(subtitlePath);
                 var hasAiSubtitle = HasAiSubtitle(audio.FullPath);
-                var subtitlePath = GetPreferredSubtitlePath(audio.FullPath);
                 var pendingSheets = Math.Max(totalSheets - completedSheets, 0);
+                var statusMessage = hasSubtitle
+                    ? "待处理"
+                    : (requireSpeech ? "待生成 speech 字幕" : "缺少字幕");
+                var reviewStatusText = totalSheets == 0
+                    ? "复盘:未勾选"
+                    : $"复盘 {completedSheets}/{totalSheets}";
+                if (requireSpeech && !hasSubtitle && totalSheets > 0)
+                {
+                    reviewStatusText = "复盘:等待字幕";
+                }
 
                 _batchTasks.Add(new BatchTaskItem
                 {
@@ -897,14 +978,12 @@ namespace TranslationToolUI.ViewModels
                     Progress = 0,
                     HasAiSubtitle = hasAiSubtitle,
                     HasAiSummary = hasAiSummary,
-                    StatusMessage = string.IsNullOrWhiteSpace(subtitlePath) ? "缺少字幕" : "待处理",
+                    StatusMessage = statusMessage,
                     ReviewTotal = totalSheets,
                     ReviewCompleted = completedSheets,
                     ReviewFailed = 0,
                     ReviewPending = pendingSheets,
-                    ReviewStatusText = totalSheets == 0
-                        ? "复盘:未勾选"
-                        : $"复盘 {completedSheets}/{totalSheets}"
+                    ReviewStatusText = reviewStatusText
                 });
             }
 
@@ -936,15 +1015,42 @@ namespace TranslationToolUI.ViewModels
                 : $"队列 {completed}/{total} 完成，运行 {running}，等待 {pending}，失败 {failed}";
         }
 
+        private void NormalizeSpeechSubtitleOption()
+        {
+            if (!IsSpeechSubtitleOptionEnabled && _config.UseSpeechSubtitleForReview)
+            {
+                _config.UseSpeechSubtitleForReview = false;
+            }
+        }
+
+        private bool ShouldGenerateSpeechSubtitleForReview => IsSpeechSubtitleOptionEnabled
+            && _config.UseSpeechSubtitleForReview;
+
+        private bool CanGenerateSpeechSubtitleFromStorage()
+        {
+            if (!IsSpeechSubtitleOptionEnabled)
+            {
+                return false;
+            }
+
+            var subscription = _config.GetActiveSubscription();
+            return subscription?.IsValid() == true && !string.IsNullOrWhiteSpace(_config.SourceLanguage);
+        }
+
         private void EnqueueReviewSheetsForAudio(MediaFileItem audioFile, IEnumerable<ReviewSheetState> sheets)
         {
-            var subtitlePath = GetPreferredSubtitlePath(audioFile.FullPath);
-            var hasSubtitle = !string.IsNullOrWhiteSpace(subtitlePath) && File.Exists(subtitlePath);
+            var requireSpeech = ShouldGenerateSpeechSubtitleForReview;
+            var subtitlePath = requireSpeech
+                ? GetSpeechSubtitlePath(audioFile.FullPath)
+                : GetPreferredSubtitlePath(audioFile.FullPath);
+            var hasSubtitle = requireSpeech
+                ? File.Exists(subtitlePath)
+                : !string.IsNullOrWhiteSpace(subtitlePath) && File.Exists(subtitlePath);
             if (!hasSubtitle)
             {
                 foreach (var sheet in sheets)
                 {
-                    sheet.StatusMessage = "缺少字幕";
+                    sheet.StatusMessage = requireSpeech ? "缺少 speech 字幕" : "缺少字幕";
                 }
                 return;
             }
@@ -974,6 +1080,7 @@ namespace TranslationToolUI.ViewModels
                     SheetName = sheet.Name,
                     SheetTag = sheet.FileTag,
                     Prompt = sheet.Prompt,
+                    QueueType = BatchQueueItemType.ReviewSheet,
                     Status = BatchTaskStatus.Pending,
                     Progress = 0,
                     StatusMessage = "待处理"
@@ -1053,6 +1160,10 @@ namespace TranslationToolUI.ViewModels
                     BatchStatusMessage = token.IsCancellationRequested
                         ? "批处理已停止"
                         : "批处理完成";
+                    if (!token.IsCancellationRequested && ShouldWriteBatchLogSuccess)
+                    {
+                        AppendBatchLog("BatchComplete", "-", "Success", "批处理完成");
+                    }
                 });
             }, token);
         }
@@ -1066,17 +1177,117 @@ namespace TranslationToolUI.ViewModels
 
         private bool CanStartBatchProcessing()
         {
-            return !IsBatchRunning && BatchTasks.Count > 0 && IsAiConfigured;
+            if (IsBatchRunning || BatchTasks.Count == 0)
+            {
+                return false;
+            }
+
+            var batchSheets = GetBatchReviewSheets();
+            var enableReview = IsAiConfigured && batchSheets.Count > 0;
+            var enableSpeech = ShouldGenerateSpeechSubtitleForReview;
+
+            if (!enableReview && !enableSpeech)
+            {
+                return false;
+            }
+
+            var needsSpeech = enableSpeech && BatchTasks.Any(task => !HasSpeechSubtitle(task.FullPath));
+            if (needsSpeech && !CanGenerateSpeechSubtitleFromStorage())
+            {
+                return false;
+            }
+
+            return true;
+        }
+
+        private bool ShouldWriteBatchLogSuccess => _config.BatchLogLevel == BatchLogLevel.SuccessAndFailure;
+
+        private bool ShouldWriteBatchLogFailure => _config.BatchLogLevel is BatchLogLevel.FailuresOnly or BatchLogLevel.SuccessAndFailure;
+
+        private void EnsureBatchLogFile()
+        {
+            if (_config.BatchLogLevel == BatchLogLevel.Off)
+            {
+                _batchLogFilePath = null;
+                return;
+            }
+
+            if (!string.IsNullOrWhiteSpace(_batchLogFilePath))
+            {
+                return;
+            }
+
+            var sessionsPath = PathManager.Instance.SessionsPath;
+            Directory.CreateDirectory(sessionsPath);
+            var fileName = $"batch_{DateTime.Now:yyyyMMdd_HHmmss}.log";
+            _batchLogFilePath = Path.Combine(sessionsPath, fileName);
+        }
+
+        private void AppendBatchLog(string eventName, string fileName, string status, string message)
+        {
+            if (_config.BatchLogLevel == BatchLogLevel.Off)
+            {
+                return;
+            }
+
+            EnsureBatchLogFile();
+            if (string.IsNullOrWhiteSpace(_batchLogFilePath))
+            {
+                return;
+            }
+
+            var timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff");
+            var line = $"{timestamp} | {eventName} | {fileName} | {status} | {message}";
+
+            lock (_batchLogLock)
+            {
+                File.AppendAllText(_batchLogFilePath, line + Environment.NewLine, new System.Text.UTF8Encoding(false));
+            }
+        }
+
+        private static string FormatBatchExceptionForLog(Exception ex)
+        {
+            var sb = new System.Text.StringBuilder(ex.ToString());
+            if (ex.Data.Contains("SpeechBatchError"))
+            {
+                var detail = ex.Data["SpeechBatchError"]?.ToString();
+                if (!string.IsNullOrWhiteSpace(detail))
+                {
+                    sb.AppendLine();
+                    sb.Append("SpeechBatchError: ");
+                    sb.Append(detail);
+                }
+            }
+
+            return sb.ToString();
+        }
+
+        private string GetBatchStartButtonText()
+        {
+            var batchSheets = GetBatchReviewSheets();
+            var enableReview = IsAiConfigured && batchSheets.Count > 0;
+            var enableSpeech = ShouldGenerateSpeechSubtitleForReview;
+
+            if (enableSpeech && enableReview)
+            {
+                return "开始生成字幕+复盘";
+            }
+
+            if (enableSpeech)
+            {
+                return "开始生成字幕";
+            }
+
+            if (enableReview)
+            {
+                return "开始生成复盘";
+            }
+
+            return "开始处理";
         }
 
         private void StartBatchProcessing()
         {
-            if (_config.AiConfig == null || !_config.AiConfig.IsValid)
-            {
-                BatchStatusMessage = "AI 配置无效，请先配置 AI 服务";
-                return;
-            }
-
             if (BatchTasks.Count == 0)
             {
                 BatchStatusMessage = "没有可处理的任务";
@@ -1084,31 +1295,86 @@ namespace TranslationToolUI.ViewModels
             }
 
             var batchSheets = GetBatchReviewSheets();
-            if (batchSheets.Count == 0)
+            var enableReview = IsAiConfigured && batchSheets.Count > 0;
+            var enableSpeech = ShouldGenerateSpeechSubtitleForReview;
+
+            if (!enableReview && !enableSpeech)
             {
-                BatchStatusMessage = "未勾选批处理复盘模板";
+                BatchStatusMessage = "未启用 speech 字幕或复盘生成";
+                return;
+            }
+
+            var needsSpeech = enableSpeech && BatchTasks.Any(task => !HasSpeechSubtitle(task.FullPath));
+            if (needsSpeech && !CanGenerateSpeechSubtitleFromStorage())
+            {
+                BatchStatusMessage = "speech 字幕需要有效的存储账号与语音订阅";
                 return;
             }
 
             _batchCts?.Cancel();
             IsBatchRunning = true;
             BatchStatusMessage = "批处理已开始";
+            _batchLogFilePath = null;
+            EnsureBatchLogFile();
+            if (ShouldWriteBatchLogSuccess)
+            {
+                AppendBatchLog("BatchStart", "-", "Success", "批处理开始");
+            }
 
             _batchQueueItems.Clear();
-            var batchItemLookup = BatchTasks.ToDictionary(item => item.FullPath, item => item);
+            _batchReviewSheetSnapshot = batchSheets.ToList();
             foreach (var batchItem in BatchTasks)
             {
-                var subtitlePath = GetPreferredSubtitlePath(batchItem.FullPath);
-                var hasSubtitle = !string.IsNullOrWhiteSpace(subtitlePath) && File.Exists(subtitlePath);
-                if (!hasSubtitle)
+                var speechExists = HasSpeechSubtitle(batchItem.FullPath);
+                batchItem.HasAiSubtitle = enableSpeech
+                    ? speechExists
+                    : HasAiSubtitle(batchItem.FullPath);
+                if (enableSpeech && !speechExists)
                 {
-                    UpdateBatchItem(batchItem, BatchTaskStatus.Failed, 0, "缺少字幕");
-                    batchItem.ReviewTotal = batchSheets.Count;
+                    UpdateBatchItem(batchItem, BatchTaskStatus.Pending, 0, "待生成 speech 字幕");
+                    batchItem.ReviewTotal = enableReview ? batchSheets.Count : 0;
                     batchItem.ReviewCompleted = 0;
                     batchItem.ReviewFailed = 0;
-                    batchItem.ReviewPending = batchSheets.Count;
-                    batchItem.ReviewStatusText = "复盘:缺少字幕";
+                    batchItem.ReviewPending = enableReview ? batchSheets.Count : 0;
+                    batchItem.ReviewStatusText = enableReview ? "复盘:等待字幕" : "复盘:未启用";
+                    EnqueueSpeechSubtitleForBatch(batchItem);
                     continue;
+                }
+
+                if (!enableReview)
+                {
+                    UpdateBatchItem(batchItem, BatchTaskStatus.Completed, 1, "字幕已存在");
+                    batchItem.ReviewTotal = 0;
+                    batchItem.ReviewCompleted = 0;
+                    batchItem.ReviewFailed = 0;
+                    batchItem.ReviewPending = 0;
+                    batchItem.ReviewStatusText = "复盘:未启用";
+                    batchItem.HasAiSubtitle = speechExists || HasAiSubtitle(batchItem.FullPath);
+                    if (ShouldWriteBatchLogSuccess)
+                    {
+                        AppendBatchLog("SpeechSkip", batchItem.FileName, "Success", "speech 字幕已存在");
+                    }
+                    continue;
+                }
+
+                if (!enableSpeech)
+                {
+                    var subtitlePath = GetPreferredSubtitlePath(batchItem.FullPath);
+                    var hasSubtitle = !string.IsNullOrWhiteSpace(subtitlePath) && File.Exists(subtitlePath);
+                    if (!hasSubtitle)
+                    {
+                        UpdateBatchItem(batchItem, BatchTaskStatus.Failed, 0, "缺少字幕");
+                        batchItem.ReviewTotal = batchSheets.Count;
+                        batchItem.ReviewCompleted = 0;
+                        batchItem.ReviewFailed = 0;
+                        batchItem.ReviewPending = batchSheets.Count;
+                        batchItem.ReviewStatusText = "复盘:缺少字幕";
+                        if (ShouldWriteBatchLogFailure)
+                        {
+                            AppendBatchLog("ReviewSkip", batchItem.FileName, "Failed", "缺少字幕");
+                        }
+                        continue;
+                    }
                 }
 
                 var completed = 0;
@@ -1133,6 +1399,10 @@ namespace TranslationToolUI.ViewModels
                 {
                     UpdateBatchItem(batchItem, BatchTaskStatus.Completed, 1, "已存在");
                     batchItem.HasAiSummary = true;
+                    if (ShouldWriteBatchLogSuccess)
+                    {
+                        AppendBatchLog("ReviewSkip", batchItem.FileName, "Success", "复盘已存在");
+                    }
                     continue;
                 }
 
@@ -1150,14 +1420,103 @@ namespace TranslationToolUI.ViewModels
                         SheetName = sheet.Name,
                         SheetTag = sheet.FileTag,
                         Prompt = sheet.Prompt,
+                        QueueType = BatchQueueItemType.ReviewSheet,
                         Status = BatchTaskStatus.Pending,
                         Progress = 0,
                         StatusMessage = "待处理"
                     });
+                    if (ShouldWriteBatchLogSuccess)
+                    {
+                        AppendBatchLog("ReviewEnqueue", batchItem.FileName, "Success", $"入队 {sheet.Name}");
+                    }
                 }
             }
 
+            if (_batchQueueItems.Count == 0)
+            {
+                IsBatchRunning = false;
+                BatchStatusMessage = "批处理完成";
+                if (ShouldWriteBatchLogSuccess)
+                {
+                    AppendBatchLog("BatchComplete", "-", "Success", "无待处理任务");
+                }
+                return;
+            }
+
             StartBatchQueueRunner("批处理已开始");
+        }
+
+        private void EnqueueSpeechSubtitleForBatch(BatchTaskItem batchItem)
+        {
+            var existsInQueue = _batchQueueItems.Any(item =>
+                item.QueueType == BatchQueueItemType.SpeechSubtitle
+                && string.Equals(item.FullPath, batchItem.FullPath, StringComparison.OrdinalIgnoreCase)
+                && item.Status is BatchTaskStatus.Pending or BatchTaskStatus.Running);
+
+            if (existsInQueue)
+            {
+                return;
+            }
+
+            _batchQueueItems.Add(new BatchQueueItem
+            {
+                FileName = batchItem.FileName,
+                FullPath = batchItem.FullPath,
+                SheetName = "speech 字幕",
+                SheetTag = "speech",
+                Prompt = "",
+                QueueType = BatchQueueItemType.SpeechSubtitle,
+                Status = BatchTaskStatus.Pending,
+                Progress = 0,
+                StatusMessage = "待处理"
+            });
+            if (ShouldWriteBatchLogSuccess)
+            {
+                AppendBatchLog("SpeechEnqueue", batchItem.FileName, "Success", "入队 speech 字幕");
+            }
+        }
+
+        private int EnqueueReviewQueueItemsForAudioInternal(BatchTaskItem parentItem, IEnumerable<ReviewSheetPreset> sheets)
+        {
+            var added = 0;
+            foreach (var sheet in sheets)
+            {
+                if (File.Exists(GetReviewSheetPath(parentItem.FullPath, sheet.FileTag)))
+                {
+                    continue;
+                }
+
+                var existsInQueue = _batchQueueItems.Any(item =>
+                    item.QueueType == BatchQueueItemType.ReviewSheet
+                    && string.Equals(item.FullPath, parentItem.FullPath, StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(item.SheetTag, sheet.FileTag, StringComparison.OrdinalIgnoreCase)
+                    && item.Status is BatchTaskStatus.Pending or BatchTaskStatus.Running);
+
+                if (existsInQueue)
+                {
+                    continue;
+                }
+
+                _batchQueueItems.Add(new BatchQueueItem
+                {
+                    FileName = parentItem.FileName,
+                    FullPath = parentItem.FullPath,
+                    SheetName = sheet.Name,
+                    SheetTag = sheet.FileTag,
+                    Prompt = sheet.Prompt,
+                    QueueType = BatchQueueItemType.ReviewSheet,
+                    Status = BatchTaskStatus.Pending,
+                    Progress = 0,
+                    StatusMessage = "待处理"
+                });
+                added++;
+                if (ShouldWriteBatchLogSuccess)
+                {
+                    AppendBatchLog("ReviewEnqueue", parentItem.FileName, "Success", $"入队 {sheet.Name}");
+                }
+            }
+
+            return added;
         }
 
         private void StopBatchProcessing()
@@ -1168,6 +1527,10 @@ namespace TranslationToolUI.ViewModels
                 item.Cts?.Cancel();
             }
             BatchStatusMessage = "正在停止批处理...";
+            if (ShouldWriteBatchLogFailure)
+            {
+                AppendBatchLog("BatchStop", "-", "Failed", "批处理停止");
+            }
         }
 
         private async Task ProcessBatchQueueItem(
@@ -1187,15 +1550,32 @@ namespace TranslationToolUI.ViewModels
             var localToken = queueItem.Cts.Token;
 
             UpdateQueueItem(queueItem, BatchTaskStatus.Running, 0.1, "生成中");
+            if (ShouldWriteBatchLogSuccess)
+            {
+                var eventName = queueItem.QueueType == BatchQueueItemType.SpeechSubtitle
+                    ? "SpeechStart"
+                    : "ReviewStart";
+                AppendBatchLog(eventName, queueItem.FileName, "Success", queueItem.SheetName);
+            }
             if (parentItem != null)
             {
                 UpdateBatchItem(parentItem, BatchTaskStatus.Running, parentItem.Progress, "生成中");
+            }
+
+            if (queueItem.QueueType == BatchQueueItemType.SpeechSubtitle)
+            {
+                await ProcessSpeechSubtitleQueueItem(queueItem, parentItem, localToken, cueCache, cueLock);
+                return;
             }
 
             var cues = GetBatchCues(queueItem.FullPath, cueCache, cueLock);
             if (cues.Count == 0)
             {
                 UpdateQueueItem(queueItem, BatchTaskStatus.Failed, 0, "字幕为空");
+                if (ShouldWriteBatchLogFailure)
+                {
+                    AppendBatchLog("ReviewFailed", queueItem.FileName, "Failed", "字幕为空");
+                }
                 if (parentItem != null)
                 {
                     UpdateBatchReviewProgress(parentItem, BatchTaskStatus.Failed);
@@ -1244,6 +1624,10 @@ namespace TranslationToolUI.ViewModels
                 }
 
                 UpdateQueueItem(queueItem, BatchTaskStatus.Completed, 1, note);
+                if (ShouldWriteBatchLogSuccess)
+                {
+                    AppendBatchLog("ReviewSuccess", queueItem.FileName, "Success", queueItem.SheetName);
+                }
                 if (parentItem != null)
                 {
                     UpdateBatchReviewProgress(parentItem, BatchTaskStatus.Completed);
@@ -1252,6 +1636,10 @@ namespace TranslationToolUI.ViewModels
             catch (OperationCanceledException)
             {
                 UpdateQueueItem(queueItem, BatchTaskStatus.Failed, 0, "已取消");
+                if (ShouldWriteBatchLogFailure)
+                {
+                    AppendBatchLog("ReviewCanceled", queueItem.FileName, "Failed", "已取消");
+                }
                 if (parentItem != null)
                 {
                     UpdateBatchReviewProgress(parentItem, BatchTaskStatus.Failed);
@@ -1260,9 +1648,125 @@ namespace TranslationToolUI.ViewModels
             catch (Exception ex)
             {
                 UpdateQueueItem(queueItem, BatchTaskStatus.Failed, 0, $"失败: {ex.Message}");
+                if (ShouldWriteBatchLogFailure)
+                {
+                    AppendBatchLog("ReviewFailed", queueItem.FileName, "Failed", ex.ToString());
+                }
                 if (parentItem != null)
                 {
                     UpdateBatchReviewProgress(parentItem, BatchTaskStatus.Failed);
+                }
+            }
+        }
+
+        private async Task ProcessSpeechSubtitleQueueItem(
+            BatchQueueItem queueItem,
+            BatchTaskItem? parentItem,
+            CancellationToken token,
+            Dictionary<string, List<SubtitleCue>> cueCache,
+            object cueLock)
+        {
+            try
+            {
+                var success = await GenerateBatchSpeechSubtitleForFileAsync(
+                    queueItem.FullPath,
+                    token,
+                    status => UpdateQueueItem(queueItem, BatchTaskStatus.Running, 0.2, status));
+
+                if (!success)
+                {
+                    UpdateQueueItem(queueItem, BatchTaskStatus.Failed, 0, "未识别到有效文本");
+                    if (ShouldWriteBatchLogFailure)
+                    {
+                        AppendBatchLog("SpeechFailed", queueItem.FileName, "Failed", "未识别到有效文本");
+                    }
+                    if (parentItem != null)
+                    {
+                        parentItem.ReviewStatusText = "复盘:字幕失败";
+                        UpdateBatchItem(parentItem, BatchTaskStatus.Failed, 0, "字幕失败");
+                    }
+                    return;
+                }
+
+                UpdateQueueItem(queueItem, BatchTaskStatus.Completed, 1, "完成");
+                if (ShouldWriteBatchLogSuccess)
+                {
+                    AppendBatchLog("SpeechSuccess", queueItem.FileName, "Success", "speech 字幕完成");
+                }
+
+                lock (cueLock)
+                {
+                    cueCache.Remove(queueItem.FullPath);
+                }
+
+                if (parentItem != null)
+                {
+                    parentItem.HasAiSubtitle = true;
+                }
+
+                var enableReview = IsAiConfigured && _batchReviewSheetSnapshot.Count > 0;
+                if (!enableReview)
+                {
+                    if (parentItem != null)
+                    {
+                        UpdateBatchItem(parentItem, BatchTaskStatus.Completed, 1, "字幕完成");
+                    }
+                    return;
+                }
+
+                if (parentItem != null)
+                {
+                    var completed = _batchReviewSheetSnapshot.Count(sheet =>
+                        File.Exists(GetReviewSheetPath(parentItem.FullPath, sheet.FileTag)));
+                    parentItem.ReviewTotal = _batchReviewSheetSnapshot.Count;
+                    parentItem.ReviewCompleted = completed;
+                    parentItem.ReviewFailed = 0;
+                    parentItem.ReviewPending = Math.Max(parentItem.ReviewTotal - completed, 0);
+                    parentItem.ReviewStatusText = parentItem.ReviewTotal == 0
+                        ? "复盘:未勾选"
+                        : $"复盘 {completed}/{parentItem.ReviewTotal}";
+
+                    if (parentItem.ReviewPending == 0)
+                    {
+                        parentItem.HasAiSummary = true;
+                        UpdateBatchItem(parentItem, BatchTaskStatus.Completed, 1, "已存在");
+                        return;
+                    }
+                }
+
+                var added = await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
+                    parentItem == null
+                        ? 0
+                        : EnqueueReviewQueueItemsForAudioInternal(parentItem, _batchReviewSheetSnapshot));
+
+                if (parentItem != null)
+                {
+                    var statusMessage = added > 0 ? "字幕完成，待复盘" : "字幕完成";
+                    UpdateBatchItem(parentItem, BatchTaskStatus.Running, parentItem.Progress, statusMessage);
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                UpdateQueueItem(queueItem, BatchTaskStatus.Failed, 0, "已取消");
+                if (ShouldWriteBatchLogFailure)
+                {
+                    AppendBatchLog("SpeechCanceled", queueItem.FileName, "Failed", "已取消");
+                }
+                if (parentItem != null)
+                {
+                    UpdateBatchItem(parentItem, BatchTaskStatus.Failed, 0, "字幕已取消");
+                }
+            }
+            catch (Exception ex)
+            {
+                UpdateQueueItem(queueItem, BatchTaskStatus.Failed, 0, $"失败: {ex.Message}");
+                if (ShouldWriteBatchLogFailure)
+                {
+                    AppendBatchLog("SpeechFailed", queueItem.FileName, "Failed", FormatBatchExceptionForLog(ex));
+                }
+                if (parentItem != null)
+                {
+                    UpdateBatchItem(parentItem, BatchTaskStatus.Failed, 0, "字幕失败");
                 }
             }
         }
@@ -1280,7 +1784,9 @@ namespace TranslationToolUI.ViewModels
                 }
             }
 
-            var subtitlePath = GetPreferredSubtitlePath(audioPath);
+            var subtitlePath = ShouldGenerateSpeechSubtitleForReview
+                ? GetSpeechSubtitlePath(audioPath)
+                : GetPreferredSubtitlePath(audioPath);
             if (string.IsNullOrWhiteSpace(subtitlePath) || !File.Exists(subtitlePath))
             {
                 return new List<SubtitleCue>();
@@ -1359,11 +1865,26 @@ namespace TranslationToolUI.ViewModels
 
             item.Cts?.Cancel();
             UpdateQueueItem(item, BatchTaskStatus.Failed, item.Progress, "已取消");
+            if (ShouldWriteBatchLogFailure)
+            {
+                var eventName = item.QueueType == BatchQueueItemType.SpeechSubtitle
+                    ? "SpeechCanceled"
+                    : "ReviewCanceled";
+                AppendBatchLog(eventName, item.FileName, "Failed", "已取消");
+            }
 
             var parent = BatchTasks.FirstOrDefault(x => x.FullPath == item.FullPath);
             if (parent != null)
             {
-                UpdateBatchReviewProgress(parent, BatchTaskStatus.Failed);
+                if (item.QueueType == BatchQueueItemType.SpeechSubtitle)
+                {
+                    parent.ReviewStatusText = "复盘:字幕取消";
+                    UpdateBatchItem(parent, BatchTaskStatus.Failed, 0, "字幕已取消");
+                }
+                else
+                {
+                    UpdateBatchReviewProgress(parent, BatchTaskStatus.Failed);
+                }
             }
 
             Avalonia.Threading.Dispatcher.UIThread.Post(() =>
@@ -1403,9 +1924,16 @@ namespace TranslationToolUI.ViewModels
         {
             var directory = Path.GetDirectoryName(audioFilePath) ?? PathManager.Instance.SessionsPath;
             var baseName = Path.GetFileNameWithoutExtension(audioFilePath);
+            var speechVtt = Path.Combine(directory, baseName + ".speech.vtt");
             var aiSrt = Path.Combine(directory, baseName + ".ai.srt");
             var aiVtt = Path.Combine(directory, baseName + ".ai.vtt");
-            return File.Exists(aiSrt) || File.Exists(aiVtt);
+            return File.Exists(speechVtt) || File.Exists(aiSrt) || File.Exists(aiVtt);
+        }
+
+        private static bool HasSpeechSubtitle(string audioFilePath)
+        {
+            var speechPath = GetSpeechSubtitlePath(audioFilePath);
+            return File.Exists(speechPath);
         }
 
         private void RebuildReviewSheets()
@@ -1503,7 +2031,12 @@ namespace TranslationToolUI.ViewModels
 
             if (_subtitleFiles.Count > 0)
             {
-                SelectedSubtitleFile = _subtitleFiles[0];
+                var speechPath = GetSpeechSubtitlePath(audioFile.FullPath);
+                var speechFile = _subtitleFiles.FirstOrDefault(item =>
+                    string.Equals(item.FullPath, speechPath, StringComparison.OrdinalIgnoreCase));
+                SelectedSubtitleFile = ShouldGenerateSpeechSubtitleForReview && speechFile != null
+                    ? speechFile
+                    : _subtitleFiles[0];
             }
         }
 
@@ -1586,10 +2119,16 @@ namespace TranslationToolUI.ViewModels
 
         private bool CanGenerateReviewSummary()
         {
+            var hasCues = SubtitleCues.Count > 0;
+            var allowSpeechGeneration = ShouldGenerateSpeechSubtitleForReview
+                && SelectedAudioFile != null
+                && !IsSpeechSubtitleGenerating
+                && (HasSpeechSubtitle(SelectedAudioFile.FullPath) || CanGenerateSpeechSubtitleFromStorage());
+
             return IsAiConfigured
                    && SelectedAudioFile != null
                    && SelectedReviewSheet != null
-                   && SubtitleCues.Count > 0
+                   && (hasCues || allowSpeechGeneration)
                    && !IsReviewSummaryLoading;
         }
 
@@ -1602,22 +2141,112 @@ namespace TranslationToolUI.ViewModels
 
             var sheet = SelectedReviewSheet;
             var audioFile = SelectedAudioFile;
+            if (!await EnsureSpeechSubtitleForReviewAsync(audioFile))
+            {
+                return;
+            }
+
             var cues = SubtitleCues.ToList();
             await GenerateReviewSheetAsync(sheet, audioFile, cues);
         }
 
         private bool CanGenerateAllReviewSheets()
         {
+            var hasCues = SubtitleCues.Count > 0;
+            var allowSpeechGeneration = ShouldGenerateSpeechSubtitleForReview
+                && SelectedAudioFile != null
+                && !IsSpeechSubtitleGenerating
+                && (HasSpeechSubtitle(SelectedAudioFile.FullPath) || CanGenerateSpeechSubtitleFromStorage());
+
             return IsAiConfigured
                    && SelectedAudioFile != null
-                   && SubtitleCues.Count > 0
+                   && (hasCues || allowSpeechGeneration)
                    && _reviewSheets.Count > 0
                    && _reviewSheets.Any(sheet => !sheet.IsLoading);
         }
 
+        private async Task<bool> EnsureSpeechSubtitleForReviewAsync(MediaFileItem audioFile)
+        {
+            if (!ShouldGenerateSpeechSubtitleForReview)
+            {
+                return true;
+            }
+
+            var speechPath = GetSpeechSubtitlePath(audioFile.FullPath);
+            if (File.Exists(speechPath))
+            {
+                LoadSubtitleFilesForAudio(audioFile);
+                var speechFile = _subtitleFiles.FirstOrDefault(item =>
+                    string.Equals(item.FullPath, speechPath, StringComparison.OrdinalIgnoreCase));
+                if (speechFile != null)
+                {
+                    SelectedSubtitleFile = speechFile;
+                }
+                return true;
+            }
+
+            if (!CanGenerateSpeechSubtitleFromStorage())
+            {
+                SpeechSubtitleStatusMessage = "缺少有效的存储账号或语音订阅，无法生成 speech 字幕";
+                return false;
+            }
+
+            _speechSubtitleCts?.Cancel();
+            _speechSubtitleCts = new CancellationTokenSource();
+            var token = _speechSubtitleCts.Token;
+
+            IsSpeechSubtitleGenerating = true;
+            SpeechSubtitleStatusMessage = "speech 字幕生成中...";
+
+            try
+            {
+                var success = await GenerateBatchSpeechSubtitleForFileAsync(
+                    audioFile.FullPath,
+                    token,
+                    status => SpeechSubtitleStatusMessage = status);
+                if (!success)
+                {
+                    SpeechSubtitleStatusMessage = "未识别到有效文本";
+                    return false;
+                }
+
+                SpeechSubtitleStatusMessage = $"speech 字幕已生成: {Path.GetFileName(speechPath)}";
+                LoadSubtitleFilesForAudio(audioFile);
+                var speechFile = _subtitleFiles.FirstOrDefault(item =>
+                    string.Equals(item.FullPath, speechPath, StringComparison.OrdinalIgnoreCase));
+                if (speechFile != null)
+                {
+                    SelectedSubtitleFile = speechFile;
+                }
+
+                return true;
+            }
+            catch (OperationCanceledException)
+            {
+                SpeechSubtitleStatusMessage = "speech 字幕生成已取消";
+                return false;
+            }
+            catch (Exception ex)
+            {
+                SpeechSubtitleStatusMessage = $"speech 字幕生成失败: {ex.Message}";
+                return false;
+            }
+            finally
+            {
+                IsSpeechSubtitleGenerating = false;
+                _speechSubtitleCts?.Dispose();
+                _speechSubtitleCts = null;
+            }
+        }
+
         private async void GenerateAllReviewSheets()
         {
-            if (SelectedAudioFile == null || SubtitleCues.Count == 0)
+            if (SelectedAudioFile == null)
+            {
+                return;
+            }
+
+            if (!await EnsureSpeechSubtitleForReviewAsync(SelectedAudioFile))
             {
                 return;
             }
@@ -1716,20 +2345,19 @@ namespace TranslationToolUI.ViewModels
                 return false;
             }
 
-            if (string.IsNullOrWhiteSpace(_config.BatchStorageConnectionString))
+            if (!IsSpeechSubtitleOptionEnabled)
             {
                 return false;
             }
 
-            var subscription = _config.GetActiveSubscription();
-            return subscription?.IsValid() == true && !string.IsNullOrWhiteSpace(_config.SourceLanguage);
+            return CanGenerateSpeechSubtitleFromStorage();
         }
 
         private async void GenerateBatchSpeechSubtitle()
         {
             if (!CanGenerateBatchSpeechSubtitle())
             {
-                SpeechSubtitleStatusMessage = "请配置批量转写的存储连接字符串";
+                SpeechSubtitleStatusMessage = "请先验证存储账号与语音订阅";
                 return;
             }
 
@@ -1744,59 +2372,20 @@ namespace TranslationToolUI.ViewModels
             var token = _speechSubtitleCts.Token;
 
             IsSpeechSubtitleGenerating = true;
-            SpeechSubtitleStatusMessage = "批量转写：上传音频...";
-
-            BlobClient? uploadedBlob = null;
-            BlobContainerClient? resultContainer = null;
-
             try
             {
-                var (audioContainer, outputContainer) = await GetBatchContainersAsync(
-                    _config.BatchStorageConnectionString,
-                    _config.BatchAudioContainerName,
-                    _config.BatchResultContainerName,
-                    token);
-
-                resultContainer = outputContainer;
-
-                uploadedBlob = await UploadAudioToBlobAsync(
+                var success = await GenerateBatchSpeechSubtitleForFileAsync(
                     audioFile.FullPath,
-                    audioContainer,
-                    token);
-
-                var contentUrl = CreateBlobReadSasUri(uploadedBlob, TimeSpan.FromHours(24));
-
-                SpeechSubtitleStatusMessage = "批量转写：提交任务...";
-
-                var subscription = _config.GetActiveSubscription();
-                if (subscription == null)
-                {
-                    throw new InvalidOperationException("语音订阅未配置");
-                }
-
-                var (cues, transcriptionJson) = await BatchTranscribeSpeechToCuesAsync(
-                    contentUrl,
-                    _config.SourceLanguage,
-                    subscription,
                     token,
                     status => SpeechSubtitleStatusMessage = status);
 
-                if (cues.Count == 0)
+                if (!success)
                 {
                     SpeechSubtitleStatusMessage = "未识别到有效文本";
                     return;
                 }
 
                 var outputPath = GetSpeechSubtitlePath(audioFile.FullPath);
-                WriteVttFile(outputPath, cues);
-
-                if (resultContainer != null)
-                {
-                    var baseName = Path.GetFileNameWithoutExtension(audioFile.FullPath);
-                    await UploadTextToBlobAsync(resultContainer, baseName + ".speech.vtt", File.ReadAllText(outputPath), "text/vtt", token);
-                    await UploadTextToBlobAsync(resultContainer, baseName + ".speech.json", transcriptionJson, "application/json", token);
-                }
-
                 SpeechSubtitleStatusMessage = $"speech 字幕已生成: {Path.GetFileName(outputPath)}";
                 LoadSubtitleFilesForAudio(audioFile);
             }
@@ -1814,6 +2403,71 @@ namespace TranslationToolUI.ViewModels
                 _speechSubtitleCts?.Dispose();
                 _speechSubtitleCts = null;
             }
+        }
+
+        private async Task<bool> GenerateBatchSpeechSubtitleForFileAsync(
+            string audioPath,
+            CancellationToken token,
+            Action<string>? onStatus)
+        {
+            if (string.IsNullOrWhiteSpace(audioPath))
+            {
+                return false;
+            }
+
+            if (!File.Exists(audioPath))
+            {
+                throw new FileNotFoundException("未找到音频文件", audioPath);
+            }
+
+            var subscription = _config.GetActiveSubscription();
+            if (subscription == null || !subscription.IsValid())
+            {
+                throw new InvalidOperationException("语音订阅未配置");
+            }
+
+            if (!IsSpeechSubtitleOptionEnabled)
+            {
+                throw new InvalidOperationException("存储账号未验证");
+            }
+
+            onStatus?.Invoke("批量转写：上传音频...");
+
+            var (audioContainer, outputContainer) = await GetBatchContainersAsync(
+                _config.BatchStorageConnectionString,
+                _config.BatchAudioContainerName,
+                _config.BatchResultContainerName,
+                token);
+
+            var uploadedBlob = await UploadAudioToBlobAsync(
+                audioPath,
+                audioContainer,
+                token);
+
+            var contentUrl = CreateBlobReadSasUri(uploadedBlob, TimeSpan.FromHours(24));
+
+            onStatus?.Invoke("批量转写：提交任务...");
+
+            var (cues, transcriptionJson) = await BatchTranscribeSpeechToCuesAsync(
+                contentUrl,
+                _config.SourceLanguage,
+                subscription,
+                token,
+                status => onStatus?.Invoke(status));
+
+            if (cues.Count == 0)
+            {
+                return false;
+            }
+
+            var outputPath = GetSpeechSubtitlePath(audioPath);
+            WriteVttFile(outputPath, cues);
+
+            var baseName = Path.GetFileNameWithoutExtension(audioPath);
+            await UploadTextToBlobAsync(outputContainer, baseName + ".speech.vtt", File.ReadAllText(outputPath), "text/vtt", token);
+            await UploadTextToBlobAsync(outputContainer, baseName + ".speech.json", transcriptionJson, "application/json", token);
+
+            return true;
         }
 
         private static async Task<(BlobContainerClient Audio, BlobContainerClient Result)> GetBatchContainersAsync(
@@ -2004,14 +2658,10 @@ namespace TranslationToolUI.ViewModels
 
                 if (string.Equals(status, "Failed", StringComparison.OrdinalIgnoreCase))
                 {
-                    var errorMessage = "批量转写失败";
-                    if (statusDoc.RootElement.TryGetProperty("error", out var errorElement) &&
-                        errorElement.TryGetProperty("message", out var messageElement))
-                    {
-                        errorMessage = messageElement.GetString() ?? errorMessage;
-                    }
-
-                    throw new InvalidOperationException(errorMessage);
+                    var errorSummary = BuildSpeechBatchFailureSummary(statusDoc) ?? "批量转写失败";
+                    var ex = new InvalidOperationException(errorSummary);
+                    ex.Data["SpeechBatchError"] = statusBody;
+                    throw ex;
                 }
 
                 onStatus($"批量转写：{status}...");
@@ -2074,6 +2724,58 @@ namespace TranslationToolUI.ViewModels
             }
 
             return null;
+        }
+
+        private static string? BuildSpeechBatchFailureSummary(JsonDocument statusDoc)
+        {
+            if (!statusDoc.RootElement.TryGetProperty("error", out var errorElement))
+            {
+                return null;
+            }
+
+            var code = errorElement.TryGetProperty("code", out var codeElement)
+                ? codeElement.GetString()
+                : null;
+            var message = errorElement.TryGetProperty("message", out var messageElement)
+                ? messageElement.GetString()
+                : null;
+
+            var detailMessages = new List<string>();
+            if (errorElement.TryGetProperty("details", out var detailsElement) &&
+                detailsElement.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var detail in detailsElement.EnumerateArray())
+                {
+                    var detailMessage = detail.TryGetProperty("message", out var detailMessageElement)
+                        ? detailMessageElement.GetString()
+                        : null;
+                    if (!string.IsNullOrWhiteSpace(detailMessage))
+                    {
+                        detailMessages.Add(detailMessage);
+                    }
+                }
+            }
+
+            var summaryParts = new List<string>();
+            if (!string.IsNullOrWhiteSpace(code))
+            {
+                summaryParts.Add(code);
+            }
+            if (!string.IsNullOrWhiteSpace(message))
+            {
+                summaryParts.Add(message);
+            }
+            if (detailMessages.Count > 0)
+            {
+                summaryParts.Add(string.Join("; ", detailMessages));
+            }
+
+            if (summaryParts.Count == 0)
+            {
+                return null;
+            }
+
+            return "批量转写失败: " + string.Join(" | ", summaryParts);
         }
 
         private static List<SubtitleCue> ParseBatchTranscriptionToCues(string transcriptionJson)
@@ -3997,6 +4699,11 @@ namespace TranslationToolUI.ViewModels
             OnPropertyChanged(nameof(IsAudioDeviceSelectionEnabled));
             OnPropertyChanged(nameof(IsAudioDeviceRefreshEnabled));
             OnPropertyChanged(nameof(IsAiConfigured));
+            NormalizeSpeechSubtitleOption();
+            OnPropertyChanged(nameof(IsSpeechSubtitleOptionEnabled));
+            OnPropertyChanged(nameof(UseSpeechSubtitleForReview));
+            OnPropertyChanged(nameof(SpeechSubtitleOptionStatusText));
+            OnPropertyChanged(nameof(BatchStartButtonText));
             RebuildReviewSheets();
 
             ForceUpdateComboBoxSelection();

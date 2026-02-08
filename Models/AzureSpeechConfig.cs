@@ -6,6 +6,13 @@ using TranslationToolUI.Services;
 
 namespace TranslationToolUI.Models
 {
+    public enum BatchLogLevel
+    {
+        Off,
+        FailuresOnly,
+        SuccessAndFailure
+    }
+
     public class AzureSubscription
     {
         public string Name { get; set; } = "";
@@ -59,8 +66,11 @@ namespace TranslationToolUI.Models
         public const string DefaultBatchResultContainerName = "translationtoolui-results";
 
         public string BatchStorageConnectionString { get; set; } = "";
+        public bool BatchStorageIsValid { get; set; } = false;
         public string BatchAudioContainerName { get; set; } = DefaultBatchAudioContainerName;
         public string BatchResultContainerName { get; set; } = DefaultBatchResultContainerName;
+        public bool UseSpeechSubtitleForReview { get; set; } = true;
+        public BatchLogLevel BatchLogLevel { get; set; } = BatchLogLevel.Off;
 
         public AiConfig? AiConfig { get; set; }
 
