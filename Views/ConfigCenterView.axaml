@@ -77,91 +77,18 @@
                     </Grid>
                 </ScrollViewer>
             </TabItem>
-
-            <TabItem Header="输入与识别">
-                <ScrollViewer>
-                    <StackPanel Spacing="12">
-                        <TextBlock Text="识别策略" FontWeight="Bold"/>
-
-                        <CheckBox x:Name="FilterModalParticlesCheckBox" Content="过滤语气助词" IsChecked="True"/>
-
-                        <StackPanel Spacing="5">
-                            <TextBlock Text="最大历史记录数量"/>
-                            <NumericUpDown x:Name="MaxHistoryItemsNumeric" Value="15" Minimum="5" Maximum="100" Width="120" FormatString="F0"/>
-                        </StackPanel>
-
-                        <StackPanel Spacing="5">
-                            <TextBlock Text="实时字幕最大长度"/>
-                            <NumericUpDown x:Name="RealtimeMaxLengthNumeric" Value="150" Minimum="50" Maximum="500" Width="120" FormatString="F0"/>
-                        </StackPanel>
-
-                        <StackPanel Spacing="5">
-                            <TextBlock Text="Chunk 时长 (ms)"/>
-                            <NumericUpDown x:Name="ChunkDurationMsNumeric" Value="200" Minimum="20" Maximum="2000" Width="120" FormatString="F0"/>
-                            <TextBlock FontSize="10" Foreground="Gray" Text="默认 200ms；可改为 500ms（延迟更高）" TextWrapping="Wrap"/>
-                        </StackPanel>
-
-                        <Separator Margin="0,8,0,8"/>
-
-                        <TextBlock Text="静音超时" FontWeight="Bold"/>
-
-                        <CheckBox x:Name="EnableAutoTimeoutCheckBox" Content="启用静音超时" IsChecked="True"/>
-
-                        <StackPanel Spacing="5">
-                            <TextBlock Text="初始静音超时 (秒)"/>
-                            <NumericUpDown x:Name="InitialSilenceTimeoutSecondsNumeric" Value="25" Minimum="1" Maximum="300" Width="120" FormatString="F0"/>
-                            <TextBlock FontSize="10" Foreground="Gray" Text="未检测到语音的等待时间" TextWrapping="Wrap"/>
-                        </StackPanel>
-
-                        <StackPanel Spacing="5">
-                            <TextBlock Text="断句静音超时 (秒)"/>
-                            <NumericUpDown x:Name="EndSilenceTimeoutSecondsNumeric" Value="1" Minimum="1" Maximum="30" Width="120" FormatString="F0"/>
-                            <TextBlock FontSize="10" Foreground="Gray" Text="识别到语音后，判定一句结束的等待时间" TextWrapping="Wrap"/>
-                        </StackPanel>
-
-                        <Separator Margin="0,8,0,8"/>
-
-                        <TextBlock Text="无回显重连" FontWeight="Bold"/>
-
-                        <CheckBox x:Name="EnableNoResponseRestartCheckBox" Content="有音频输入但无回显时自动重连" IsChecked="False"/>
-
-                        <StackPanel Spacing="5">
-                            <TextBlock Text="无回显阈值 (秒)"/>
-                            <NumericUpDown x:Name="NoResponseRestartSecondsNumeric" Value="3" Minimum="1" Maximum="30" Width="120" FormatString="F0"/>
-                            <TextBlock FontSize="10" Foreground="Gray" Text="连续 N 秒无中间/最终结果且检测到音频活动时触发" TextWrapping="Wrap"/>
-                        </StackPanel>
-
-                        <StackPanel Spacing="5">
-                            <TextBlock Text="音频活动阈值"/>
-                            <NumericUpDown x:Name="AudioActivityThresholdNumeric" Value="600" Minimum="50" Maximum="8000" Width="120" FormatString="F0"/>
-                            <TextBlock FontSize="10" Foreground="Gray" Text="PCM 16-bit 幅度阈值；越大越不敏感" TextWrapping="Wrap"/>
-                        </StackPanel>
-
-                        <StackPanel Spacing="5">
-                            <TextBlock Text="电平显示放大倍数"/>
-                            <NumericUpDown x:Name="AudioLevelGainNumeric" Value="2" Minimum="0.5" Maximum="10" Width="120" FormatString="F1"/>
-                            <TextBlock FontSize="10" Foreground="Gray" Text="仅影响电平显示，不影响识别" TextWrapping="Wrap"/>
-                        </StackPanel>
-
-                        <CheckBox x:Name="ShowReconnectMarkerCheckBox" Content="在字幕中显示 *触发重连* 提示" IsChecked="True"/>
-                    </StackPanel>
-                </ScrollViewer>
-            </TabItem>
-
             <TabItem Header="录音与存储">
                 <ScrollViewer>
                     <StackPanel Spacing="12">
                         <TextBlock Text="录音设置" FontWeight="Bold"/>
 
                         <StackPanel Spacing="8">
-                            <CheckBox x:Name="EnableRecordingCheckBox" Content="边翻译边录音（停止后转 MP3）" IsChecked="True"/>
+                            <CheckBox x:Name="EnableRecordingCheckBox" Content="边翻译边录音（直接输出 MP3）" IsChecked="True"/>
 
                             <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
                                 <TextBlock Text="MP3 码率 (kbps)" VerticalAlignment="Center"/>
-                                <NumericUpDown x:Name="RecordingMp3BitrateNumeric" Value="96" Minimum="32" Maximum="320" Width="120" FormatString="F0"/>
+                                <NumericUpDown x:Name="RecordingMp3BitrateNumeric" Value="256" Minimum="32" Maximum="320" Width="120" FormatString="F0"/>
                             </StackPanel>
-
-                            <CheckBox x:Name="DeleteWavAfterMp3CheckBox" Content="MP3 生成成功后删除 WAV（转码失败会保留 WAV）" IsChecked="True"/>
                         </StackPanel>
 
                         <Separator Margin="0,8,0,8"/>
@@ -209,21 +136,7 @@
                 </ScrollViewer>
             </TabItem>
 
-            <TabItem Header="字幕与文本">
-                <ScrollViewer>
-                    <StackPanel Spacing="12">
-                        <TextBlock Text="字幕输出" FontWeight="Bold"/>
-
-                        <StackPanel Spacing="6">
-                            <CheckBox x:Name="ExportSrtCheckBox" Content="生成 SRT 字幕" IsChecked="False"/>
-                            <CheckBox x:Name="ExportVttCheckBox" Content="生成 VTT 字幕" IsChecked="False"/>
-                            <TextBlock FontSize="10" Foreground="Gray" Text="字幕与录音同目录保存，可同时勾选" TextWrapping="Wrap"/>
-                        </StackPanel>
-                    </StackPanel>
-                </ScrollViewer>
-            </TabItem>
-
-            <TabItem Header="AI 基础">
+            <TabItem Header="AI 基础配置">
                 <ScrollViewer>
                     <StackPanel Spacing="12">
                         <StackPanel Spacing="5">
@@ -308,6 +221,102 @@
                 </ScrollViewer>
             </TabItem>
 
+            <TabItem Header="输入与识别">
+                <ScrollViewer>
+                    <StackPanel Spacing="12">
+                        <TextBlock Text="识别策略" FontWeight="Bold"/>
+
+                        <CheckBox x:Name="FilterModalParticlesCheckBox" Content="过滤语气助词" IsChecked="True"/>
+
+                        <StackPanel Spacing="5">
+                            <TextBlock Text="最大历史记录数量"/>
+                            <NumericUpDown x:Name="MaxHistoryItemsNumeric" Value="15" Minimum="5" Maximum="100" Width="120" FormatString="F0"/>
+                        </StackPanel>
+
+                        <StackPanel Spacing="5">
+                            <TextBlock Text="实时字幕最大长度"/>
+                            <NumericUpDown x:Name="RealtimeMaxLengthNumeric" Value="150" Minimum="50" Maximum="500" Width="120" FormatString="F0"/>
+                        </StackPanel>
+
+                        <StackPanel Spacing="5">
+                            <TextBlock Text="Chunk 时长 (ms)"/>
+                            <NumericUpDown x:Name="ChunkDurationMsNumeric" Value="200" Minimum="20" Maximum="2000" Width="120" FormatString="F0"/>
+                            <TextBlock FontSize="10" Foreground="Gray" Text="默认 200ms；可改为 500ms（延迟更高）" TextWrapping="Wrap"/>
+                        </StackPanel>
+
+                        <Separator Margin="0,8,0,8"/>
+
+                        <TextBlock Text="静音超时" FontWeight="Bold"/>
+
+                        <CheckBox x:Name="EnableAutoTimeoutCheckBox" Content="启用静音超时" IsChecked="True"/>
+
+                        <StackPanel Spacing="5">
+                            <TextBlock Text="初始静音超时 (秒)"/>
+                            <NumericUpDown x:Name="InitialSilenceTimeoutSecondsNumeric" Value="25" Minimum="1" Maximum="300" Width="120" FormatString="F0"/>
+                            <TextBlock FontSize="10" Foreground="Gray" Text="未检测到语音的等待时间" TextWrapping="Wrap"/>
+                        </StackPanel>
+
+                        <StackPanel Spacing="5">
+                            <TextBlock Text="断句静音超时 (秒)"/>
+                            <NumericUpDown x:Name="EndSilenceTimeoutSecondsNumeric" Value="1" Minimum="1" Maximum="30" Width="120" FormatString="F0"/>
+                            <TextBlock FontSize="10" Foreground="Gray" Text="识别到语音后，判定一句结束的等待时间" TextWrapping="Wrap"/>
+                        </StackPanel>
+
+                        <Separator Margin="0,8,0,8"/>
+
+                        <TextBlock Text="无回显重连" FontWeight="Bold"/>
+
+                        <CheckBox x:Name="EnableNoResponseRestartCheckBox" Content="有音频输入但无回显时自动重连" IsChecked="False"/>
+
+                        <StackPanel Spacing="5">
+                            <TextBlock Text="无回显阈值 (秒)"/>
+                            <NumericUpDown x:Name="NoResponseRestartSecondsNumeric" Value="3" Minimum="1" Maximum="30" Width="120" FormatString="F0"/>
+                            <TextBlock FontSize="10" Foreground="Gray" Text="连续 N 秒无中间/最终结果且检测到音频活动时触发" TextWrapping="Wrap"/>
+                        </StackPanel>
+
+                        <StackPanel Spacing="5">
+                            <TextBlock Text="音频活动阈值"/>
+                            <NumericUpDown x:Name="AudioActivityThresholdNumeric" Value="600" Minimum="50" Maximum="8000" Width="120" FormatString="F0"/>
+                            <TextBlock FontSize="10" Foreground="Gray" Text="PCM 16-bit 幅度阈值；越大越不敏感" TextWrapping="Wrap"/>
+                        </StackPanel>
+
+                        <StackPanel Spacing="5">
+                            <TextBlock Text="电平显示放大倍数"/>
+                            <NumericUpDown x:Name="AudioLevelGainNumeric" Value="2" Minimum="0.5" Maximum="10" Width="120" FormatString="F1"/>
+                            <TextBlock FontSize="10" Foreground="Gray" Text="仅影响电平显示，不影响识别" TextWrapping="Wrap"/>
+                        </StackPanel>
+
+                        <StackPanel Spacing="5">
+                            <TextBlock Text="自动增益预设"/>
+                            <ComboBox x:Name="AutoGainPresetComboBox" MinWidth="140">
+                                <ComboBoxItem Content="关闭"/>
+                                <ComboBoxItem Content="低"/>
+                                <ComboBoxItem Content="中"/>
+                                <ComboBoxItem Content="高"/>
+                            </ComboBox>
+                            <TextBlock FontSize="10" Foreground="Gray"
+                                       Text="自动提升识别与录音音量，不影响听感" TextWrapping="Wrap"/>
+                        </StackPanel>
+
+                        <CheckBox x:Name="ShowReconnectMarkerCheckBox" Content="在字幕中显示 *触发重连* 提示" IsChecked="True"/>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+
+            <TabItem Header="字幕与文本">
+                <ScrollViewer>
+                    <StackPanel Spacing="12">
+                        <TextBlock Text="字幕输出" FontWeight="Bold"/>
+
+                        <StackPanel Spacing="6">
+                            <CheckBox x:Name="ExportSrtCheckBox" Content="生成 SRT 字幕" IsChecked="False"/>
+                            <CheckBox x:Name="ExportVttCheckBox" Content="生成 VTT 字幕" IsChecked="False"/>
+                            <TextBlock FontSize="10" Foreground="Gray" Text="字幕与录音同目录保存，可同时勾选" TextWrapping="Wrap"/>
+                        </StackPanel>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+
             <TabItem Header="洞察">
                 <ScrollViewer>
                     <StackPanel Spacing="12">
@@ -345,6 +354,15 @@
             <TabItem Header="复盘">
                 <ScrollViewer>
                     <StackPanel Spacing="12">
+                        <Border BorderBrush="#FFE2E8F0" BorderThickness="0,1,0,0" Padding="0,12,0,0" Margin="0,0,0,0">
+                            <StackPanel Spacing="8">
+                                <TextBlock Text="复盘设置" FontSize="14" FontWeight="SemiBold"/>
+                                <CheckBox x:Name="UseSpeechSubtitleForReviewCheckBox"
+                                          Content="根据音频生成 speech 字幕（更准确，区分讲话人）"/>
+                                <TextBlock FontSize="10" Foreground="Gray"
+                                           Text="需先在“录音与存储”中验证批量转写的存储账号" TextWrapping="Wrap"/>
+                            </StackPanel>
+                        </Border>
                         <Border BorderBrush="#FFE2E8F0" BorderThickness="0,1,0,0" Padding="0,12,0,0" Margin="0,0,0,0">
                             <StackPanel Spacing="8">
                                 <TextBlock Text="复盘洞察模板配置" FontSize="14" FontWeight="SemiBold"/>

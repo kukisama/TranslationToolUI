@@ -69,7 +69,6 @@
             <Button Content="清空历史" Command="{Binding ClearHistoryCommand}" Padding="10,5"
                 IsVisible="{Binding IsLiveMode}"/>
             <Button Content="查看历史记录" Command="{Binding OpenHistoryFolderCommand}" Padding="10,5" 
-                IsVisible="{Binding IsLiveMode}"
                         ToolTip.Tip="打开本地历史记录文件夹，查看保存的翻译文件"/>
             <Button Content="浮动字幕" Command="{Binding ShowFloatingSubtitlesCommand}" Padding="10,5"
                 IsVisible="{Binding IsLiveMode}"
@@ -89,19 +88,110 @@
                     </Button.ContextMenu>
                 </Button>
 
-                <StackPanel Orientation="Horizontal" Spacing="6" Margin="20,0,0,0" VerticalAlignment="Center"
+                <Border Width="70" Height="22" Margin="20,0,0,0"
+                        Background="Transparent" BorderBrush="#FFCBD5E1" BorderThickness="1"
+                        CornerRadius="3" VerticalAlignment="Center"
+                        ToolTip.Tip="音频活动电平"
+                        IsVisible="{Binding IsLiveMode}">
+                    <Grid>
+                        <Border Height="1" Background="#FFE2E8F0" VerticalAlignment="Center"/>
+                        <ItemsControl ItemsSource="{Binding AudioLevelHistory}" VerticalAlignment="Bottom" Margin="4,3">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <StackPanel Orientation="Horizontal" Spacing="1"/>
+                                </ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Border Width="2"
+                                            Height="{Binding Converter={StaticResource LevelToHeight}}"
+                                            Background="#FF16A34A"
+                                            Opacity="0.85"
+                                            VerticalAlignment="Bottom"/>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </Grid>
+                </Border>
+
+                <StackPanel Orientation="Horizontal" Spacing="8" Margin="16,0,0,0" VerticalAlignment="Center">
+                    <TextBlock Text="模式:" VerticalAlignment="Center"/>
+                    <StackPanel Orientation="Horizontal" Spacing="10">
+                        <RadioButton Content="实时会议" GroupName="UiMode"
+                                     IsChecked="{Binding IsLiveModeSelected, Mode=TwoWay}"/>
+                        <RadioButton Content="复盘/批处理" GroupName="UiMode"
+                                     IsChecked="{Binding IsReviewModeSelected, Mode=TwoWay}"/>
+                    </StackPanel>
+                </StackPanel>
+            </StackPanel>
+        </Grid>
+          <!-- 订阅与输入选择区域 -->
+        <Grid Grid.Row="1" Margin="10,0,10,10" IsVisible="{Binding IsLiveMode}"
+            ColumnDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,*,Auto,Auto"
+            RowDefinitions="Auto,Auto" RowSpacing="6">
+            <TextBlock Grid.Column="0" Text="订阅:" VerticalAlignment="Center" Margin="0,0,5,0"/>
+            <ComboBox Grid.Column="1" Name="SubscriptionComboBox" MinWidth="150" 
+                      ItemsSource="{Binding SubscriptionNames}" 
+                      SelectedIndex="{Binding ActiveSubscriptionIndex, Mode=TwoWay}"
+                      IsEnabled="{Binding IsConfigurationEnabled}"
+                      ToolTip.Tip="选择要使用的Azure订阅"/>
+
+            <Ellipse Grid.Column="2" Width="12" Height="12" StrokeThickness="2"
+                     VerticalAlignment="Center" Margin="8,0,12,0"
+                     Fill="{Binding SubscriptionLampFill}"
+                     Stroke="{Binding SubscriptionLampStroke}"
+                     Opacity="{Binding SubscriptionLampOpacity}"
+                     ToolTip.Tip="{Binding SubscriptionValidationStatusMessage}"/>
+
+            <ToggleButton Grid.Column="3" Content="输入" Padding="6,2"
+                          IsChecked="{Binding IsInputRecognitionEnabled, Mode=TwoWay}"
+                          IsEnabled="{Binding IsAudioDeviceSelectionEnabled}"
+                          VerticalAlignment="Center" Margin="10,0,5,0"/>
+            <ComboBox Grid.Column="4" Name="InputDeviceComboBox" Width="220"
+                      ItemsSource="{Binding AudioDevices}"
+                      SelectedItem="{Binding SelectedAudioDevice, Mode=TwoWay}"
+                      IsEnabled="{Binding IsInputDeviceUiEnabled}"
+                      ToolTip.Tip="选择输入设备"/>
+
+            <ToggleButton Grid.Column="5" Content="输出" Padding="6,2"
+                          IsChecked="{Binding IsOutputRecognitionEnabled, Mode=TwoWay}"
+                          IsEnabled="{Binding IsAudioDeviceSelectionEnabled}"
+                          VerticalAlignment="Center" Margin="15,0,5,0"/>
+            <ComboBox Grid.Column="6" Name="OutputDeviceComboBox" Width="220"
+                      ItemsSource="{Binding OutputDevices}"
+                      SelectedItem="{Binding SelectedOutputDevice, Mode=TwoWay}"
+                      IsEnabled="{Binding IsOutputDeviceUiEnabled}"
+                      ToolTip.Tip="选择输出设备"/>
+
+            <Button Grid.Column="7" Content="刷新" Width="60" Margin="10,0,0,0"
+                    Command="{Binding RefreshAudioDevicesCommand}"
+                    IsEnabled="{Binding IsAudioDeviceRefreshEnabled}"
+                    ToolTip.Tip="刷新音频设备列表"/>
+
+            <StackPanel Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="12" Orientation="Horizontal"
+                        Spacing="12" VerticalAlignment="Center">
+                <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                    <TextBlock Text="录制:" VerticalAlignment="Center"/>
+                    <RadioButton Content="仅环回" GroupName="RecordingMode"
+                                 IsChecked="{Binding IsRecordingLoopbackOnly, Mode=TwoWay}"/>
+                    <RadioButton Content="环回+麦克风" GroupName="RecordingMode"
+                                 IsChecked="{Binding IsRecordingLoopbackMix, Mode=TwoWay}"/>
+                </StackPanel>
+
+                <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center"
                             IsVisible="{Binding IsLiveMode}">
                     <TextBlock Text="源语言:" VerticalAlignment="Center"/>
                     <ComboBox Name="SourceLanguageComboBox" MinWidth="120"
                           IsEnabled="{Binding IsConfigurationEnabled}"
                           SelectedIndex="{Binding SourceLanguageIndex}">
-                    <ComboBoxItem Tag="zh-CN" Content="中文"/>
-                    <ComboBoxItem Tag="en-US" Content="英语"/>
-                    <ComboBoxItem Tag="ja-JP" Content="日语"/>
-                    <ComboBoxItem Tag="ko-KR" Content="韩语"/>
-                    <ComboBoxItem Tag="fr-FR" Content="法语"/>
-                    <ComboBoxItem Tag="de-DE" Content="德语"/>
-                    <ComboBoxItem Tag="es-ES" Content="西班牙语"/>
+                    <ComboBoxItem Tag="auto" Content="自动识别"/>
+                      <ComboBoxItem Tag="en" Content="英语"/>
+                      <ComboBoxItem Tag="zh-CN" Content="中文"/>
+                      <ComboBoxItem Tag="ja-JP" Content="日语"/>
+                      <ComboBoxItem Tag="ko-KR" Content="韩语"/>
+                      <ComboBoxItem Tag="fr-FR" Content="法语"/>
+                      <ComboBoxItem Tag="de-DE" Content="德语"/>
+                      <ComboBoxItem Tag="es" Content="西班牙语"/>
                     </ComboBox>
 
                     <TextBlock Text="→" VerticalAlignment="Center" FontSize="16" FontWeight="Bold" Margin="4,0"/>
@@ -118,95 +208,19 @@
                     <ComboBoxItem Tag="de-DE" Content="德语"/>
                     <ComboBoxItem Tag="es" Content="西班牙语"/>
                     </ComboBox>
-
-                    <Border Width="70" Height="22" Margin="12,0,0,0"
-                            Background="Transparent" BorderBrush="#FFCBD5E1" BorderThickness="1"
-                            CornerRadius="3" VerticalAlignment="Center"
-                            ToolTip.Tip="音频活动电平">
-                        <Grid>
-                            <Border Height="1" Background="#FFE2E8F0" VerticalAlignment="Center"/>
-                            <ItemsControl ItemsSource="{Binding AudioLevelHistory}" VerticalAlignment="Bottom" Margin="4,3">
-                                <ItemsControl.ItemsPanel>
-                                    <ItemsPanelTemplate>
-                                        <StackPanel Orientation="Horizontal" Spacing="1"/>
-                                    </ItemsPanelTemplate>
-                                </ItemsControl.ItemsPanel>
-                                <ItemsControl.ItemTemplate>
-                                    <DataTemplate>
-                                        <Border Width="2"
-                                                Height="{Binding Converter={StaticResource LevelToHeight}}"
-                                                Background="#FF16A34A"
-                                                Opacity="0.85"
-                                                VerticalAlignment="Bottom"/>
-                                    </DataTemplate>
-                                </ItemsControl.ItemTemplate>
-                            </ItemsControl>
-                        </Grid>
-                    </Border>
                 </StackPanel>
 
-                <StackPanel Orientation="Horizontal" Spacing="8" Margin="16,0,0,0" VerticalAlignment="Center">
-                    <TextBlock Text="模式:" VerticalAlignment="Center"/>
-                    <StackPanel Orientation="Horizontal" Spacing="10">
-                        <RadioButton Content="实时会议" GroupName="UiMode"
-                                     IsChecked="{Binding IsLiveModeSelected, Mode=TwoWay}"/>
-                        <RadioButton Content="复盘/批处理" GroupName="UiMode"
-                                     IsChecked="{Binding IsReviewModeSelected, Mode=TwoWay}"/>
-                    </StackPanel>
+                <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+                    <Button Content="{Binding TranslationToggleButtonText}"
+                            Command="{Binding ToggleTranslationCommand}"
+                            Background="{Binding TranslationToggleButtonBackground}"
+                            Foreground="{Binding TranslationToggleButtonForeground}"
+                            Padding="10,5"/>
                 </StackPanel>
+
             </StackPanel>
         </Grid>
-          <!-- 订阅与输入选择区域 -->
-          <Grid Grid.Row="1" Margin="10,0,10,10" IsVisible="{Binding IsLiveMode}"
-                            ColumnDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,*,Auto,Auto">
-            <TextBlock Grid.Column="0" Text="订阅:" VerticalAlignment="Center" Margin="0,0,5,0"/>
-            <ComboBox Grid.Column="1" Name="SubscriptionComboBox" MinWidth="150" 
-                      ItemsSource="{Binding SubscriptionNames}" 
-                      SelectedIndex="{Binding ActiveSubscriptionIndex, Mode=TwoWay}"
-                      IsEnabled="{Binding IsConfigurationEnabled}"
-                      ToolTip.Tip="选择要使用的Azure订阅"/>
-
-            <Ellipse Grid.Column="2" Width="12" Height="12" StrokeThickness="2"
-                     VerticalAlignment="Center" Margin="8,0,12,0"
-                     Fill="{Binding SubscriptionLampFill}"
-                     Stroke="{Binding SubscriptionLampStroke}"
-                     Opacity="{Binding SubscriptionLampOpacity}"
-                     ToolTip.Tip="{Binding SubscriptionValidationStatusMessage}"/>
-            
-            <TextBlock Grid.Column="3" Text="输入:" VerticalAlignment="Center" Margin="10,0,5,0"/>
-            <ComboBox Grid.Column="4" MinWidth="210"
-                      SelectedIndex="{Binding AudioSourceModeIndex, Mode=TwoWay}"
-                      IsEnabled="{Binding IsAudioSourceSelectionEnabled}">
-                <ComboBoxItem Content="默认麦克风"/>
-                <ComboBoxItem Content="选择输入设备（WASAPI）"/>
-                <ComboBoxItem Content="系统输出回环（WASAPI Loopback）"/>
-            </ComboBox>
-
-            <TextBlock Grid.Column="5" Text="设备:" VerticalAlignment="Center" Margin="15,0,5,0"/>
-            <ComboBox Grid.Column="6" MinWidth="320"
-                      ItemsSource="{Binding AudioDevices}"
-                      SelectedItem="{Binding SelectedAudioDevice, Mode=TwoWay}"
-                      IsEnabled="{Binding IsAudioDeviceSelectionEnabled}"
-                      ToolTip.Tip="选择要采集的音频设备"/>
-
-                <Button Grid.Column="7" Content="刷新" Width="60" Margin="10,0,0,0"
-                    Command="{Binding RefreshAudioDevicesCommand}"
-                    IsEnabled="{Binding IsAudioDeviceRefreshEnabled}"
-                    ToolTip.Tip="刷新音频设备列表"/>
-
-            <StackPanel Grid.Column="11" Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
-                <Button Content="{Binding TranslationToggleButtonText}"
-                    Command="{Binding ToggleTranslationCommand}"
-                    Background="{Binding TranslationToggleButtonBackground}"
-                    Foreground="{Binding TranslationToggleButtonForeground}"
-                    Padding="10,5"/>
-                <ToggleSwitch IsChecked="{Binding IsTranslating}" IsEnabled="False" OnContent="翻译中" OffContent="已停止"/>
-            </StackPanel>
-
-            <TextBlock Grid.Column="12" Text="{Binding ActiveSubscriptionStatus}" 
-                       VerticalAlignment="Center" FontSize="10" Foreground="Gray"
-                       ToolTip.Tip="当前订阅状态"/>
-        </Grid>        <!-- 中间翻译内容区域 -->
+        <!-- 中间翻译内容区域 -->
         <Grid Grid.Row="2" Margin="10">
             <!-- 实时会议模式 -->
             <Grid IsVisible="{Binding IsLiveMode}" ColumnDefinitions="*,*">
@@ -484,23 +498,6 @@
                                             Command="{Binding StopBatchCommand}"/>
                                 </StackPanel>
                                 <TextBlock Text="{Binding BatchStatusMessage}" Foreground="Gray" FontSize="11"/>
-                            </StackPanel>
-                        </TabItem>
-                        <TabItem Header="复盘设置">
-                            <StackPanel Spacing="10">
-                                <TextBlock Text="Speech 字幕" FontWeight="Bold"/>
-                                <CheckBox Content="根据音频生成 speech 字幕（更准确，区分讲话人）"
-                                          IsChecked="{Binding UseSpeechSubtitleForReview, Mode=TwoWay}"
-                                          IsEnabled="{Binding IsSpeechSubtitleOptionEnabled}"/>
-                                <TextBlock Text="{Binding SpeechSubtitleOptionStatusText}" FontSize="10" Foreground="Gray"/>
-                                <StackPanel Orientation="Horizontal" Spacing="6"
-                                            IsVisible="{Binding IsSpeechSubtitleGenerating}">
-                                    <ProgressBar Width="120" Height="6" IsIndeterminate="True"/>
-                                    <Button Content="取消" Padding="6,3"
-                                            Command="{Binding CancelSpeechSubtitleCommand}"
-                                            IsEnabled="{Binding IsSpeechSubtitleGenerating}"/>
-                                </StackPanel>
-                                <TextBlock Text="{Binding SpeechSubtitleStatusMessage}" FontSize="10" Foreground="Gray"/>
                             </StackPanel>
                         </TabItem>
                     </TabControl>

@@ -135,12 +135,12 @@ namespace TranslationToolUI.Views
             NoResponseRestartSecondsNumeric.Value = 3;
             AudioActivityThresholdNumeric.Value = 600;
             AudioLevelGainNumeric.Value = 2.0m;
+            AutoGainPresetComboBox.SelectedIndex = 0;
             ShowReconnectMarkerCheckBox.IsChecked = true;
             UpdateNoResponseUiEnabledState();
 
             EnableRecordingCheckBox.IsChecked = true;
-            RecordingMp3BitrateNumeric.Value = 96;
-            DeleteWavAfterMp3CheckBox.IsChecked = true;
+            RecordingMp3BitrateNumeric.Value = 256;
             UpdateRecordingUiEnabledState();
 
             ExportSrtCheckBox.IsChecked = false;
@@ -150,6 +150,9 @@ namespace TranslationToolUI.Views
             BatchStorageConnectionStringTextBox.Text = "";
             BatchStorageValidateStatusTextBlock.Text = "";
             BatchLogLevelComboBox.SelectedIndex = 0;
+
+            UseSpeechSubtitleForReviewCheckBox.IsChecked = false;
+            UseSpeechSubtitleForReviewCheckBox.IsEnabled = false;
         }
 
         private void LoadConfigValues()
@@ -170,12 +173,12 @@ namespace TranslationToolUI.Views
             NoResponseRestartSecondsNumeric.Value = _config.NoResponseRestartSeconds;
             AudioActivityThresholdNumeric.Value = _config.AudioActivityThreshold;
             AudioLevelGainNumeric.Value = (decimal)_config.AudioLevelGain;
+            AutoGainPresetComboBox.SelectedIndex = _config.AutoGainEnabled ? (int)_config.AutoGainPreset : 0;
             ShowReconnectMarkerCheckBox.IsChecked = _config.ShowReconnectMarkerInSubtitle;
             UpdateNoResponseUiEnabledState();
 
             EnableRecordingCheckBox.IsChecked = _config.EnableRecording;
             RecordingMp3BitrateNumeric.Value = _config.RecordingMp3BitrateKbps;
-            DeleteWavAfterMp3CheckBox.IsChecked = _config.DeleteWavAfterMp3;
             UpdateRecordingUiEnabledState();
 
             ExportSrtCheckBox.IsChecked = _config.ExportSrtSubtitles;
@@ -192,6 +195,9 @@ namespace TranslationToolUI.Views
                 BatchLogLevel.SuccessAndFailure => 2,
                 _ => 0
             };
+
+            UseSpeechSubtitleForReviewCheckBox.IsChecked = _config.UseSpeechSubtitleForReview;
+            UseSpeechSubtitleForReviewCheckBox.IsEnabled = _config.BatchStorageIsValid;
         }
 
         private void LoadAiConfigValues()
@@ -254,11 +260,11 @@ namespace TranslationToolUI.Views
             UpdateNoResponseUiEnabledState();
         }
 
+
         private void UpdateRecordingUiEnabledState()
         {
             var enabled = EnableRecordingCheckBox.IsChecked ?? true;
             RecordingMp3BitrateNumeric.IsEnabled = enabled;
-            DeleteWavAfterMp3CheckBox.IsEnabled = enabled;
         }
 
         private void UpdateTimeoutUiEnabledState()
@@ -275,6 +281,7 @@ namespace TranslationToolUI.Views
             AudioActivityThresholdNumeric.IsEnabled = enabled;
             ShowReconnectMarkerCheckBox.IsEnabled = enabled;
         }
+
 
         private void ForceUpdateListBoxSelection(int targetIndex)
         {
@@ -553,15 +560,18 @@ namespace TranslationToolUI.Views
                 var (isValid, message) = await ValidateBatchStorageAsync(connectionString, CancellationToken.None);
                 BatchStorageValidateStatusTextBlock.Text = message;
                 _config.BatchStorageIsValid = isValid;
-                if (isValid && !_config.UseSpeechSubtitleForReview)
+                UseSpeechSubtitleForReviewCheckBox.IsEnabled = isValid;
+                if (!isValid)
                 {
-                    _config.UseSpeechSubtitleForReview = true;
+                    UseSpeechSubtitleForReviewCheckBox.IsChecked = false;
                 }
             }
             catch (Exception ex)
             {
                 BatchStorageValidateStatusTextBlock.Text = $"验证失败: {ex.Message}";
                 _config.BatchStorageIsValid = false;
+                UseSpeechSubtitleForReviewCheckBox.IsEnabled = false;
+                UseSpeechSubtitleForReviewCheckBox.IsChecked = false;
             }
             finally
             {
@@ -675,7 +685,6 @@ namespace TranslationToolUI.Views
 
             try
             {
-                var previousStorageValid = _config.BatchStorageIsValid;
                 var validSubscriptions = new List<AzureSubscription>();
                 var invalidSubscriptions = "";
 
@@ -744,14 +753,18 @@ namespace TranslationToolUI.Views
                 _config.NoResponseRestartSeconds = (int)(NoResponseRestartSecondsNumeric.Value ?? 3);
                 _config.AudioActivityThreshold = (int)(AudioActivityThresholdNumeric.Value ?? 600);
                 _config.AudioLevelGain = (double)(AudioLevelGainNumeric.Value ?? 2.0m);
+                var presetIndex = Math.Clamp(AutoGainPresetComboBox.SelectedIndex, 0, 3);
+                _config.AutoGainEnabled = presetIndex > 0;
+                _config.AutoGainPreset = (AutoGainPreset)presetIndex;
                 _config.ShowReconnectMarkerInSubtitle = ShowReconnectMarkerCheckBox.IsChecked ?? true;
 
                 _config.EnableRecording = EnableRecordingCheckBox.IsChecked ?? true;
-                _config.RecordingMp3BitrateKbps = (int)(RecordingMp3BitrateNumeric.Value ?? 96);
-                _config.DeleteWavAfterMp3 = DeleteWavAfterMp3CheckBox.IsChecked ?? true;
+                _config.RecordingMp3BitrateKbps = (int)(RecordingMp3BitrateNumeric.Value ?? 256);
 
                 _config.ExportSrtSubtitles = ExportSrtCheckBox.IsChecked ?? false;
                 _config.ExportVttSubtitles = ExportVttCheckBox.IsChecked ?? false;
+
+                _config.UseSpeechSubtitleForReview = UseSpeechSubtitleForReviewCheckBox.IsChecked ?? false;
 
                 _config.BatchStorageConnectionString = BatchStorageConnectionStringTextBox.Text?.Trim() ?? "";
                 _config.BatchAudioContainerName = AzureSpeechConfig.DefaultBatchAudioContainerName;
@@ -776,9 +789,9 @@ namespace TranslationToolUI.Views
                         CancellationToken.None);
                     _config.BatchStorageIsValid = storageValid;
                     BatchStorageValidateStatusTextBlock.Text = storageMessage;
-                    if (storageValid && !previousStorageValid && !_config.UseSpeechSubtitleForReview)
+                    if (!storageValid)
                     {
-                        _config.UseSpeechSubtitleForReview = true;
+                        _config.UseSpeechSubtitleForReview = false;
                     }
                 }
 

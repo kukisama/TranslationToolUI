@@ -129,6 +129,18 @@
                         <TextBlock FontSize="10" Foreground="Gray" Text="仅影响电平显示，不影响识别" TextWrapping="Wrap"/>
                     </StackPanel>
 
+                    <StackPanel Spacing="5">
+                        <TextBlock Text="自动增益预设"/>
+                        <ComboBox x:Name="AutoGainPresetComboBox" MinWidth="140">
+                            <ComboBoxItem Content="关闭"/>
+                            <ComboBoxItem Content="低"/>
+                            <ComboBoxItem Content="中"/>
+                            <ComboBoxItem Content="高"/>
+                        </ComboBox>
+                        <TextBlock FontSize="10" Foreground="Gray"
+                                   Text="自动提升识别与录音音量，不影响听感" TextWrapping="Wrap"/>
+                    </StackPanel>
+
                     <CheckBox x:Name="ShowReconnectMarkerCheckBox" Content="在字幕中显示 *触发重连* 提示" IsChecked="True"/>
 
                     <Separator Margin="0,10,0,10"/>
@@ -140,14 +152,12 @@
                     </StackPanel>
 
                     <StackPanel Spacing="8">
-                        <CheckBox x:Name="EnableRecordingCheckBox" Content="边翻译边录音（停止后转 MP3）" IsChecked="True"/>
+                        <CheckBox x:Name="EnableRecordingCheckBox" Content="边翻译边录音（直接输出 MP3）" IsChecked="True"/>
 
                         <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
                             <TextBlock Text="MP3 码率 (kbps)" VerticalAlignment="Center"/>
-                            <NumericUpDown x:Name="RecordingMp3BitrateNumeric" Value="96" Minimum="32" Maximum="320" Width="120" FormatString="F0"/>
+                            <NumericUpDown x:Name="RecordingMp3BitrateNumeric" Value="256" Minimum="32" Maximum="320" Width="120" FormatString="F0"/>
                         </StackPanel>
-
-                        <CheckBox x:Name="DeleteWavAfterMp3CheckBox" Content="MP3 生成成功后删除 WAV（转码失败会保留 WAV）" IsChecked="True"/>
                     </StackPanel>
 
                     <Separator Margin="0,10,0,10"/>

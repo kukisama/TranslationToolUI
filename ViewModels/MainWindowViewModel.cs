@@ -51,8 +51,8 @@ namespace TranslationToolUI.ViewModels
         private ConfigurationService _configService;
         private ObservableCollection<string> _subscriptionNames;
         private int _activeSubscriptionIndex;
-        private string _sourceLanguage = "zh-CN";
-        private string _targetLanguage = "en";
+        private string _sourceLanguage = "auto";
+        private string _targetLanguage = "zh-CN";
         private bool _isConfigurationEnabled = true;
         private TextEditorType _editorType = TextEditorType.Advanced;
         private EditorDisplayMode _editorDisplayMode = EditorDisplayMode.Translated;
@@ -62,6 +62,10 @@ namespace TranslationToolUI.ViewModels
         private AudioDeviceInfo? _selectedAudioDevice;
         private bool _isAudioDeviceSelectionEnabled;
         private bool _isAudioDeviceRefreshEnabled;
+        private readonly ObservableCollection<AudioDeviceInfo> _outputDevices;
+        private AudioDeviceInfo? _selectedOutputDevice;
+        private bool _isOutputDeviceSelectionEnabled;
+        private bool _suppressDeviceSelectionPersistence;
         private double _audioLevel;
         private readonly ObservableCollection<double> _audioLevelHistory;
 
@@ -70,7 +74,7 @@ namespace TranslationToolUI.ViewModels
         private readonly ObservableCollection<SubtitleCue> _subtitleCues;
         private readonly ObservableCollection<BatchTaskItem> _batchTasks;
         private readonly ObservableCollection<BatchQueueItem> _batchQueueItems;
-        private int _batchConcurrencyLimit = 5;
+        private int _batchConcurrencyLimit = 10;
         private bool _isBatchRunning;
         private CancellationTokenSource? _batchCts;
         private string _batchStatusMessage = "";
@@ -132,7 +136,7 @@ namespace TranslationToolUI.ViewModels
 
         private static readonly HttpClient SpeechBatchHttpClient = new();
 
-        private readonly string[] _sourceLanguages = { "zh-CN", "en-US", "ja-JP", "ko-KR", "fr-FR", "de-DE", "es-ES" };
+        private readonly string[] _sourceLanguages = { "auto", "en", "zh-CN", "ja-JP", "ko-KR", "fr-FR", "de-DE", "es-ES" };
         private readonly string[] _targetLanguages = { "en", "zh-CN", "ja-JP", "ko-KR", "fr-FR", "de-DE", "es-ES" };        public MainWindowViewModel()
         {
             _configService = new ConfigurationService();
@@ -140,6 +144,7 @@ namespace TranslationToolUI.ViewModels
             _history = new ObservableCollection<TranslationItem>();
             _subscriptionNames = new ObservableCollection<string>();
             _audioDevices = new ObservableCollection<AudioDeviceInfo>();
+            _outputDevices = new ObservableCollection<AudioDeviceInfo>();
             _audioLevelHistory = new ObservableCollection<double>(Enumerable.Repeat(0d, 24));
             _audioFiles = new ObservableCollection<MediaFileItem>();
             _subtitleFiles = new ObservableCollection<MediaFileItem>();
@@ -405,6 +410,7 @@ namespace TranslationToolUI.ViewModels
                     _activeSubscriptionIndex = _config.ActiveSubscriptionIndex;
 
                     _audioSourceModeIndex = AudioSourceModeToIndex(_config.AudioSourceMode);
+                    NormalizeRecognitionToggles();
 
                     OnPropertyChanged(nameof(Config));
                     OnPropertyChanged(nameof(SubscriptionNames));
@@ -419,6 +425,15 @@ namespace TranslationToolUI.ViewModels
                     OnPropertyChanged(nameof(IsAudioSourceSelectionEnabled));
                     OnPropertyChanged(nameof(IsAudioDeviceSelectionEnabled));
                     OnPropertyChanged(nameof(IsAudioDeviceRefreshEnabled));
+                    OnPropertyChanged(nameof(OutputDevices));
+                    OnPropertyChanged(nameof(SelectedOutputDevice));
+                    OnPropertyChanged(nameof(IsOutputDeviceSelectionEnabled));
+                    OnPropertyChanged(nameof(IsRecordingLoopbackOnly));
+                    OnPropertyChanged(nameof(IsRecordingLoopbackMix));
+                    OnPropertyChanged(nameof(IsInputRecognitionEnabled));
+                    OnPropertyChanged(nameof(IsOutputRecognitionEnabled));
+                    OnPropertyChanged(nameof(IsInputDeviceUiEnabled));
+                    OnPropertyChanged(nameof(IsOutputDeviceUiEnabled));
 
                     ForceUpdateComboBoxSelection();
 
@@ -524,6 +539,8 @@ namespace TranslationToolUI.ViewModels
         }
 
         public ObservableCollection<AudioDeviceInfo> AudioDevices => _audioDevices;
+
+        public ObservableCollection<AudioDeviceInfo> OutputDevices => _outputDevices;
 
         public ObservableCollection<MediaFileItem> AudioFiles => _audioFiles;
 
@@ -799,6 +816,12 @@ namespace TranslationToolUI.ViewModels
             set => SetSelectedAudioDevice(value, persistSelection: true);
         }
 
+        public AudioDeviceInfo? SelectedOutputDevice
+        {
+            get => _selectedOutputDevice;
+            set => SetSelectedOutputDevice(value, persistSelection: true);
+        }
+
         public bool IsAudioSourceSelectionEnabled => OperatingSystem.IsWindows() && !IsTranslating;
 
         public bool IsAudioDeviceSelectionEnabled
@@ -807,15 +830,79 @@ namespace TranslationToolUI.ViewModels
             private set => SetProperty(ref _isAudioDeviceSelectionEnabled, value);
         }
 
+        public bool IsOutputDeviceSelectionEnabled
+        {
+            get => _isOutputDeviceSelectionEnabled;
+            private set => SetProperty(ref _isOutputDeviceSelectionEnabled, value);
+        }
+
+        public bool IsInputRecognitionEnabled
+        {
+            get => _config.UseInputForRecognition;
+            set => SetInputRecognitionEnabled(value);
+        }
+
+        public bool IsOutputRecognitionEnabled
+        {
+            get => _config.UseOutputForRecognition;
+            set => SetOutputRecognitionEnabled(value);
+        }
+
+        public bool IsInputDeviceUiEnabled => IsAudioDeviceSelectionEnabled && IsInputRecognitionEnabled;
+
+        public bool IsOutputDeviceUiEnabled => IsOutputDeviceSelectionEnabled && IsOutputRecognitionEnabled;
+
         public bool IsAudioDeviceRefreshEnabled
         {
             get => _isAudioDeviceRefreshEnabled;
             private set => SetProperty(ref _isAudioDeviceRefreshEnabled, value);
         }
 
+        public bool IsRecordingLoopbackOnly
+        {
+            get => _config.RecordingMode == RecordingMode.LoopbackOnly;
+            set
+            {
+                if (value)
+                {
+                    SetRecordingMode(RecordingMode.LoopbackOnly);
+                }
+            }
+        }
+
+        public bool IsRecordingLoopbackMix
+        {
+            get => _config.RecordingMode == RecordingMode.LoopbackWithMic;
+            set
+            {
+                if (value)
+                {
+                    SetRecordingMode(RecordingMode.LoopbackWithMic);
+                }
+            }
+        }
+
         private void SetSelectedAudioDevice(AudioDeviceInfo? device, bool persistSelection)
         {
+            AppendBatchDebugLog("InputSelectChange",
+                $"device='{device?.DisplayName ?? ""}' id='{device?.DeviceId ?? ""}' persist={persistSelection} suppress={_suppressDeviceSelectionPersistence}");
+
+            if (_suppressDeviceSelectionPersistence && device == null)
+            {
+                return;
+            }
+
+            if (device == null && _audioDevices.Count > 0)
+            {
+                return;
+            }
+
             if (!SetProperty(ref _selectedAudioDevice, device))
+            {
+                return;
+            }
+
+            if (!persistSelection || _suppressDeviceSelectionPersistence)
             {
                 return;
             }
@@ -832,9 +919,143 @@ namespace TranslationToolUI.ViewModels
 
                 if (persistSelection)
                 {
-                    _ = Task.Run(async () => await _configService.SaveConfigAsync(_config));
+                    QueueConfigSave("InputDeviceSelected");
                 }
             }
+        }
+
+        private void SetSelectedOutputDevice(AudioDeviceInfo? device, bool persistSelection)
+        {
+            AppendBatchDebugLog("OutputSelectChange",
+                $"device='{device?.DisplayName ?? ""}' id='{device?.DeviceId ?? ""}' persist={persistSelection} suppress={_suppressDeviceSelectionPersistence}");
+
+            if (_suppressDeviceSelectionPersistence && device == null)
+            {
+                return;
+            }
+
+            if (device == null && _outputDevices.Count > 0)
+            {
+                return;
+            }
+
+            if (!SetProperty(ref _selectedOutputDevice, device))
+            {
+                return;
+            }
+
+            if (!persistSelection || _suppressDeviceSelectionPersistence)
+            {
+                return;
+            }
+
+            var deviceId = device?.DeviceId ?? "";
+            if (_config.SelectedOutputDeviceId != deviceId)
+            {
+                _config.SelectedOutputDeviceId = deviceId;
+
+                if (_translationService != null)
+                {
+                    _translationService.UpdateConfig(_config);
+                }
+
+                QueueConfigSave("OutputDeviceSelected");
+            }
+        }
+
+
+        private void SetRecordingMode(RecordingMode mode)
+        {
+            if (_config.RecordingMode == mode)
+            {
+                return;
+            }
+
+            _config.RecordingMode = mode;
+
+            if (_translationService != null)
+            {
+                _translationService.UpdateConfig(_config);
+            }
+
+            _ = Task.Run(async () => await _configService.SaveConfigAsync(_config));
+            OnPropertyChanged(nameof(IsRecordingLoopbackOnly));
+            OnPropertyChanged(nameof(IsRecordingLoopbackMix));
+        }
+
+        private void SetInputRecognitionEnabled(bool enabled)
+        {
+            if (_config.UseInputForRecognition == enabled)
+            {
+                return;
+            }
+
+            if (!enabled && !_config.UseOutputForRecognition)
+            {
+                StatusMessage = "输入与输出不能同时关闭";
+                OnPropertyChanged(nameof(IsInputRecognitionEnabled));
+                return;
+            }
+
+            _config.UseInputForRecognition = enabled;
+            UpdateRecognitionModeFromToggles();
+            QueueConfigSave("InputRecognitionToggle");
+            OnPropertyChanged(nameof(IsInputRecognitionEnabled));
+            OnPropertyChanged(nameof(IsInputDeviceUiEnabled));
+            OnPropertyChanged(nameof(IsOutputDeviceUiEnabled));
+        }
+
+        private void SetOutputRecognitionEnabled(bool enabled)
+        {
+            if (_config.UseOutputForRecognition == enabled)
+            {
+                return;
+            }
+
+            if (!enabled && !_config.UseInputForRecognition)
+            {
+                StatusMessage = "输入与输出不能同时关闭";
+                OnPropertyChanged(nameof(IsOutputRecognitionEnabled));
+                return;
+            }
+
+            _config.UseOutputForRecognition = enabled;
+            UpdateRecognitionModeFromToggles();
+            QueueConfigSave("OutputRecognitionToggle");
+            OnPropertyChanged(nameof(IsOutputRecognitionEnabled));
+            OnPropertyChanged(nameof(IsInputDeviceUiEnabled));
+            OnPropertyChanged(nameof(IsOutputDeviceUiEnabled));
+        }
+
+        private void UpdateRecognitionModeFromToggles()
+        {
+            if (_config.UseOutputForRecognition && !_config.UseInputForRecognition)
+            {
+                _config.AudioSourceMode = AudioSourceMode.Loopback;
+            }
+            else
+            {
+                _config.AudioSourceMode = AudioSourceMode.CaptureDevice;
+            }
+
+            _audioSourceModeIndex = AudioSourceModeToIndex(_config.AudioSourceMode);
+
+            if (_translationService != null)
+            {
+                _translationService.UpdateConfig(_config);
+            }
+
+            OnPropertyChanged(nameof(AudioSourceModeIndex));
+        }
+
+        private void NormalizeRecognitionToggles()
+        {
+            if (!_config.UseInputForRecognition && !_config.UseOutputForRecognition)
+            {
+                _config.UseInputForRecognition = true;
+            }
+
+            UpdateRecognitionModeFromToggles();
         }
 
         private void RefreshAudioDevices(bool persistSelection)
@@ -843,53 +1064,117 @@ namespace TranslationToolUI.ViewModels
             {
                 IsAudioDeviceSelectionEnabled = false;
                 IsAudioDeviceRefreshEnabled = false;
+                IsOutputDeviceSelectionEnabled = false;
                 return;
             }
 
-            _audioDevices.Clear();
+            var currentInputId = _selectedAudioDevice?.DeviceId ?? _config.SelectedAudioDeviceId;
+            var currentOutputId = _selectedOutputDevice?.DeviceId ?? _config.SelectedOutputDeviceId;
 
-            if (!OperatingSystem.IsWindows())
+            AppendBatchDebugLog("DeviceRefreshStart",
+                $"persist={persistSelection} inputId='{currentInputId}' outputId='{currentOutputId}' " +
+                $"inputName='{_selectedAudioDevice?.DisplayName ?? ""}' outputName='{_selectedOutputDevice?.DisplayName ?? ""}'");
+
+            _suppressDeviceSelectionPersistence = true;
+            try
             {
-                IsAudioDeviceSelectionEnabled = false;
-                IsAudioDeviceRefreshEnabled = false;
-                SetSelectedAudioDevice(null, persistSelection: false);
-                return;
-            }
+                _audioDevices.Clear();
+                _outputDevices.Clear();
 
-            var mode = _config.AudioSourceMode;
-            if (mode == AudioSourceMode.DefaultMic)
+                if (!OperatingSystem.IsWindows())
+                {
+                    IsAudioDeviceSelectionEnabled = false;
+                    IsAudioDeviceRefreshEnabled = false;
+                    IsOutputDeviceSelectionEnabled = false;
+                    SetSelectedAudioDevice(null, persistSelection: false);
+                    SetSelectedOutputDevice(null, persistSelection: false);
+                    return;
+                }
+
+                var inputDevices = AudioDeviceEnumerator.GetActiveDevices(AudioDeviceType.Capture);
+                foreach (var device in inputDevices)
+                {
+                    _audioDevices.Add(device);
+                }
+
+                var outputDevices = AudioDeviceEnumerator.GetActiveDevices(AudioDeviceType.Render);
+                foreach (var device in outputDevices)
+                {
+                    _outputDevices.Add(device);
+                }
+
+                var inputPreview = string.Join(" | ", _audioDevices.Take(5)
+                    .Select(d => $"{d.DisplayName} ({d.DeviceId})"));
+                var outputPreview = string.Join(" | ", _outputDevices.Take(5)
+                    .Select(d => $"{d.DisplayName} ({d.DeviceId})"));
+                AppendBatchDebugLog("DeviceRefreshList",
+                    $"inputs={_audioDevices.Count} outputs={_outputDevices.Count} " +
+                    $"inputPreview='{inputPreview}' outputPreview='{outputPreview}'");
+
+                IsAudioDeviceRefreshEnabled = true;
+                IsAudioDeviceSelectionEnabled = _audioDevices.Count > 0;
+                IsOutputDeviceSelectionEnabled = _outputDevices.Count > 0;
+                OnPropertyChanged(nameof(IsInputDeviceUiEnabled));
+                OnPropertyChanged(nameof(IsOutputDeviceUiEnabled));
+
+                var targetInputId = currentInputId;
+                if (string.IsNullOrWhiteSpace(targetInputId)
+                    || _audioDevices.All(d => d.DeviceId != targetInputId))
+                {
+                    targetInputId = AudioDeviceEnumerator.GetDefaultDeviceId(AudioDeviceType.Capture) ?? "";
+                    if (string.IsNullOrWhiteSpace(targetInputId))
+                    {
+                        targetInputId = _audioDevices.FirstOrDefault()?.DeviceId ?? "";
+                    }
+                }
+
+                var inputSelection = _audioDevices.FirstOrDefault(d => d.DeviceId == targetInputId)
+                    ?? _audioDevices.FirstOrDefault();
+                SetSelectedAudioDevice(inputSelection, persistSelection: false);
+
+                var targetOutputId = currentOutputId;
+                if (string.IsNullOrWhiteSpace(targetOutputId)
+                    || _outputDevices.All(d => d.DeviceId != targetOutputId))
+                {
+                    targetOutputId = AudioDeviceEnumerator.GetDefaultDeviceId(AudioDeviceType.Render) ?? "";
+                    if (string.IsNullOrWhiteSpace(targetOutputId))
+                    {
+                        targetOutputId = _outputDevices.FirstOrDefault()?.DeviceId ?? "";
+                    }
+                }
+
+                var outputSelection = _outputDevices.FirstOrDefault(d => d.DeviceId == targetOutputId)
+                    ?? _outputDevices.FirstOrDefault();
+                SetSelectedOutputDevice(outputSelection, persistSelection: false);
+
+                if (string.IsNullOrWhiteSpace(_config.SelectedAudioDeviceId)
+                    && _selectedAudioDevice != null)
+                {
+                    _config.SelectedAudioDeviceId = _selectedAudioDevice.DeviceId;
+                    QueueConfigSave("InputDevicePersistDefault");
+                    AppendBatchDebugLog("DevicePersist",
+                        $"inputId='{_config.SelectedAudioDeviceId}' inputName='{_selectedAudioDevice.DisplayName}'");
+                }
+
+                if (string.IsNullOrWhiteSpace(_config.SelectedOutputDeviceId)
+                    && _selectedOutputDevice != null)
+                {
+                    _config.SelectedOutputDeviceId = _selectedOutputDevice.DeviceId;
+                    QueueConfigSave("OutputDevicePersistDefault");
+                    AppendBatchDebugLog("DevicePersist",
+                        $"outputId='{_config.SelectedOutputDeviceId}' outputName='{_selectedOutputDevice.DisplayName}'");
+                }
+
+                AppendBatchDebugLog("DeviceRefreshSelect",
+                    $"inputSelected='{_selectedAudioDevice?.DisplayName ?? ""}' ({_selectedAudioDevice?.DeviceId ?? ""}) " +
+                    $"outputSelected='{_selectedOutputDevice?.DisplayName ?? ""}' ({_selectedOutputDevice?.DeviceId ?? ""})");
+
+                ForceUpdateDeviceComboBoxSelection();
+            }
+            finally
             {
-                IsAudioDeviceSelectionEnabled = false;
-                IsAudioDeviceRefreshEnabled = false;
-                SetSelectedAudioDevice(null, persistSelection: false);
-                return;
+                _suppressDeviceSelectionPersistence = false;
             }
-
-            var deviceType = mode == AudioSourceMode.Loopback ? AudioDeviceType.Render : AudioDeviceType.Capture;
-            var devices = AudioDeviceEnumerator.GetActiveDevices(deviceType);
-            foreach (var device in devices)
-            {
-                _audioDevices.Add(device);
-            }
-
-            IsAudioDeviceRefreshEnabled = true;
-            IsAudioDeviceSelectionEnabled = _audioDevices.Count > 0;
-
-            AudioDeviceInfo? selection = null;
-            var targetDeviceId = _config.SelectedAudioDeviceId;
-
-            if (string.IsNullOrWhiteSpace(targetDeviceId))
-            {
-                targetDeviceId = AudioDeviceEnumerator.GetDefaultDeviceId(deviceType) ?? "";
-            }
-
-            if (!string.IsNullOrWhiteSpace(targetDeviceId))
-            {
-                selection = _audioDevices.FirstOrDefault(d => d.DeviceId == targetDeviceId);
-            }
-
-            selection ??= _audioDevices.FirstOrDefault();
-            SetSelectedAudioDevice(selection, persistSelection);
         }
 
         private void RefreshAudioLibrary()
@@ -1243,6 +1528,40 @@ namespace TranslationToolUI.ViewModels
             {
                 File.AppendAllText(_batchLogFilePath, line + Environment.NewLine, new System.Text.UTF8Encoding(false));
             }
+        }
+
+        private void AppendBatchDebugLog(string eventName, string message)
+        {
+            var sessionsPath = PathManager.Instance.SessionsPath;
+            var logsRoot = Directory.GetParent(sessionsPath)?.FullName ?? sessionsPath;
+            var logsPath = Path.Combine(logsRoot, "Logs");
+            Directory.CreateDirectory(logsPath);
+            var auditPath = Path.Combine(logsPath, "Audit.log");
+            var timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff");
+            var line = $"{timestamp} | {eventName} | {message}";
+
+            lock (_batchLogLock)
+            {
+                File.AppendAllText(auditPath, line + Environment.NewLine, new System.Text.UTF8Encoding(false));
+            }
+        }
+
+        private void QueueConfigSave(string reason)
+        {
+            var configPath = _configService.GetConfigFilePath();
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await _configService.SaveConfigAsync(_config).ConfigureAwait(false);
+                    AppendBatchDebugLog("ConfigSaved", $"reason='{reason}' path='{configPath}'");
+                }
+                catch (Exception ex)
+                {
+                    AppendBatchDebugLog("ConfigSaveFailed",
+                        $"reason='{reason}' path='{configPath}' error='{ex.Message}'");
+                }
+            });
         }
 
         private static string FormatBatchExceptionForLog(Exception ex)
@@ -2926,6 +3245,16 @@ namespace TranslationToolUI.ViewModels
             return Path.Combine(directory, baseName + ".speech.vtt");
         }
 
+        private string GetTranscriptionSourceLanguage()
+        {
+            if (string.Equals(_config.SourceLanguage, "auto", StringComparison.OrdinalIgnoreCase))
+            {
+                return "zh-CN";
+            }
+
+            return _config.SourceLanguage;
+        }
+
         private async Task<List<SubtitleCue>> TranscribeSpeechToCuesAsync(string audioPath, CancellationToken token)
         {
             var subscription = _config.GetActiveSubscription();
@@ -2940,7 +3269,7 @@ namespace TranslationToolUI.ViewModels
             }
 
             var speechConfig = SpeechConfig.FromSubscription(subscription.SubscriptionKey, subscription.ServiceRegion);
-            speechConfig.SpeechRecognitionLanguage = _config.SourceLanguage;
+            speechConfig.SpeechRecognitionLanguage = GetTranscriptionSourceLanguage();
 
             var cues = new List<SubtitleCue>();
             var cueLock = new object();
@@ -3896,11 +4225,11 @@ namespace TranslationToolUI.ViewModels
 
         public object? FloatingSubtitleButtonBackground => IsFloatingSubtitleOpen
             ? new SolidColorBrush(Color.Parse("#FF10B981"))
-            : AvaloniaProperty.UnsetValue;
+            : new SolidColorBrush(Color.Parse("#FFE5E7EB"));
 
         public object? FloatingSubtitleButtonForeground => IsFloatingSubtitleOpen
             ? Brushes.White
-            : AvaloniaProperty.UnsetValue;
+            : new SolidColorBrush(Color.Parse("#FF111827"));
 
         public bool IsTranslating
         {
@@ -3921,6 +4250,9 @@ namespace TranslationToolUI.ViewModels
                 {
                     IsAudioDeviceSelectionEnabled = false;
                     IsAudioDeviceRefreshEnabled = false;
+                    IsOutputDeviceSelectionEnabled = false;
+                    OnPropertyChanged(nameof(IsInputDeviceUiEnabled));
+                    OnPropertyChanged(nameof(IsOutputDeviceUiEnabled));
                 }
                 else
                 {
@@ -4295,7 +4627,13 @@ namespace TranslationToolUI.ViewModels
             get
             {
                 var index = Array.IndexOf(_sourceLanguages, _sourceLanguage);
-                return index >= 0 ? index : 0;
+                if (index >= 0)
+                {
+                    return index;
+                }
+
+                SourceLanguage = _sourceLanguages[0];
+                return 0;
             }
             set
             {
@@ -4353,7 +4691,9 @@ namespace TranslationToolUI.ViewModels
         {
             if (_translationService == null)
             {
-                _translationService = new SpeechTranslationService(_config);
+                _translationService = new SpeechTranslationService(
+                    _config,
+                    message => AppendBatchDebugLog("RecorderStats", message));
                 _translationService.OnRealtimeTranslationReceived += OnRealtimeTranslationReceived;
                 _translationService.OnFinalTranslationReceived += OnFinalTranslationReceived;
                 _translationService.OnStatusChanged += OnStatusChanged;
@@ -4688,6 +5028,7 @@ namespace TranslationToolUI.ViewModels
             _activeSubscriptionIndex = _config.ActiveSubscriptionIndex;
 
             _audioSourceModeIndex = AudioSourceModeToIndex(_config.AudioSourceMode);
+            NormalizeRecognitionToggles();
             RefreshAudioDevices(persistSelection: false);
 
             OnPropertyChanged(nameof(SubscriptionNames));
@@ -4698,6 +5039,15 @@ namespace TranslationToolUI.ViewModels
             OnPropertyChanged(nameof(IsAudioSourceSelectionEnabled));
             OnPropertyChanged(nameof(IsAudioDeviceSelectionEnabled));
             OnPropertyChanged(nameof(IsAudioDeviceRefreshEnabled));
+            OnPropertyChanged(nameof(OutputDevices));
+            OnPropertyChanged(nameof(SelectedOutputDevice));
+            OnPropertyChanged(nameof(IsOutputDeviceSelectionEnabled));
+            OnPropertyChanged(nameof(IsRecordingLoopbackOnly));
+            OnPropertyChanged(nameof(IsRecordingLoopbackMix));
+            OnPropertyChanged(nameof(IsInputRecognitionEnabled));
+            OnPropertyChanged(nameof(IsOutputRecognitionEnabled));
+            OnPropertyChanged(nameof(IsInputDeviceUiEnabled));
+            OnPropertyChanged(nameof(IsOutputDeviceUiEnabled));
             OnPropertyChanged(nameof(IsAiConfigured));
             NormalizeSpeechSubtitleOption();
             OnPropertyChanged(nameof(IsSpeechSubtitleOptionEnabled));
@@ -4930,7 +5280,54 @@ namespace TranslationToolUI.ViewModels
                 comboBox.SelectedIndex = -1;
                 comboBox.SelectedIndex = _activeSubscriptionIndex;
             }
-        }        public void Dispose()
+        }
+
+        private void ForceUpdateDeviceComboBoxSelection()
+        {
+            if (_mainWindow == null)
+            {
+                return;
+            }
+
+            Dispatcher.UIThread.Post(() =>
+            {
+                _suppressDeviceSelectionPersistence = true;
+                try
+                {
+                    var inputCombo = _mainWindow.FindControl<ComboBox>("InputDeviceComboBox");
+                    if (inputCombo != null)
+                    {
+                        if (_selectedAudioDevice != null)
+                        {
+                            inputCombo.SelectedItem = _selectedAudioDevice;
+                        }
+                        else if (_audioDevices.Count > 0)
+                        {
+                            inputCombo.SelectedItem = _audioDevices[0];
+                        }
+                    }
+
+                    var outputCombo = _mainWindow.FindControl<ComboBox>("OutputDeviceComboBox");
+                    if (outputCombo != null)
+                    {
+                        if (_selectedOutputDevice != null)
+                        {
+                            outputCombo.SelectedItem = _selectedOutputDevice;
+                        }
+                        else if (_outputDevices.Count > 0)
+                        {
+                            outputCombo.SelectedItem = _outputDevices[0];
+                        }
+                    }
+                }
+                finally
+                {
+                    _suppressDeviceSelectionPersistence = false;
+                }
+            });
+        }
+
+        public void Dispose()
         {
             if (_translationService != null)
             {

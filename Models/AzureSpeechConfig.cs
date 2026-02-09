@@ -13,6 +13,14 @@ namespace TranslationToolUI.Models
         SuccessAndFailure
     }
 
+    public enum AutoGainPreset
+    {
+        Off,
+        Low,
+        Medium,
+        High
+    }
+
     public class AzureSubscription
     {
         public string Name { get; set; } = "";
@@ -31,8 +39,8 @@ namespace TranslationToolUI.Models
         public List<AzureSubscription> Subscriptions { get; set; } = new();
         public int ActiveSubscriptionIndex { get; set; } = 0;
 
-        public string SourceLanguage { get; set; } = "zh-CN";
-        public string TargetLanguage { get; set; } = "en";
+        public string SourceLanguage { get; set; } = "auto";
+        public string TargetLanguage { get; set; } = "zh-CN";
 
         public bool FilterModalParticles { get; set; } = true;
         public int MaxHistoryItems { get; set; } = 15;
@@ -47,14 +55,24 @@ namespace TranslationToolUI.Models
         public bool ShowReconnectMarkerInSubtitle { get; set; } = true;
         public int AudioActivityThreshold { get; set; } = 600;
         public double AudioLevelGain { get; set; } = 2.0;
+        public bool AutoGainEnabled { get; set; } = false;
+        public AutoGainPreset AutoGainPreset { get; set; } = AutoGainPreset.Off;
+        public double AutoGainTargetRms { get; set; } = 0.12;
+        public double AutoGainMinGain { get; set; } = 0.5;
+        public double AutoGainMaxGain { get; set; } = 6.0;
+        public double AutoGainSmoothing { get; set; } = 0.08;
 
         public AudioSourceMode AudioSourceMode { get; set; } = AudioSourceMode.DefaultMic;
         public string SelectedAudioDeviceId { get; set; } = "";
+        public string SelectedOutputDeviceId { get; set; } = "";
+        public RecordingMode RecordingMode { get; set; } = RecordingMode.LoopbackWithMic;
+        public bool UseInputForRecognition { get; set; } = true;
+        public bool UseOutputForRecognition { get; set; } = false;
 
         public int ChunkDurationMs { get; set; } = 200;
 
         public bool EnableRecording { get; set; } = true;
-        public int RecordingMp3BitrateKbps { get; set; } = 96;
+        public int RecordingMp3BitrateKbps { get; set; } = 256;
         public bool DeleteWavAfterMp3 { get; set; } = true;
 
         public bool ExportSrtSubtitles { get; set; } = false;

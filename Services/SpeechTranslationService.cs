@@ -13,7 +13,15 @@ namespace TranslationToolUI.Services
 {
     public class SpeechTranslationService
     {
+        private static readonly string[] AutoDetectSourceLanguages =
+        {
+            "zh-CN",
+            "en-US",
+            "ja-JP",
+            "ko-KR"
+        };
         private AzureSpeechConfig _config;
+        private readonly Action<string>? _auditLog;
         private TranslationRecognizer? _recognizer;
         private bool _isTranslating; private string _currentSessionFilePath = string.Empty;
 
@@ -25,7 +33,7 @@ namespace TranslationToolUI.Services
         private PushAudioInputStream? _pushStream;
         private WasapiPcm16AudioSource? _naudioSource;
 
-        private WavChunkRecorder? _wavRecorder;
+        private HighQualityRecorder? _highQualityRecorder;
         private Task? _pendingTranscodeTask;
 
         private readonly object _subtitleLock = new();
@@ -41,16 +49,19 @@ namespace TranslationToolUI.Services
         private DateTime _lastRecognitionUtc = DateTime.MinValue;
         private DateTime _lastAudioActivityUtc = DateTime.MinValue;
         private double _smoothedAudioLevel;
+        private AutoGainProcessor _autoGainProcessor;
 
         public event EventHandler<TranslationItem>? OnRealtimeTranslationReceived;
         public event EventHandler<TranslationItem>? OnFinalTranslationReceived;
         public event EventHandler<string>? OnStatusChanged;
         public event EventHandler<string>? OnReconnectTriggered;
         public event EventHandler<double>? OnAudioLevelUpdated;
-        public SpeechTranslationService(AzureSpeechConfig config)
+        public SpeechTranslationService(AzureSpeechConfig config, Action<string>? auditLog = null)
         {
             _config = config;
+            _auditLog = auditLog;
             _isTranslating = false;
+            _autoGainProcessor = CreateAutoGainProcessor();
             InitializeSessionFile();
         }
 
@@ -96,7 +107,7 @@ namespace TranslationToolUI.Services
                 _audioConfig = CreateAudioConfigAndStartSource();
                 InitializeSubtitleWriters();
                 var speechConfig = CreateSpeechConfig();
-                _recognizer = new TranslationRecognizer(speechConfig, _audioConfig);
+                _recognizer = CreateTranslationRecognizer(speechConfig, _audioConfig);
 
                 _recognizer.Recognized += OnRecognized;
                 _recognizer.Recognizing += OnRecognizing;
@@ -515,6 +526,7 @@ namespace TranslationToolUI.Services
             }
 
             _config = newConfig;
+            _autoGainProcessor = CreateAutoGainProcessor();
 
             if (wasTranslating && _config.IsValid())
             {
@@ -544,7 +556,12 @@ namespace TranslationToolUI.Services
             _pushStream = AudioInputStream.CreatePushStream(streamFormat);
 
             var mode = _config.AudioSourceMode;
-            var deviceId = mode == AudioSourceMode.DefaultMic ? null : _config.SelectedAudioDeviceId;
+            var deviceId = mode switch
+            {
+                AudioSourceMode.Loopback => _config.SelectedOutputDeviceId,
+                AudioSourceMode.DefaultMic => null,
+                _ => _config.SelectedAudioDeviceId
+            };
 
             _naudioSource = new WasapiPcm16AudioSource(mode == AudioSourceMode.DefaultMic ? AudioSourceMode.CaptureDevice : mode, deviceId, _config.ChunkDurationMs);
             _naudioSource.Pcm16ChunkReady += OnPcm16ChunkReady;
@@ -555,12 +572,30 @@ namespace TranslationToolUI.Services
 
                 if (_config.EnableRecording)
                 {
-                    _currentAudioWavPath = PathManager.Instance.GetSessionFile($"Audio_{_currentRunStamp}.wav");
                     _currentAudioMp3Path = PathManager.Instance.GetSessionFile($"Audio_{_currentRunStamp}.mp3");
-
-                    _wavRecorder = new WavChunkRecorder(_currentAudioWavPath, _naudioSource.OutputWaveFormat);
-                    _wavRecorder.Start();
-                    OnStatusChanged?.Invoke(this, $"录音已开始: {_currentAudioWavPath}");
+                    try
+                    {
+                        var (autoGainEnabled, targetRms, minGain, maxGain, smoothing) = GetAutoGainSettings();
+                        _highQualityRecorder = new HighQualityRecorder(
+                            _currentAudioMp3Path,
+                            _config.SelectedOutputDeviceId,
+                            _config.SelectedAudioDeviceId,
+                            _config.RecordingMode,
+                            _config.RecordingMp3BitrateKbps,
+                            autoGainEnabled,
+                            targetRms,
+                            minGain,
+                            maxGain,
+                            smoothing,
+                            _auditLog);
+                        _highQualityRecorder.StartAsync().GetAwaiter().GetResult();
+                        OnStatusChanged?.Invoke(this, $"录音已开始: {_currentAudioMp3Path}");
+                    }
+                    catch (Exception ex)
+                    {
+                        _highQualityRecorder = null;
+                        OnStatusChanged?.Invoke(this, $"录音启动失败: {ex.Message}");
+                    }
                 }
             }
             catch (Exception ex)
@@ -570,8 +605,8 @@ namespace TranslationToolUI.Services
                 _naudioSource.DisposeAsync().AsTask().GetAwaiter().GetResult();
                 _naudioSource = null;
 
-                _wavRecorder?.DisposeAsync().AsTask().GetAwaiter().GetResult();
-                _wavRecorder = null;
+                _highQualityRecorder?.DisposeAsync().AsTask().GetAwaiter().GetResult();
+                _highQualityRecorder = null;
                 _currentAudioWavPath = null;
                 _currentAudioMp3Path = null;
 
@@ -587,7 +622,10 @@ namespace TranslationToolUI.Services
         private SpeechTranslationConfig CreateSpeechConfig()
         {
             var speechConfig = SpeechTranslationConfig.FromSubscription(_config.SubscriptionKey, _config.ServiceRegion);
-            speechConfig.SpeechRecognitionLanguage = _config.SourceLanguage;
+            if (!IsAutoDetectSourceLanguage())
+            {
+                speechConfig.SpeechRecognitionLanguage = _config.SourceLanguage;
+            }
             speechConfig.AddTargetLanguage(_config.TargetLanguage);
             speechConfig.OutputFormat = OutputFormat.Detailed;
 
@@ -624,18 +662,43 @@ namespace TranslationToolUI.Services
         {
             try
             {
+                if (_config.AutoGainEnabled)
+                {
+                    _autoGainProcessor.ProcessInPlace(chunk, chunk.Length);
+                }
+
                 if (HasAudioActivity(chunk, _config.AudioActivityThreshold))
                 {
                     _lastAudioActivityUtc = DateTime.UtcNow;
                 }
                 UpdateAudioLevel(chunk);
                 _pushStream?.Write(chunk);
-                _wavRecorder?.TryEnqueue(chunk);
             }
             catch
             {
                 // ignore: can happen during shutdown
             }
+        }
+
+        private AutoGainProcessor CreateAutoGainProcessor()
+        {
+            var (_, targetRms, minGain, maxGain, smoothing) = GetAutoGainSettings();
+            return new AutoGainProcessor(targetRms, minGain, maxGain, smoothing);
+        }
+
+        private (bool enabled, double targetRms, double minGain, double maxGain, double smoothing) GetAutoGainSettings()
+        {
+            if (!_config.AutoGainEnabled || _config.AutoGainPreset == AutoGainPreset.Off)
+            {
+                return (false, 0.12, 0.5, 6.0, 0.08);
+            }
+
+            return _config.AutoGainPreset switch
+            {
+                AutoGainPreset.Low => (true, 0.08, 0.7, 3.5, 0.05),
+                AutoGainPreset.High => (true, 0.18, 0.4, 8.0, 0.12),
+                _ => (true, 0.12, 0.5, 6.0, 0.08)
+            };
         }
 
         private void UpdateAudioLevel(byte[] chunk)
@@ -770,7 +833,7 @@ namespace TranslationToolUI.Services
                 _recognizer = null;
 
                 var speechConfig = CreateSpeechConfig();
-                _recognizer = new TranslationRecognizer(speechConfig, _audioConfig);
+                _recognizer = CreateTranslationRecognizer(speechConfig, _audioConfig);
 
                 _recognizer.Recognized += OnRecognized;
                 _recognizer.Recognizing += OnRecognizing;
@@ -802,13 +865,29 @@ namespace TranslationToolUI.Services
             };
         }
 
+        private TranslationRecognizer CreateTranslationRecognizer(SpeechTranslationConfig speechConfig, AudioConfig audioConfig)
+        {
+            if (IsAutoDetectSourceLanguage())
+            {
+                var autoConfig = AutoDetectSourceLanguageConfig.FromLanguages(AutoDetectSourceLanguages);
+                return new TranslationRecognizer(speechConfig, autoConfig, audioConfig);
+            }
+
+            return new TranslationRecognizer(speechConfig, audioConfig);
+        }
+
+        private bool IsAutoDetectSourceLanguage()
+        {
+            return string.Equals(_config.SourceLanguage, "auto", StringComparison.OrdinalIgnoreCase);
+        }
+
         private async Task CleanupAudioAsync()
         {
-            if (_wavRecorder != null)
+            if (_highQualityRecorder != null)
             {
                 try
                 {
-                    await _wavRecorder.DisposeAsync().ConfigureAwait(false);
+                    await _highQualityRecorder.DisposeAsync().ConfigureAwait(false);
                 }
                 catch
                 {
@@ -818,7 +897,7 @@ namespace TranslationToolUI.Services
 
             var wavPath = _currentAudioWavPath;
             var mp3Path = _currentAudioMp3Path;
-            _wavRecorder = null;
+            _highQualityRecorder = null;
             _currentAudioWavPath = null;
             _currentAudioMp3Path = null;
 
