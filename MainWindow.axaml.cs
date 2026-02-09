@@ -3,6 +3,7 @@ using TranslationToolUI.Services;
 using TranslationToolUI.ViewModels;
 using System;
 using Avalonia.Interactivity;
+using TranslationToolUI.Models;
 
 namespace TranslationToolUI;
 
@@ -64,6 +65,17 @@ public partial class MainWindow : Window
         }
     }
 
+    private void SubtitleCueListBox_DoubleTapped(object? sender, Avalonia.Input.TappedEventArgs e)
+    {
+        if (_viewModel == null)
+        {
+            return;
+        }
 
+        if (sender is ListBox listBox && listBox.SelectedItem is SubtitleCue cue)
+        {
+            _viewModel.PlayFromSubtitleCue(cue);
+        }
+    }
 }
 
