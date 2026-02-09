@@ -24,6 +24,7 @@ namespace TranslationToolUI.Models
         private int _reviewFailed;
         private int _reviewPending;
         private string _reviewStatusText = "";
+        private bool _forceReviewRegeneration;
 
         public string FileName
         {
@@ -95,6 +96,12 @@ namespace TranslationToolUI.Models
         {
             get => _reviewStatusText;
             set => SetProperty(ref _reviewStatusText, value, nameof(ReviewStatusText));
+        }
+
+        public bool ForceReviewRegeneration
+        {
+            get => _forceReviewRegeneration;
+            set => SetProperty(ref _forceReviewRegeneration, value, nameof(ForceReviewRegeneration));
         }
 
         public event PropertyChangedEventHandler? PropertyChanged;

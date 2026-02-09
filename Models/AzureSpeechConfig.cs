@@ -89,6 +89,14 @@ namespace TranslationToolUI.Models
         public string BatchResultContainerName { get; set; } = DefaultBatchResultContainerName;
         public bool UseSpeechSubtitleForReview { get; set; } = true;
         public BatchLogLevel BatchLogLevel { get; set; } = BatchLogLevel.Off;
+        public bool EnableAuditLog { get; set; } = false;
+        public bool BatchForceRegeneration { get; set; } = false;
+        public bool ContextMenuForceRegeneration { get; set; } = true;
+        public bool EnableBatchSubtitleSentenceSplit { get; set; } = true;
+        public bool BatchSubtitleSplitOnComma { get; set; } = false;
+        public int BatchSubtitleMaxChars { get; set; } = 24;
+        public double BatchSubtitleMaxDurationSeconds { get; set; } = 6;
+        public int BatchSubtitlePauseSplitMs { get; set; } = 500;
 
         public AiConfig? AiConfig { get; set; }
 

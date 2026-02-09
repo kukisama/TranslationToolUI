@@ -416,10 +416,20 @@
                                     <Button Content="刷新" Width="50" Padding="6,2" Command="{Binding RefreshAudioLibraryCommand}"
                                             HorizontalAlignment="Right" DockPanel.Dock="Right"/>
                                 </DockPanel>
-                                <ListBox ItemsSource="{Binding AudioFiles}" SelectedItem="{Binding SelectedAudioFile}" Height="160">
+                                <ListBox ItemsSource="{Binding AudioFiles}" SelectedItem="{Binding SelectedAudioFile}" Height="160"
+                                         PointerPressed="AudioFileList_PointerPressed">
                                     <ListBox.ItemTemplate>
                                         <DataTemplate DataType="models:MediaFileItem">
-                                            <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis"/>
+                                            <Border Padding="2">
+                                                <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis"/>
+                                                <Border.ContextMenu>
+                                                    <ContextMenu DataContext="{Binding}">
+                                                        <MenuItem Header="生成字幕+复盘"
+                                                                  IsEnabled="True"
+                                                                  Click="AudioFileEnqueue_Click"/>
+                                                    </ContextMenu>
+                                                </Border.ContextMenu>
+                                            </Border>
                                         </DataTemplate>
                                     </ListBox.ItemTemplate>
                                 </ListBox>

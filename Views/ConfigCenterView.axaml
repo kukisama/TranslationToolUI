@@ -129,8 +129,41 @@
                                 <ComboBoxItem Content="仅失败"/>
                                 <ComboBoxItem Content="成功 + 失败"/>
                             </ComboBox>
+                            <CheckBox x:Name="EnableAuditLogCheckBox" Content="启用审计日志 (Audit.log)"/>
                             <TextBlock FontSize="10" Foreground="Gray"
                                        Text="日志保存到会话目录，文件后缀为 .log" TextWrapping="Wrap"/>
+                        </StackPanel>
+
+                        <StackPanel Spacing="5">
+                            <TextBlock Text="强制重新生成"/>
+                            <CheckBox x:Name="BatchForceRegenerationCheckBox" Content="批量处理：强制重新生成字幕和复盘"/>
+                            <CheckBox x:Name="ContextMenuForceRegenerationCheckBox" Content="右键处理：强制重新生成字幕和复盘"/>
+                            <TextBlock FontSize="10" Foreground="Gray"
+                                       Text="勾选后将忽略已有的字幕或复盘文件，全部重新生成" TextWrapping="Wrap"/>
+                        </StackPanel>
+
+                        <Separator Margin="0,8,0,8"/>
+
+                        <TextBlock Text="批量字幕切分" FontWeight="Bold"/>
+
+                        <StackPanel Spacing="6">
+                            <CheckBox x:Name="EnableBatchSentenceSplitCheckBox" Content="启用按句子切分"/>
+                            <CheckBox x:Name="BatchSplitOnCommaCheckBox" Content="逗号也作为断句"/>
+
+                            <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+                                <TextBlock Text="每句最大字数" VerticalAlignment="Center"/>
+                                <NumericUpDown x:Name="BatchMaxCharsNumeric" Value="24" Minimum="6" Maximum="80" Width="120" FormatString="F0"/>
+                            </StackPanel>
+
+                            <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+                                <TextBlock Text="每句最长时长(秒)" VerticalAlignment="Center"/>
+                                <NumericUpDown x:Name="BatchMaxDurationNumeric" Value="6" Minimum="1" Maximum="15" Width="120" FormatString="F1"/>
+                            </StackPanel>
+
+                            <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+                                <TextBlock Text="停顿断句阈值(ms)" VerticalAlignment="Center"/>
+                                <NumericUpDown x:Name="BatchPauseSplitNumeric" Value="500" Minimum="100" Maximum="2000" Width="120" FormatString="F0"/>
+                            </StackPanel>
                         </StackPanel>
                     </StackPanel>
                 </ScrollViewer>

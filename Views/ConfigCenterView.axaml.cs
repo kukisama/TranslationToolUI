@@ -150,6 +150,14 @@ namespace TranslationToolUI.Views
             BatchStorageConnectionStringTextBox.Text = "";
             BatchStorageValidateStatusTextBlock.Text = "";
             BatchLogLevelComboBox.SelectedIndex = 0;
+            EnableAuditLogCheckBox.IsChecked = false;
+            BatchForceRegenerationCheckBox.IsChecked = false;
+            ContextMenuForceRegenerationCheckBox.IsChecked = true;
+            EnableBatchSentenceSplitCheckBox.IsChecked = true;
+            BatchSplitOnCommaCheckBox.IsChecked = false;
+            BatchMaxCharsNumeric.Value = 24;
+            BatchMaxDurationNumeric.Value = 6;
+            BatchPauseSplitNumeric.Value = 500;
 
             UseSpeechSubtitleForReviewCheckBox.IsChecked = false;
             UseSpeechSubtitleForReviewCheckBox.IsEnabled = false;
@@ -195,6 +203,14 @@ namespace TranslationToolUI.Views
                 BatchLogLevel.SuccessAndFailure => 2,
                 _ => 0
             };
+            EnableAuditLogCheckBox.IsChecked = _config.EnableAuditLog;
+            BatchForceRegenerationCheckBox.IsChecked = _config.BatchForceRegeneration;
+            ContextMenuForceRegenerationCheckBox.IsChecked = _config.ContextMenuForceRegeneration;
+            EnableBatchSentenceSplitCheckBox.IsChecked = _config.EnableBatchSubtitleSentenceSplit;
+            BatchSplitOnCommaCheckBox.IsChecked = _config.BatchSubtitleSplitOnComma;
+            BatchMaxCharsNumeric.Value = _config.BatchSubtitleMaxChars;
+            BatchMaxDurationNumeric.Value = (decimal)_config.BatchSubtitleMaxDurationSeconds;
+            BatchPauseSplitNumeric.Value = _config.BatchSubtitlePauseSplitMs;
 
             UseSpeechSubtitleForReviewCheckBox.IsChecked = _config.UseSpeechSubtitleForReview;
             UseSpeechSubtitleForReviewCheckBox.IsEnabled = _config.BatchStorageIsValid;
@@ -775,6 +791,14 @@ namespace TranslationToolUI.Views
                     2 => BatchLogLevel.SuccessAndFailure,
                     _ => BatchLogLevel.Off
                 };
+                _config.EnableAuditLog = EnableAuditLogCheckBox.IsChecked ?? false;
+                _config.BatchForceRegeneration = BatchForceRegenerationCheckBox.IsChecked ?? false;
+                _config.ContextMenuForceRegeneration = ContextMenuForceRegenerationCheckBox.IsChecked ?? true;
+                _config.EnableBatchSubtitleSentenceSplit = EnableBatchSentenceSplitCheckBox.IsChecked ?? true;
+                _config.BatchSubtitleSplitOnComma = BatchSplitOnCommaCheckBox.IsChecked ?? false;
+                _config.BatchSubtitleMaxChars = (int)(BatchMaxCharsNumeric.Value ?? 24);
+                _config.BatchSubtitleMaxDurationSeconds = (double)(BatchMaxDurationNumeric.Value ?? 6m);
+                _config.BatchSubtitlePauseSplitMs = (int)(BatchPauseSplitNumeric.Value ?? 500);
 
                 if (string.IsNullOrWhiteSpace(_config.BatchStorageConnectionString))
                 {
