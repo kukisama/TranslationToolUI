@@ -1,0 +1,45 @@
+# 当推送 tag（如 v1.3.0 或 1.3.0）时，自动构建并发布 GitHub Release
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+      - '[0-9]+.*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    strategy:
+      matrix:
+        rid: [win-x64, win-arm64]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Publish (${{ matrix.rid }})
+        run: |
+          dotnet publish TranslationToolUI.csproj `
+            -c Release `
+            -r ${{ matrix.rid }} `
+            --self-contained false `
+            -o artifacts/publish/TranslationToolUI-${{ matrix.rid }}-fdd
+
+      - name: Create zip
+        run: |
+          Compress-Archive `
+            -Path "artifacts/publish/TranslationToolUI-${{ matrix.rid }}-fdd/*" `
+            -DestinationPath "artifacts/TranslationToolUI-${{ matrix.rid }}-fdd.zip"
+
+      - name: Upload Release Asset
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/TranslationToolUI-${{ matrix.rid }}-fdd.zip
+          generate_release_notes: true
