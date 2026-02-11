@@ -74,6 +74,11 @@ namespace TranslationToolUI.Views
                     QuickDeploymentName = existingConfig.QuickDeploymentName,
                     ApiVersion = existingConfig.ApiVersion,
                     SummaryEnableReasoning = existingConfig.SummaryEnableReasoning,
+                    InsightSystemPrompt = existingConfig.InsightSystemPrompt,
+                    ReviewSystemPrompt = existingConfig.ReviewSystemPrompt,
+                    InsightUserContentTemplate = existingConfig.InsightUserContentTemplate,
+                    ReviewUserContentTemplate = existingConfig.ReviewUserContentTemplate,
+                    AutoInsightBufferOutput = existingConfig.AutoInsightBufferOutput,
                     PresetButtons = existingConfig.PresetButtons
                         .Select(b => new InsightPresetButton { Name = b.Name, Prompt = b.Prompt })
                         .ToList(),
@@ -239,6 +244,12 @@ namespace TranslationToolUI.Views
                 : _aiConfig.ApiVersion;
             SummaryReasoningCheckBox.IsChecked = _aiConfig.SummaryEnableReasoning;
             UpdateProviderFieldsVisibility();
+
+            InsightSystemPromptTextBox.Text = _aiConfig.InsightSystemPrompt;
+            ReviewSystemPromptTextBox.Text = _aiConfig.ReviewSystemPrompt;
+            InsightUserContentTemplateTextBox.Text = _aiConfig.InsightUserContentTemplate;
+            ReviewUserContentTemplateTextBox.Text = _aiConfig.ReviewUserContentTemplate;
+            AutoInsightBufferCheckBox.IsChecked = _aiConfig.AutoInsightBufferOutput;
 
             _presetButtons = new ObservableCollection<InsightPresetButton>(_aiConfig.PresetButtons);
             PresetButtonsItemsControl.ItemsSource = _presetButtons;
@@ -897,6 +908,11 @@ namespace TranslationToolUI.Views
             _aiConfig.DeploymentName = quickDeployment;
             _aiConfig.ApiVersion = ApiVersionTextBox.Text?.Trim() ?? "2024-02-01";
             _aiConfig.SummaryEnableReasoning = SummaryReasoningCheckBox.IsChecked == true;
+            _aiConfig.InsightSystemPrompt = InsightSystemPromptTextBox.Text?.Trim() ?? "";
+            _aiConfig.ReviewSystemPrompt = ReviewSystemPromptTextBox.Text?.Trim() ?? "";
+            _aiConfig.InsightUserContentTemplate = InsightUserContentTemplateTextBox.Text?.Trim() ?? "";
+            _aiConfig.ReviewUserContentTemplate = ReviewUserContentTemplateTextBox.Text?.Trim() ?? "";
+            _aiConfig.AutoInsightBufferOutput = AutoInsightBufferCheckBox.IsChecked == true;
             _aiConfig.PresetButtons = _presetButtons
                 .Where(b => !string.IsNullOrWhiteSpace(b.Name))
                 .ToList();

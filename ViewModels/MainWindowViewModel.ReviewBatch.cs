@@ -1041,11 +1041,22 @@ namespace TranslationToolUI.ViewModels
                 return;
             }
 
-            var systemPrompt = "你是一个会议复盘助手。根据字幕内容生成结构化 Markdown 总结。请输出包含关键结论、行动项和风险点，并在引用内容时标注时间戳，格式为 [HH:MM:SS]。";
+            var systemPrompt = _config.AiConfig?.ReviewSystemPrompt;
+            if (string.IsNullOrWhiteSpace(systemPrompt))
+            {
+                systemPrompt = new AiConfig().ReviewSystemPrompt;
+            }
             var prompt = string.IsNullOrWhiteSpace(queueItem.Prompt)
                 ? "请生成复盘总结。"
                 : queueItem.Prompt.Trim();
-            var userPrompt = $"以下是会议字幕内容:\n\n{FormatSubtitleForSummary(cues)}\n\n---\n\n{prompt}";
+            var userTemplate = _config.AiConfig?.ReviewUserContentTemplate;
+            if (string.IsNullOrWhiteSpace(userTemplate))
+            {
+                userTemplate = new AiConfig().ReviewUserContentTemplate;
+            }
+            var userPrompt = userTemplate
+                .Replace("{subtitle}", FormatSubtitleForSummary(cues))
+                .Replace("{prompt}", prompt);
 
             try
             {
@@ -1600,8 +1611,15 @@ namespace TranslationToolUI.ViewModels
 
         private async void GenerateReviewSummary()
         {
-            if (SelectedReviewSheet == null || SelectedAudioFile == null)
+            if (SelectedReviewSheet == null)
             {
+                SelectedReviewSheet?.StatusMessage = "未选择复盘模板";
+                return;
+            }
+
+            if (SelectedAudioFile == null)
+            {
+                SelectedReviewSheet.StatusMessage = "未选择音频文件";
                 return;
             }
 
@@ -1609,6 +1627,9 @@ namespace TranslationToolUI.ViewModels
             var audioFile = SelectedAudioFile;
             if (!await EnsureSpeechSubtitleForReviewAsync(audioFile))
             {
+                sheet.StatusMessage = string.IsNullOrWhiteSpace(SpeechSubtitleStatusMessage)
+                    ? "speech 字幕未就绪，无法生成复盘"
+                    : SpeechSubtitleStatusMessage;
                 return;
             }
 
@@ -1709,11 +1730,18 @@ namespace TranslationToolUI.ViewModels
         {
             if (SelectedAudioFile == null)
             {
+                SelectedReviewSheet?.StatusMessage = "未选择音频文件";
                 return;
             }
 
             if (!await EnsureSpeechSubtitleForReviewAsync(SelectedAudioFile))
             {
+                if (SelectedReviewSheet != null)
+                {
+                    SelectedReviewSheet.StatusMessage = string.IsNullOrWhiteSpace(SpeechSubtitleStatusMessage)
+                        ? "speech 字幕未就绪，无法生成复盘"
+                        : SpeechSubtitleStatusMessage;
+                }
                 return;
             }
 
@@ -3209,7 +3237,8 @@ namespace TranslationToolUI.ViewModels
 
         private async Task GenerateReviewSheetAsync(ReviewSheetState sheet, MediaFileItem audioFile, List<SubtitleCue> cues)
         {
-            if (_config.AiConfig == null || !_config.AiConfig.IsValid)
+            var aiConfig = _config.AiConfig;
+            if (aiConfig == null || !aiConfig.IsValid)
             {
                 sheet.StatusMessage = "AI 配置无效，请先配置 AI 服务";
                 return;
@@ -3240,19 +3269,30 @@ namespace TranslationToolUI.ViewModels
                 allStartCmd.RaiseCanExecuteChanged();
             }
 
-            var systemPrompt = "你是一个会议复盘助手。根据字幕内容生成结构化 Markdown 总结。请输出包含关键结论、行动项和风险点，并在引用内容时标注时间戳，格式为 [HH:MM:SS]。";
+            var systemPrompt = aiConfig.ReviewSystemPrompt;
+            if (string.IsNullOrWhiteSpace(systemPrompt))
+            {
+                systemPrompt = new AiConfig().ReviewSystemPrompt;
+            }
             var subtitlesText = FormatSubtitleForSummary(cues);
             var prompt = string.IsNullOrWhiteSpace(sheet.Prompt)
                 ? "请生成复盘总结。"
                 : sheet.Prompt.Trim();
-            var userPrompt = $"以下是会议字幕内容:\n\n{subtitlesText}\n\n---\n\n{prompt}";
+            var userTemplate = aiConfig.ReviewUserContentTemplate;
+            if (string.IsNullOrWhiteSpace(userTemplate))
+            {
+                userTemplate = new AiConfig().ReviewUserContentTemplate;
+            }
+            var userPrompt = userTemplate
+                .Replace("{subtitle}", subtitlesText)
+                .Replace("{prompt}", prompt);
 
             try
             {
                 var sb = new System.Text.StringBuilder();
                 AiRequestOutcome? outcome = null;
                 await _aiInsightService.StreamChatAsync(
-                    _config.AiConfig,
+                    aiConfig,
                     systemPrompt,
                     userPrompt,
                     chunk =>
@@ -3270,7 +3310,7 @@ namespace TranslationToolUI.ViewModels
                     },
                     token,
                     AiChatProfile.Summary,
-                    enableReasoning: _config.AiConfig.SummaryEnableReasoning,
+                    enableReasoning: aiConfig.SummaryEnableReasoning,
                     onOutcome: o => outcome = o);
 
                 if (!ReferenceEquals(sheet.Cts, localCts))
@@ -3289,7 +3329,7 @@ namespace TranslationToolUI.ViewModels
                 {
                     reasoningNote = " (思考已启用)";
                 }
-                else if (_config.AiConfig.SummaryEnableReasoning)
+                else if (aiConfig.SummaryEnableReasoning)
                 {
                     reasoningNote = " (未启用思考)";
                 }

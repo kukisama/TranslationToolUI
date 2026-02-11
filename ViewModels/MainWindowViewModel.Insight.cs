@@ -105,7 +105,7 @@ namespace TranslationToolUI.ViewModels
             set => SetProperty(ref _autoInsightPrompt, value);
         }
 
-        private async void SendInsight(string userQuestion)
+        private async void SendInsight(string userQuestion, bool bufferOutput = false)
         {
             if (_config.AiConfig == null || !_config.AiConfig.IsValid)
             {
@@ -117,21 +117,41 @@ namespace TranslationToolUI.ViewModels
             var token = _insightCts.Token;
 
             IsInsightLoading = true;
-            InsightMarkdown = "";
+            if (!bufferOutput || string.IsNullOrWhiteSpace(InsightMarkdown))
+            {
+                InsightMarkdown = "";
+            }
 
-            var systemPrompt = "你是一个专业的会议/翻译分析助手。用户会提供实时翻译的历史记录，请根据用户的问题对内容进行分析。请用 Markdown 格式输出分析结果。";
+            var systemPrompt = _config.AiConfig.InsightSystemPrompt;
+            if (string.IsNullOrWhiteSpace(systemPrompt))
+            {
+                systemPrompt = new AiConfig().InsightSystemPrompt;
+            }
             var historyText = FormatHistoryForAi();
-            var fullUserContent = $"以下是翻译历史记录：\n\n{historyText}\n\n---\n\n用户问题：{userQuestion}";
+            var userTemplate = _config.AiConfig.InsightUserContentTemplate;
+            if (string.IsNullOrWhiteSpace(userTemplate))
+            {
+                userTemplate = new AiConfig().InsightUserContentTemplate;
+            }
+            var fullUserContent = userTemplate
+                .Replace("{history}", historyText)
+                .Replace("{question}", userQuestion ?? string.Empty);
 
+            var sb = new System.Text.StringBuilder();
             try
             {
-                var sb = new System.Text.StringBuilder();
                 await _aiInsightService.StreamChatAsync(
                     _config.AiConfig,
                     systemPrompt,
                     fullUserContent,
                     chunk =>
                     {
+                        if (bufferOutput)
+                        {
+                            sb.Append(chunk);
+                            return;
+                        }
+
                         Dispatcher.UIThread.Post(() =>
                         {
                             sb.Append(chunk);
@@ -141,6 +161,14 @@ namespace TranslationToolUI.ViewModels
                     token,
                     AiChatProfile.Quick,
                     enableReasoning: false);
+
+                if (bufferOutput)
+                {
+                    Dispatcher.UIThread.Post(() =>
+                    {
+                        InsightMarkdown = sb.ToString();
+                    });
+                }
             }
             catch (OperationCanceledException)
             {
@@ -148,11 +176,23 @@ namespace TranslationToolUI.ViewModels
             }
             catch (HttpRequestException ex)
             {
-                InsightMarkdown += $"\n\n---\n**错误**: {ex.Message}";
+                var message = $"\n\n---\n**错误**: {ex.Message}";
+                Dispatcher.UIThread.Post(() =>
+                {
+                    InsightMarkdown = bufferOutput
+                        ? sb.ToString() + message
+                        : InsightMarkdown + message;
+                });
             }
             catch (Exception ex)
             {
-                InsightMarkdown += $"\n\n---\n**错误**: {ex.Message}";
+                var message = $"\n\n---\n**错误**: {ex.Message}";
+                Dispatcher.UIThread.Post(() =>
+                {
+                    InsightMarkdown = bufferOutput
+                        ? sb.ToString() + message
+                        : InsightMarkdown + message;
+                });
             }
             finally
             {
@@ -240,7 +280,8 @@ namespace TranslationToolUI.ViewModels
                 return;
             }
 
-            SendInsight(AutoInsightPrompt);
+            var bufferOutput = _config.AiConfig?.AutoInsightBufferOutput == true;
+            SendInsight(AutoInsightPrompt, bufferOutput);
         }
 
         private void OnNewDataAutoInsight()
@@ -261,7 +302,8 @@ namespace TranslationToolUI.ViewModels
             }
 
             _lastAutoInsightHistoryCount = History.Count;
-            SendInsight(AutoInsightPrompt);
+            var bufferOutput = _config.AiConfig?.AutoInsightBufferOutput == true;
+            SendInsight(AutoInsightPrompt, bufferOutput);
         }
     }
 }

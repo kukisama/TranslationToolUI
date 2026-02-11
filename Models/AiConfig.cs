@@ -38,6 +38,16 @@ namespace TranslationToolUI.Models
 
         public bool SummaryEnableReasoning { get; set; } = false;
 
+        public string InsightSystemPrompt { get; set; } = "你是一个专业的会议/翻译分析助手。用户会提供实时翻译的历史记录，请根据用户的问题对内容进行分析。请用 Markdown 格式输出分析结果。";
+
+        public string ReviewSystemPrompt { get; set; } = "你是一个会议复盘助手。根据字幕内容生成结构化 Markdown 总结。请输出包含关键结论、行动项和风险点，并在引用内容时标注时间戳，格式为 [HH:MM:SS]。";
+
+        public string InsightUserContentTemplate { get; set; } = "以下是翻译历史记录：\n\n{history}\n\n---\n\n用户问题：{question}";
+
+        public string ReviewUserContentTemplate { get; set; } = "以下是会议字幕内容:\n\n{subtitle}\n\n---\n\n{prompt}";
+
+        public bool AutoInsightBufferOutput { get; set; } = true;
+
         public List<InsightPresetButton> PresetButtons { get; set; } = new()
         {
             new() { Name = "会议摘要", Prompt = "请对以上翻译记录进行会议摘要。总结会议的主要议题、关键讨论内容和结论。" },

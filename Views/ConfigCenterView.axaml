@@ -250,6 +250,46 @@
                             <TextBox x:Name="ReasoningOutputTextBox" AcceptsReturn="True" Height="120"
                                      TextWrapping="Wrap" IsReadOnly="True"/>
                         </StackPanel>
+
+                        <Separator Margin="0,8,0,8"/>
+
+                        <StackPanel Spacing="6">
+                            <TextBlock Text="系统提示词" FontWeight="SemiBold"/>
+                            <TextBlock Text="系统提示词用于定义 AI 的角色与输出风格；用户内容会自动包含翻译历史/字幕与提问。"
+                                       FontSize="10" Foreground="Gray" TextWrapping="Wrap"/>
+
+                            <CheckBox x:Name="AutoInsightBufferCheckBox"
+                                      Content="自动洞察一次性刷新（缓冲输出）"
+                                      FontSize="11"/>
+
+                            <StackPanel Spacing="4">
+                                <TextBlock Text="洞察系统提示词" FontSize="11" Foreground="Gray"/>
+                                <TextBox x:Name="InsightSystemPromptTextBox" AcceptsReturn="True" Height="120"
+                                         TextWrapping="Wrap"/>
+                            </StackPanel>
+
+                            <StackPanel Spacing="4">
+                                <TextBlock Text="复盘系统提示词" FontSize="11" Foreground="Gray"/>
+                                <TextBox x:Name="ReviewSystemPromptTextBox" AcceptsReturn="True" Height="120"
+                                         TextWrapping="Wrap"/>
+                            </StackPanel>
+
+                            <StackPanel Spacing="4">
+                                <TextBlock Text="洞察用户内容模板" FontSize="11" Foreground="Gray"/>
+                                <TextBox x:Name="InsightUserContentTemplateTextBox" AcceptsReturn="True" Height="120"
+                                         TextWrapping="Wrap"/>
+                                <TextBlock FontSize="10" Foreground="Gray"
+                                           Text="占位符：{history} 翻译历史、{question} 用户问题"/>
+                            </StackPanel>
+
+                            <StackPanel Spacing="4">
+                                <TextBlock Text="复盘用户内容模板" FontSize="11" Foreground="Gray"/>
+                                <TextBox x:Name="ReviewUserContentTemplateTextBox" AcceptsReturn="True" Height="120"
+                                         TextWrapping="Wrap"/>
+                                <TextBlock FontSize="10" Foreground="Gray"
+                                           Text="占位符：{subtitle} 字幕内容、{prompt} 复盘提示词"/>
+                            </StackPanel>
+                        </StackPanel>
                     </StackPanel>
                 </ScrollViewer>
             </TabItem>
