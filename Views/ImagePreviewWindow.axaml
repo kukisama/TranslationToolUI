@@ -1,0 +1,54 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="TranslationToolUI.Views.ImagePreviewWindow"
+        Title="图片预览"
+        Width="900" Height="700"
+        MinWidth="480" MinHeight="200"
+        WindowStartupLocation="CenterScreen"
+        Background="#FFFFFFFF"
+        SizeChanged="OnWindowSizeChanged">
+
+    <Window.Styles>
+        <!-- 工具栏按钮 -->
+        <Style Selector="Button.toolbar-btn">
+            <Setter Property="Padding" Value="10,5"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="Background" Value="#FFE8E8E8"/>
+            <Setter Property="Foreground" Value="#FF333333"/>
+            <Setter Property="CornerRadius" Value="4"/>
+            <Setter Property="BorderBrush" Value="#FFCCCCCC"/>
+            <Setter Property="BorderThickness" Value="1"/>
+        </Style>
+        <Style Selector="Button.toolbar-btn:pointerover">
+            <Setter Property="Background" Value="#FFD0D0D0"/>
+        </Style>
+        <Style Selector="Button.toolbar-btn:disabled">
+            <Setter Property="Opacity" Value="0.4"/>
+        </Style>
+    </Window.Styles>
+
+    <Grid RowDefinitions="Auto,*">
+        <!-- 顶部工具栏 -->
+        <Border Grid.Row="0" Background="#FFF0F0F0" BorderBrush="#FFDCDCDC" BorderThickness="0,0,0,1" Padding="10,6">
+            <Grid ColumnDefinitions="Auto,Auto,*,Auto,Auto,Auto" ColumnSpacing="8">
+                <Button x:Name="PrevButton" Content="◀ 上一张" Classes="toolbar-btn"/>
+                <Button x:Name="NextButton" Content="下一张 ▶" Classes="toolbar-btn" Grid.Column="1"/>
+                <TextBlock x:Name="FileInfoTextBlock" Foreground="#FF555555" FontSize="12"
+                           VerticalAlignment="Center" Grid.Column="2" HorizontalAlignment="Center"
+                           TextTrimming="CharacterEllipsis"/>
+                <Button x:Name="DownloadButton" Content="💾 下载" Classes="toolbar-btn" Grid.Column="3"/>
+                <Button x:Name="OpenLocationButton" Content="📂 位置" Classes="toolbar-btn" Grid.Column="4"/>
+                <Button x:Name="CopyButton" Content="📋 复制" Classes="toolbar-btn" Grid.Column="5"/>
+            </Grid>
+        </Border>
+
+        <!-- 图片主区域（等比缩放） -->
+        <Border Grid.Row="1" Background="#FFFFFFFF" ClipToBounds="True">
+            <Image x:Name="PreviewImage"
+                   Stretch="Uniform"
+                   Margin="8"
+                   VerticalAlignment="Center"
+                   HorizontalAlignment="Center"/>
+        </Border>
+    </Grid>
+</Window>

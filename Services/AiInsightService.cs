@@ -24,6 +24,13 @@ namespace TranslationToolUI.Services
             Timeout = TimeSpan.FromMinutes(5)
         };
 
+        private readonly AzureTokenProvider? _tokenProvider;
+
+        public AiInsightService(AzureTokenProvider? tokenProvider = null)
+        {
+            _tokenProvider = tokenProvider;
+        }
+
         public async Task StreamChatAsync(
             AiConfig config,
             string systemPrompt,
@@ -89,7 +96,7 @@ namespace TranslationToolUI.Services
             await StreamResponseAsync(response, onChunk, onReasoningChunk, cancellationToken);
         }
 
-        private static async Task<HttpResponseMessage> SendRequestAsync(
+        private async Task<HttpResponseMessage> SendRequestAsync(
             AiConfig config,
             string systemPrompt,
             string userContent,
@@ -108,7 +115,15 @@ namespace TranslationToolUI.Services
 
             if (config.ProviderType == AiProviderType.AzureOpenAi)
             {
-                request.Headers.Add("api-key", config.ApiKey);
+                if (config.AzureAuthMode == AzureAuthMode.AAD && _tokenProvider?.IsLoggedIn == true)
+                {
+                    var token = await _tokenProvider.GetTokenAsync(cancellationToken);
+                    request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+                }
+                else
+                {
+                    request.Headers.Add("api-key", config.ApiKey);
+                }
             }
             else
             {

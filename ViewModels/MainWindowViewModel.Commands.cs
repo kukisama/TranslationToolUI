@@ -39,5 +39,6 @@ namespace TranslationToolUI.ViewModels
         public ICommand GenerateSpeechSubtitleCommand { get; } = null!;
         public ICommand CancelSpeechSubtitleCommand { get; } = null!;
         public ICommand GenerateBatchSpeechSubtitleCommand { get; } = null!;
+        public ICommand ShowMediaStudioCommand { get; }
     }
 }

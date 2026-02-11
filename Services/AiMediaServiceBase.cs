@@ -1,0 +1,148 @@
+using System;
+using System.Net.Http;
+using System.Net.Http.Headers;
+using System.Threading;
+using System.Threading.Tasks;
+using TranslationToolUI.Models;
+
+namespace TranslationToolUI.Services
+{
+    /// <summary>
+    /// 图片/视频生成服务的共享基类（HttpClient、认证、URL 构建）
+    /// </summary>
+    public abstract class AiMediaServiceBase
+    {
+        protected static readonly HttpClient _httpClient = new()
+        {
+            Timeout = TimeSpan.FromMinutes(10)
+        };
+
+        protected AzureTokenProvider? TokenProvider { get; set; }
+
+        public void SetTokenProvider(AzureTokenProvider? provider)
+        {
+            TokenProvider = provider;
+        }
+
+        /// <summary>
+        /// 构建 API 基础 URL（去掉末尾的 /v1 等）
+        /// </summary>
+        protected static string BuildBaseUrl(AiConfig config)
+        {
+            var baseUrl = config.ApiEndpoint.TrimEnd('/');
+            if (baseUrl.EndsWith("/v1"))
+                baseUrl = baseUrl[..^3];
+            return baseUrl;
+        }
+
+        /// <summary>
+        /// 设置认证头（支持 OpenAI Compatible、Azure OpenAI api-key 和 AAD Bearer）
+        /// </summary>
+        protected async Task SetAuthHeadersAsync(HttpRequestMessage request, AiConfig config, CancellationToken ct = default)
+        {
+            if (config.ProviderType == AiProviderType.AzureOpenAi)
+            {
+                if (config.AzureAuthMode == AzureAuthMode.AAD && TokenProvider?.IsLoggedIn == true)
+                {
+                    var token = await TokenProvider.GetTokenAsync(ct);
+                    request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+                }
+                else
+                {
+                    request.Headers.Add("api-key", config.ApiKey);
+                }
+            }
+            else
+            {
+                request.Headers.Authorization =
+                    new AuthenticationHeaderValue("Bearer", config.ApiKey);
+            }
+        }
+
+        /// <summary>
+        /// 设置认证头（同步版本，用于不需要 AAD 的场景）
+        /// </summary>
+        protected static void SetAuthHeaders(HttpRequestMessage request, AiConfig config)
+        {
+            if (config.ProviderType == AiProviderType.AzureOpenAi)
+            {
+                request.Headers.Add("api-key", config.ApiKey);
+            }
+            else
+            {
+                request.Headers.Authorization =
+                    new AuthenticationHeaderValue("Bearer", config.ApiKey);
+            }
+        }
+
+        /// <summary>
+        /// 构建 Images API URL
+        /// </summary>
+        protected static string BuildImageUrl(AiConfig config)
+        {
+            var baseUrl = config.ApiEndpoint.TrimEnd('/');
+
+            if (config.ProviderType == AiProviderType.AzureOpenAi)
+            {
+                // Azure OpenAI: /openai/deployments/{deployment}/images/generations?api-version=...
+                return $"{baseUrl}/openai/deployments/{config.DeploymentName}/images/generations?api-version={config.ApiVersion}";
+            }
+
+            // OpenAI Compatible
+            if (baseUrl.EndsWith("/v1"))
+                return $"{baseUrl}/images/generations";
+            return $"{baseUrl}/v1/images/generations";
+        }
+
+        /// <summary>
+        /// 构建 Videos API URL（创建）
+        /// </summary>
+        protected static string BuildVideoCreateUrl(AiConfig config)
+        {
+            var baseUrl = config.ApiEndpoint.TrimEnd('/');
+
+            if (config.ProviderType == AiProviderType.AzureOpenAi)
+            {
+                return $"{baseUrl}/openai/v1/video/generations/jobs?api-version=preview";
+            }
+
+            if (baseUrl.EndsWith("/v1"))
+                return $"{baseUrl}/videos";
+            return $"{baseUrl}/v1/videos";
+        }
+
+        /// <summary>
+        /// 构建 Videos API URL（轮询状态）
+        /// </summary>
+        protected static string BuildVideoPollUrl(AiConfig config, string videoId)
+        {
+            var baseUrl = config.ApiEndpoint.TrimEnd('/');
+
+            if (config.ProviderType == AiProviderType.AzureOpenAi)
+            {
+                return $"{baseUrl}/openai/v1/video/generations/jobs/{videoId}?api-version=preview";
+            }
+
+            if (baseUrl.EndsWith("/v1"))
+                return $"{baseUrl}/videos/{videoId}";
+            return $"{baseUrl}/v1/videos/{videoId}";
+        }
+
+        /// <summary>
+        /// 构建 Videos API URL（下载内容）
+        /// </summary>
+        protected static string BuildVideoDownloadUrl(AiConfig config, string videoId)
+        {
+            var baseUrl = config.ApiEndpoint.TrimEnd('/');
+
+            if (config.ProviderType == AiProviderType.AzureOpenAi)
+            {
+                return $"{baseUrl}/openai/v1/video/generations/jobs/{videoId}/content?api-version=preview";
+            }
+
+            if (baseUrl.EndsWith("/v1"))
+                return $"{baseUrl}/videos/{videoId}/content";
+            return $"{baseUrl}/v1/videos/{videoId}/content";
+        }
+    }
+}

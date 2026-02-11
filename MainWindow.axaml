@@ -76,6 +76,9 @@
                     Foreground="{Binding FloatingSubtitleButtonForeground}"
                     ToolTip.Tip="使用可拖动的透明字幕框提供服务"/>
 
+                <Button Content="🎨 Media Studio" Command="{Binding ShowMediaStudioCommand}" Padding="10,5"
+                        ToolTip.Tip="AI 图片与视频生成工作室"/>
+
                 <Button Name="HelpButton" Content="帮助" Padding="10,5" Click="HelpButton_Click">
                     <Button.ContextMenu>
                         <ContextMenu>

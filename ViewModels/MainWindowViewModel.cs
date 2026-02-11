@@ -127,6 +127,7 @@ namespace TranslationToolUI.ViewModels
         private readonly string[] _targetLanguages = { "en", "zh-CN", "ja-JP", "ko-KR", "fr-FR", "de-DE", "es-ES" };        public MainWindowViewModel()
         {
             _configService = new ConfigurationService();
+            _aiInsightService = new AiInsightService(_azureTokenProvider);
             _config = new AzureSpeechConfig();
             _history = new ObservableCollection<TranslationItem>();
             _subscriptionNames = new ObservableCollection<string>();
@@ -363,6 +364,11 @@ namespace TranslationToolUI.ViewModels
             GenerateBatchSpeechSubtitleCommand = new RelayCommand(
                 execute: _ => GenerateBatchSpeechSubtitle(),
                 canExecute: _ => CanGenerateBatchSpeechSubtitle()
+            );
+
+            ShowMediaStudioCommand = new RelayCommand(
+                execute: _ => ShowMediaStudio(),
+                canExecute: _ => true
             );
         }
     }

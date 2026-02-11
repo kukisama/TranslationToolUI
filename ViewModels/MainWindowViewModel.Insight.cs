@@ -13,7 +13,8 @@ namespace TranslationToolUI.ViewModels
 {
     public partial class MainWindowViewModel
     {
-        private readonly AiInsightService _aiInsightService = new();
+        private readonly AzureTokenProvider _azureTokenProvider = new();
+        private readonly AiInsightService _aiInsightService;
         private string _insightMarkdown = "";
         private string _insightUserInput = "";
         private bool _isInsightLoading;

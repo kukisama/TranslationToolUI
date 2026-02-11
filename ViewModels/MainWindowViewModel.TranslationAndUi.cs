@@ -462,6 +462,32 @@ namespace TranslationToolUI.ViewModels
             }
         }
 
+        private MediaStudioWindow? _mediaStudioWindow;
+
+        private void ShowMediaStudio()
+        {
+            try
+            {
+                if (_mediaStudioWindow == null || !_mediaStudioWindow.IsVisible)
+                {
+                    var aiConfig = _config.AiConfig ?? new AiConfig();
+                    var mediaGenConfig = _config.MediaGenConfig;
+                    _mediaStudioWindow = new MediaStudioWindow(aiConfig, mediaGenConfig);
+                    _mediaStudioWindow.Closed += (_, _) => _mediaStudioWindow = null;
+                    _mediaStudioWindow.Show();
+                    StatusMessage = "Media Studio 已打开";
+                }
+                else
+                {
+                    _mediaStudioWindow.Activate();
+                }
+            }
+            catch (Exception ex)
+            {
+                StatusMessage = $"打开 Media Studio 失败: {ex.Message}";
+            }
+        }
+
         private void ShowFloatingSubtitles()
         {
             try

@@ -229,6 +229,47 @@
                                          Watermark="例如: 2024-02-01"
                                          Text="2024-02-01"/>
                             </StackPanel>
+
+                            <Separator Margin="0,6,0,6"/>
+                            <TextBlock Text="Azure OpenAI 认证方式" FontWeight="SemiBold"/>
+                            <StackPanel Spacing="5">
+                                <ComboBox x:Name="AzureAuthModeComboBox" MinWidth="200">
+                                    <ComboBoxItem Content="API Key (默认)"/>
+                                    <ComboBoxItem Content="Microsoft Entra ID (AAD)"/>
+                                </ComboBox>
+                            </StackPanel>
+
+                            <StackPanel x:Name="AadFieldsPanel" Spacing="8" IsVisible="False">
+                                <StackPanel Spacing="5">
+                                    <TextBlock Text="Tenant ID (可选)"/>
+                                    <TextBox x:Name="AzureTenantIdTextBox"
+                                             Watermark="Azure AD 租户 ID"/>
+                                </StackPanel>
+                                <StackPanel Spacing="5">
+                                    <TextBlock Text="Client ID (可选)"/>
+                                    <TextBox x:Name="AzureClientIdTextBox"
+                                             Watermark="应用注册 Client ID"/>
+                                </StackPanel>
+
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <Button x:Name="AadLoginButton" Content="登录" Width="80"/>
+                                    <Button x:Name="AadLogoutButton" Content="注销" Width="80"/>
+                                    <TextBlock x:Name="AadStatusTextBlock" FontSize="11" Foreground="Gray"
+                                               VerticalAlignment="Center"/>
+                                </StackPanel>
+
+                                <Border x:Name="AadDeviceCodePanel" IsVisible="False"
+                                        BorderBrush="#FFE2E8F0" BorderThickness="1" CornerRadius="4"
+                                        Padding="10" Background="#FFF8F9FA">
+                                    <StackPanel Spacing="6">
+                                        <TextBlock x:Name="AadDeviceCodeMessage" TextWrapping="Wrap" FontSize="12"/>
+                                        <StackPanel Orientation="Horizontal" Spacing="8">
+                                            <Button x:Name="AadCopyCodeButton" Content="复制代码" Padding="8,3" FontSize="11"/>
+                                            <Button x:Name="AadOpenLinkButton" Content="打开链接" Padding="8,3" FontSize="11"/>
+                                        </StackPanel>
+                                    </StackPanel>
+                                </Border>
+                            </StackPanel>
                         </StackPanel>
 
                         <StackPanel Spacing="5">
@@ -471,6 +512,182 @@
                                         FontSize="11" HorizontalAlignment="Left"/>
                             </StackPanel>
                         </Border>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+
+            <TabItem Header="Media Studio">
+                <ScrollViewer>
+                    <StackPanel Spacing="12" Margin="0,4,0,0">
+                        <TextBlock Text="图片终结点" FontSize="14" FontWeight="SemiBold"/>
+                        <StackPanel Spacing="8">
+                            <StackPanel Spacing="5">
+                                <TextBlock Text="图片模型 / 部署名"/>
+                                <TextBox x:Name="MediaImageModelTextBox"
+                                         Watermark="例如: gpt-image-1 / dall-e-3 / 部署名"/>
+                            </StackPanel>
+                            <StackPanel Spacing="5">
+                                <TextBlock Text="服务类型"/>
+                                <ComboBox x:Name="MediaImageProviderTypeComboBox" MinWidth="280">
+                                    <ComboBoxItem Content="OpenAI 兼容 (OpenAI / DeepSeek / Ollama 等)"/>
+                                    <ComboBoxItem Content="Azure OpenAI"/>
+                                </ComboBox>
+                            </StackPanel>
+
+                            <StackPanel Spacing="5">
+                                <TextBlock Text="API 端点"/>
+                                <TextBox x:Name="MediaImageEndpointTextBox"
+                                         Watermark="例如: https://api.openai.com"/>
+                                <TextBlock FontSize="10" Foreground="Gray"
+                                           Text="无需包含 /v1/... 路径"/>
+                            </StackPanel>
+
+                            <StackPanel Spacing="5">
+                                <TextBlock Text="API 密钥"/>
+                                <TextBox x:Name="MediaImageApiKeyTextBox"
+                                         Watermark="sk-..."
+                                         PasswordChar="*"
+                                         RevealPassword="{Binding IsChecked, ElementName=MediaImageShowApiKeyCheckBox}"/>
+                                <CheckBox x:Name="MediaImageShowApiKeyCheckBox" Content="显示密钥"
+                                          FontSize="10" Margin="0,2,0,0"/>
+                            </StackPanel>
+
+                            <StackPanel x:Name="MediaImageAzureFieldsPanel" Spacing="10" IsVisible="False">
+                                <Separator Margin="0,6,0,6"/>
+                                <TextBlock Text="Azure OpenAI 认证方式" FontWeight="SemiBold"/>
+                                <StackPanel Spacing="5">
+                                    <ComboBox x:Name="MediaImageAzureAuthModeComboBox" MinWidth="200">
+                                        <ComboBoxItem Content="API Key (默认)"/>
+                                        <ComboBoxItem Content="Microsoft Entra ID (AAD)"/>
+                                    </ComboBox>
+                                </StackPanel>
+
+                                <StackPanel x:Name="MediaImageAadFieldsPanel" Spacing="8" IsVisible="False">
+                                    <StackPanel Spacing="5">
+                                        <TextBlock Text="Tenant ID (可选)"/>
+                                        <TextBox x:Name="MediaImageAzureTenantIdTextBox"
+                                                 Watermark="Azure AD 租户 ID"/>
+                                    </StackPanel>
+                                    <StackPanel Spacing="5">
+                                        <TextBlock Text="Client ID (可选)"/>
+                                        <TextBox x:Name="MediaImageAzureClientIdTextBox"
+                                                 Watermark="应用注册 Client ID"/>
+                                    </StackPanel>
+
+                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                        <Button x:Name="MediaImageAadLoginButton" Content="登录" Width="80"/>
+                                        <Button x:Name="MediaImageAadLogoutButton" Content="注销" Width="80"/>
+                                        <TextBlock x:Name="MediaImageAadStatusTextBlock" FontSize="11" Foreground="Gray"
+                                                   VerticalAlignment="Center"/>
+                                    </StackPanel>
+
+                                    <Border x:Name="MediaImageAadDeviceCodePanel" IsVisible="False"
+                                            BorderBrush="#FFE2E8F0" BorderThickness="1" CornerRadius="4"
+                                            Padding="10" Background="#FFF8F9FA">
+                                        <StackPanel Spacing="6">
+                                            <TextBlock x:Name="MediaImageAadDeviceCodeMessage" TextWrapping="Wrap" FontSize="12"/>
+                                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                                <Button x:Name="MediaImageAadCopyCodeButton" Content="复制代码" Padding="8,3" FontSize="11"/>
+                                                <Button x:Name="MediaImageAadOpenLinkButton" Content="打开链接" Padding="8,3" FontSize="11"/>
+                                            </StackPanel>
+                                        </StackPanel>
+                                    </Border>
+                                </StackPanel>
+                            </StackPanel>
+                        </StackPanel>
+
+                        <Separator Margin="0,8,0,8"/>
+
+                        <TextBlock Text="视频终结点" FontSize="14" FontWeight="SemiBold"/>
+                        <StackPanel Spacing="8">
+                            <CheckBox x:Name="MediaVideoUseImageEndpointCheckBox"
+                                      Content="视频终结点与图片一致"/>
+                            <StackPanel Spacing="5">
+                                <TextBlock Text="视频模型 / 部署名"/>
+                                <TextBox x:Name="MediaVideoModelTextBox"
+                                         Watermark="例如: sora-2 / 部署名"/>
+                            </StackPanel>
+                            <StackPanel x:Name="MediaVideoEndpointPanel" Spacing="8">
+                                <StackPanel Spacing="5">
+                                    <TextBlock Text="服务类型"/>
+                                    <ComboBox x:Name="MediaVideoProviderTypeComboBox" MinWidth="280">
+                                        <ComboBoxItem Content="OpenAI 兼容 (OpenAI / DeepSeek / Ollama 等)"/>
+                                        <ComboBoxItem Content="Azure OpenAI"/>
+                                    </ComboBox>
+                                </StackPanel>
+
+                                <StackPanel Spacing="5">
+                                    <TextBlock Text="API 端点"/>
+                                    <TextBox x:Name="MediaVideoEndpointTextBox"
+                                             Watermark="例如: https://xxx.cognitiveservices.azure.com"/>
+                                    <TextBlock FontSize="10" Foreground="Gray"
+                                               Text="无需包含 /v1/... 路径"/>
+                                </StackPanel>
+
+                                <StackPanel Spacing="5">
+                                    <TextBlock Text="API 密钥"/>
+                                    <TextBox x:Name="MediaVideoApiKeyTextBox"
+                                             Watermark="sk-..."
+                                             PasswordChar="*"
+                                             RevealPassword="{Binding IsChecked, ElementName=MediaVideoShowApiKeyCheckBox}"/>
+                                    <CheckBox x:Name="MediaVideoShowApiKeyCheckBox" Content="显示密钥"
+                                              FontSize="10" Margin="0,2,0,0"/>
+                                </StackPanel>
+
+                                <StackPanel x:Name="MediaVideoAzureFieldsPanel" Spacing="10" IsVisible="False">
+                                    <Separator Margin="0,6,0,6"/>
+                                    <TextBlock Text="Azure OpenAI 认证方式" FontWeight="SemiBold"/>
+                                    <StackPanel Spacing="5">
+                                        <ComboBox x:Name="MediaVideoAzureAuthModeComboBox" MinWidth="200">
+                                            <ComboBoxItem Content="API Key (默认)"/>
+                                            <ComboBoxItem Content="Microsoft Entra ID (AAD)"/>
+                                        </ComboBox>
+                                    </StackPanel>
+
+                                    <StackPanel x:Name="MediaVideoAadFieldsPanel" Spacing="8" IsVisible="False">
+                                        <StackPanel Spacing="5">
+                                            <TextBlock Text="Tenant ID (可选)"/>
+                                            <TextBox x:Name="MediaVideoAzureTenantIdTextBox"
+                                                     Watermark="Azure AD 租户 ID"/>
+                                        </StackPanel>
+                                        <StackPanel Spacing="5">
+                                            <TextBlock Text="Client ID (可选)"/>
+                                            <TextBox x:Name="MediaVideoAzureClientIdTextBox"
+                                                     Watermark="应用注册 Client ID"/>
+                                        </StackPanel>
+
+                                        <StackPanel Orientation="Horizontal" Spacing="8">
+                                            <Button x:Name="MediaVideoAadLoginButton" Content="登录" Width="80"/>
+                                            <Button x:Name="MediaVideoAadLogoutButton" Content="注销" Width="80"/>
+                                            <TextBlock x:Name="MediaVideoAadStatusTextBlock" FontSize="11" Foreground="Gray"
+                                                       VerticalAlignment="Center"/>
+                                        </StackPanel>
+
+                                        <Border x:Name="MediaVideoAadDeviceCodePanel" IsVisible="False"
+                                                BorderBrush="#FFE2E8F0" BorderThickness="1" CornerRadius="4"
+                                                Padding="10" Background="#FFF8F9FA">
+                                            <StackPanel Spacing="6">
+                                                <TextBlock x:Name="MediaVideoAadDeviceCodeMessage" TextWrapping="Wrap" FontSize="12"/>
+                                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                                    <Button x:Name="MediaVideoAadCopyCodeButton" Content="复制代码" Padding="8,3" FontSize="11"/>
+                                                    <Button x:Name="MediaVideoAadOpenLinkButton" Content="打开链接" Padding="8,3" FontSize="11"/>
+                                                </StackPanel>
+                                            </StackPanel>
+                                        </Border>
+                                    </StackPanel>
+                                </StackPanel>
+                            </StackPanel>
+                        </StackPanel>
+
+                        <Separator Margin="0,8,0,8"/>
+
+                        <TextBlock Text="输出目录" FontSize="14" FontWeight="SemiBold"/>
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <TextBox x:Name="MediaOutputDirTextBox" MinWidth="400"
+                                     Watermark="保存路径，留空使用默认"/>
+                            <Button x:Name="MediaBrowseOutputDirButton" Content="浏览…" Padding="12,6"/>
+                        </StackPanel>
+                        <TextBlock FontSize="10" Foreground="Gray" Text="留空时默认保存到 [会话目录]/media_studio/" TextWrapping="Wrap"/>
                     </StackPanel>
                 </ScrollViewer>
             </TabItem>

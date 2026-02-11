@@ -100,6 +100,8 @@ namespace TranslationToolUI.Models
 
         public AiConfig? AiConfig { get; set; }
 
+        public MediaGenConfig MediaGenConfig { get; set; } = new();
+
         [JsonIgnore]
         public string SessionDirectory => string.IsNullOrWhiteSpace(SessionDirectoryOverride)
             ? PathManager.Instance.SessionsPath

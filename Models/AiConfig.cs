@@ -15,6 +15,12 @@ namespace TranslationToolUI.Models
         Summary
     }
 
+    public enum AzureAuthMode
+    {
+        ApiKey,
+        AAD
+    }
+
     public class InsightPresetButton
     {
         public string Name { get; set; } = "";
@@ -35,6 +41,11 @@ namespace TranslationToolUI.Models
         public string SummaryDeploymentName { get; set; } = "";
         public string QuickDeploymentName { get; set; } = "";
         public string ApiVersion { get; set; } = "2024-02-01";
+
+        // --- AAD 认证 ---
+        public AzureAuthMode AzureAuthMode { get; set; } = AzureAuthMode.ApiKey;
+        public string AzureTenantId { get; set; } = "";
+        public string AzureClientId { get; set; } = "";
 
         public bool SummaryEnableReasoning { get; set; } = false;
 
@@ -87,7 +98,7 @@ namespace TranslationToolUI.Models
 
         [JsonIgnore]
         public bool IsValid => !string.IsNullOrWhiteSpace(ApiEndpoint)
-                            && !string.IsNullOrWhiteSpace(ApiKey)
+                            && (AzureAuthMode == AzureAuthMode.AAD || !string.IsNullOrWhiteSpace(ApiKey))
                             && (ProviderType == AiProviderType.OpenAiCompatible
                                 ? !string.IsNullOrWhiteSpace(ModelName)
                                     || !string.IsNullOrWhiteSpace(SummaryModelName)

@@ -73,6 +73,9 @@ namespace TranslationToolUI.Views
                     SummaryDeploymentName = existingConfig.SummaryDeploymentName,
                     QuickDeploymentName = existingConfig.QuickDeploymentName,
                     ApiVersion = existingConfig.ApiVersion,
+                    AzureAuthMode = existingConfig.AzureAuthMode,
+                    AzureTenantId = existingConfig.AzureTenantId,
+                    AzureClientId = existingConfig.AzureClientId,
                     SummaryEnableReasoning = existingConfig.SummaryEnableReasoning,
                     InsightSystemPrompt = existingConfig.InsightSystemPrompt,
                     ReviewSystemPrompt = existingConfig.ReviewSystemPrompt,
@@ -114,9 +117,33 @@ namespace TranslationToolUI.Views
             EnableNoResponseRestartCheckBox.IsCheckedChanged += EnableNoResponseRestartCheckBox_IsCheckedChanged;
 
             ProviderTypeComboBox.SelectionChanged += (_, _) => UpdateProviderFieldsVisibility();
+            AzureAuthModeComboBox.SelectionChanged += (_, _) => UpdateAadFieldsVisibility();
             AiTestButton.Click += AiTestButton_Click;
             AddPresetButton.Click += AddPresetButton_Click;
             AddReviewSheetButton.Click += AddReviewSheetButton_Click;
+
+            AadLoginButton.Click += AadLoginButton_Click;
+            AadLogoutButton.Click += AadLogoutButton_Click;
+            AadCopyCodeButton.Click += AadCopyCodeButton_Click;
+            AadOpenLinkButton.Click += AadOpenLinkButton_Click;
+
+            MediaBrowseOutputDirButton.Click += MediaBrowseOutputDirButton_Click;
+
+            MediaImageProviderTypeComboBox.SelectionChanged += (_, _) => UpdateMediaImageProviderFieldsVisibility();
+            MediaImageAzureAuthModeComboBox.SelectionChanged += (_, _) => UpdateMediaImageAadFieldsVisibility();
+            MediaVideoProviderTypeComboBox.SelectionChanged += (_, _) => UpdateMediaVideoProviderFieldsVisibility();
+            MediaVideoAzureAuthModeComboBox.SelectionChanged += (_, _) => UpdateMediaVideoAadFieldsVisibility();
+            MediaVideoUseImageEndpointCheckBox.IsCheckedChanged += (_, _) => UpdateMediaVideoEndpointSyncState();
+
+            MediaImageAadLoginButton.Click += MediaImageAadLoginButton_Click;
+            MediaImageAadLogoutButton.Click += MediaImageAadLogoutButton_Click;
+            MediaImageAadCopyCodeButton.Click += MediaImageAadCopyCodeButton_Click;
+            MediaImageAadOpenLinkButton.Click += MediaImageAadOpenLinkButton_Click;
+
+            MediaVideoAadLoginButton.Click += MediaVideoAadLoginButton_Click;
+            MediaVideoAadLogoutButton.Click += MediaVideoAadLogoutButton_Click;
+            MediaVideoAadCopyCodeButton.Click += MediaVideoAadCopyCodeButton_Click;
+            MediaVideoAadOpenLinkButton.Click += MediaVideoAadOpenLinkButton_Click;
 
             Opened += ConfigCenterView_Opened;
         }
@@ -166,6 +193,9 @@ namespace TranslationToolUI.Views
 
             UseSpeechSubtitleForReviewCheckBox.IsChecked = false;
             UseSpeechSubtitleForReviewCheckBox.IsEnabled = false;
+
+            // Media Studio defaults
+            LoadMediaGenConfigValues();
         }
 
         private void LoadConfigValues()
@@ -219,6 +249,37 @@ namespace TranslationToolUI.Views
 
             UseSpeechSubtitleForReviewCheckBox.IsChecked = _config.UseSpeechSubtitleForReview;
             UseSpeechSubtitleForReviewCheckBox.IsEnabled = _config.BatchStorageIsValid;
+
+            // Media Studio config
+            LoadMediaGenConfigValues();
+        }
+
+        private void LoadMediaGenConfigValues()
+        {
+            var mc = _config.MediaGenConfig;
+            MediaImageModelTextBox.Text = mc.ImageModel;
+            MediaImageProviderTypeComboBox.SelectedIndex = mc.ImageProviderType == AiProviderType.AzureOpenAi ? 1 : 0;
+            MediaImageEndpointTextBox.Text = mc.ImageApiEndpoint;
+            MediaImageApiKeyTextBox.Text = mc.ImageApiKey;
+            MediaImageAzureAuthModeComboBox.SelectedIndex = mc.ImageAzureAuthMode == AzureAuthMode.AAD ? 1 : 0;
+            MediaImageAzureTenantIdTextBox.Text = mc.ImageAzureTenantId ?? "";
+            MediaImageAzureClientIdTextBox.Text = mc.ImageAzureClientId ?? "";
+
+            MediaVideoUseImageEndpointCheckBox.IsChecked = mc.VideoUseImageEndpoint;
+            MediaVideoModelTextBox.Text = mc.VideoModel;
+            MediaVideoProviderTypeComboBox.SelectedIndex = mc.VideoProviderType == AiProviderType.AzureOpenAi ? 1 : 0;
+            MediaVideoEndpointTextBox.Text = mc.VideoApiEndpoint;
+            MediaVideoApiKeyTextBox.Text = mc.VideoApiKey;
+            MediaVideoAzureAuthModeComboBox.SelectedIndex = mc.VideoAzureAuthMode == AzureAuthMode.AAD ? 1 : 0;
+            MediaVideoAzureTenantIdTextBox.Text = mc.VideoAzureTenantId ?? "";
+            MediaVideoAzureClientIdTextBox.Text = mc.VideoAzureClientId ?? "";
+            MediaOutputDirTextBox.Text = mc.OutputDirectory;
+
+            UpdateMediaImageProviderFieldsVisibility();
+            UpdateMediaImageAadFieldsVisibility();
+            UpdateMediaVideoProviderFieldsVisibility();
+            UpdateMediaVideoAadFieldsVisibility();
+            UpdateMediaVideoEndpointSyncState();
         }
 
         private void LoadAiConfigValues()
@@ -245,6 +306,12 @@ namespace TranslationToolUI.Views
             SummaryReasoningCheckBox.IsChecked = _aiConfig.SummaryEnableReasoning;
             UpdateProviderFieldsVisibility();
 
+            // AAD auth fields
+            AzureAuthModeComboBox.SelectedIndex = _aiConfig.AzureAuthMode == AzureAuthMode.AAD ? 1 : 0;
+            AzureTenantIdTextBox.Text = _aiConfig.AzureTenantId ?? "";
+            AzureClientIdTextBox.Text = _aiConfig.AzureClientId ?? "";
+            UpdateAadFieldsVisibility();
+
             InsightSystemPromptTextBox.Text = _aiConfig.InsightSystemPrompt;
             ReviewSystemPromptTextBox.Text = _aiConfig.ReviewSystemPrompt;
             InsightUserContentTemplateTextBox.Text = _aiConfig.InsightUserContentTemplate;
@@ -270,6 +337,328 @@ namespace TranslationToolUI.Views
             var isAzure = ProviderTypeComboBox.SelectedIndex == 1;
             AzureFieldsPanel.IsVisible = isAzure;
             ModelNamePanel.IsVisible = !isAzure;
+        }
+
+        private void UpdateAadFieldsVisibility()
+        {
+            var isAad = AzureAuthModeComboBox.SelectedIndex == 1;
+            AadFieldsPanel.IsVisible = isAad;
+        }
+
+        private void UpdateMediaImageProviderFieldsVisibility()
+        {
+            var isAzure = MediaImageProviderTypeComboBox.SelectedIndex == 1;
+            MediaImageAzureFieldsPanel.IsVisible = isAzure;
+        }
+
+        private void UpdateMediaImageAadFieldsVisibility()
+        {
+            var isAad = MediaImageAzureAuthModeComboBox.SelectedIndex == 1;
+            MediaImageAadFieldsPanel.IsVisible = isAad;
+        }
+
+        private void UpdateMediaVideoProviderFieldsVisibility()
+        {
+            var isAzure = MediaVideoProviderTypeComboBox.SelectedIndex == 1;
+            MediaVideoAzureFieldsPanel.IsVisible = isAzure;
+        }
+
+        private void UpdateMediaVideoAadFieldsVisibility()
+        {
+            var isAad = MediaVideoAzureAuthModeComboBox.SelectedIndex == 1;
+            MediaVideoAadFieldsPanel.IsVisible = isAad;
+        }
+
+        private void UpdateMediaVideoEndpointSyncState()
+        {
+            var shared = MediaVideoUseImageEndpointCheckBox.IsChecked ?? true;
+            MediaVideoEndpointPanel.IsVisible = !shared;
+            MediaVideoEndpointPanel.IsEnabled = !shared;
+        }
+
+        private string? _lastDeviceCodeUrl;
+        private string? _lastMediaImageDeviceCodeUrl;
+        private string? _lastMediaVideoDeviceCodeUrl;
+
+        private async void AadLoginButton_Click(object? sender, RoutedEventArgs e)
+        {
+            AadLoginButton.IsEnabled = false;
+            AadStatusTextBlock.Text = "正在启动登录…";
+            AadDeviceCodePanel.IsVisible = false;
+            _lastDeviceCodeUrl = null;
+
+            try
+            {
+                var provider = new AzureTokenProvider();
+                var tenantId = AzureTenantIdTextBox.Text?.Trim();
+                var clientId = AzureClientIdTextBox.Text?.Trim();
+
+                var success = await provider.LoginAsync(
+                    tenantId,
+                    clientId,
+                    onDeviceCode: message =>
+                    {
+                        Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+                        {
+                            AadDeviceCodePanel.IsVisible = true;
+                            AadDeviceCodeMessage.Text = message;
+                            // 尝试从消息中提取 URL
+                            var urlMatch = System.Text.RegularExpressions.Regex.Match(
+                                message, @"https?://\S+");
+                            if (urlMatch.Success)
+                                _lastDeviceCodeUrl = urlMatch.Value;
+                        });
+                    });
+
+                if (success)
+                {
+                    AadStatusTextBlock.Text = $"✓ 已登录: {provider.Username ?? "已认证"}";
+                    AadStatusTextBlock.Foreground = new Avalonia.Media.SolidColorBrush(
+                        Avalonia.Media.Color.Parse("#22863a"));
+                    AadDeviceCodePanel.IsVisible = false;
+                }
+                else
+                {
+                    AadStatusTextBlock.Text = "✗ 登录失败";
+                    AadStatusTextBlock.Foreground = new Avalonia.Media.SolidColorBrush(
+                        Avalonia.Media.Color.Parse("#cb2431"));
+                }
+            }
+            catch (Exception ex)
+            {
+                AadStatusTextBlock.Text = $"✗ 错误: {ex.Message}";
+                AadStatusTextBlock.Foreground = new Avalonia.Media.SolidColorBrush(
+                    Avalonia.Media.Color.Parse("#cb2431"));
+            }
+            finally
+            {
+                AadLoginButton.IsEnabled = true;
+            }
+        }
+
+        private async void MediaImageAadLoginButton_Click(object? sender, RoutedEventArgs e)
+        {
+            MediaImageAadLoginButton.IsEnabled = false;
+            MediaImageAadStatusTextBlock.Text = "正在启动登录…";
+            MediaImageAadDeviceCodePanel.IsVisible = false;
+            _lastMediaImageDeviceCodeUrl = null;
+
+            try
+            {
+                var provider = new AzureTokenProvider();
+                var tenantId = MediaImageAzureTenantIdTextBox.Text?.Trim();
+                var clientId = MediaImageAzureClientIdTextBox.Text?.Trim();
+
+                var success = await provider.LoginAsync(
+                    tenantId,
+                    clientId,
+                    onDeviceCode: message =>
+                    {
+                        Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+                        {
+                            MediaImageAadDeviceCodePanel.IsVisible = true;
+                            MediaImageAadDeviceCodeMessage.Text = message;
+                            var urlMatch = System.Text.RegularExpressions.Regex.Match(
+                                message, @"https?://\S+");
+                            if (urlMatch.Success)
+                                _lastMediaImageDeviceCodeUrl = urlMatch.Value;
+                        });
+                    });
+
+                if (success)
+                {
+                    MediaImageAadStatusTextBlock.Text = $"✓ 已登录: {provider.Username ?? "已认证"}";
+                    MediaImageAadStatusTextBlock.Foreground = new Avalonia.Media.SolidColorBrush(
+                        Avalonia.Media.Color.Parse("#22863a"));
+                    MediaImageAadDeviceCodePanel.IsVisible = false;
+                }
+                else
+                {
+                    MediaImageAadStatusTextBlock.Text = "✗ 登录失败";
+                    MediaImageAadStatusTextBlock.Foreground = new Avalonia.Media.SolidColorBrush(
+                        Avalonia.Media.Color.Parse("#cb2431"));
+                }
+            }
+            catch (Exception ex)
+            {
+                MediaImageAadStatusTextBlock.Text = $"✗ 错误: {ex.Message}";
+                MediaImageAadStatusTextBlock.Foreground = new Avalonia.Media.SolidColorBrush(
+                    Avalonia.Media.Color.Parse("#cb2431"));
+            }
+            finally
+            {
+                MediaImageAadLoginButton.IsEnabled = true;
+            }
+        }
+
+        private void MediaImageAadLogoutButton_Click(object? sender, RoutedEventArgs e)
+        {
+            var provider = new AzureTokenProvider();
+            provider.Logout();
+            MediaImageAadStatusTextBlock.Text = "已注销";
+            MediaImageAadStatusTextBlock.Foreground = new Avalonia.Media.SolidColorBrush(
+                Avalonia.Media.Color.Parse("#6a737d"));
+            MediaImageAadDeviceCodePanel.IsVisible = false;
+        }
+
+        private async void MediaImageAadCopyCodeButton_Click(object? sender, RoutedEventArgs e)
+        {
+            var text = MediaImageAadDeviceCodeMessage.Text ?? "";
+            var codeMatch = System.Text.RegularExpressions.Regex.Match(text, @"\b[A-Z0-9]{8,}\b");
+            if (codeMatch.Success)
+            {
+                var clipboard = TopLevel.GetTopLevel(this)?.Clipboard;
+                if (clipboard != null)
+                    await clipboard.SetTextAsync(codeMatch.Value);
+            }
+        }
+
+        private void MediaImageAadOpenLinkButton_Click(object? sender, RoutedEventArgs e)
+        {
+            if (!string.IsNullOrEmpty(_lastMediaImageDeviceCodeUrl))
+            {
+                try
+                {
+                    System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                    {
+                        FileName = _lastMediaImageDeviceCodeUrl,
+                        UseShellExecute = true
+                    });
+                }
+                catch { }
+            }
+        }
+
+        private async void MediaVideoAadLoginButton_Click(object? sender, RoutedEventArgs e)
+        {
+            MediaVideoAadLoginButton.IsEnabled = false;
+            MediaVideoAadStatusTextBlock.Text = "正在启动登录…";
+            MediaVideoAadDeviceCodePanel.IsVisible = false;
+            _lastMediaVideoDeviceCodeUrl = null;
+
+            try
+            {
+                var provider = new AzureTokenProvider();
+                var tenantId = MediaVideoAzureTenantIdTextBox.Text?.Trim();
+                var clientId = MediaVideoAzureClientIdTextBox.Text?.Trim();
+
+                var success = await provider.LoginAsync(
+                    tenantId,
+                    clientId,
+                    onDeviceCode: message =>
+                    {
+                        Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+                        {
+                            MediaVideoAadDeviceCodePanel.IsVisible = true;
+                            MediaVideoAadDeviceCodeMessage.Text = message;
+                            var urlMatch = System.Text.RegularExpressions.Regex.Match(
+                                message, @"https?://\S+");
+                            if (urlMatch.Success)
+                                _lastMediaVideoDeviceCodeUrl = urlMatch.Value;
+                        });
+                    });
+
+                if (success)
+                {
+                    MediaVideoAadStatusTextBlock.Text = $"✓ 已登录: {provider.Username ?? "已认证"}";
+                    MediaVideoAadStatusTextBlock.Foreground = new Avalonia.Media.SolidColorBrush(
+                        Avalonia.Media.Color.Parse("#22863a"));
+                    MediaVideoAadDeviceCodePanel.IsVisible = false;
+                }
+                else
+                {
+                    MediaVideoAadStatusTextBlock.Text = "✗ 登录失败";
+                    MediaVideoAadStatusTextBlock.Foreground = new Avalonia.Media.SolidColorBrush(
+                        Avalonia.Media.Color.Parse("#cb2431"));
+                }
+            }
+            catch (Exception ex)
+            {
+                MediaVideoAadStatusTextBlock.Text = $"✗ 错误: {ex.Message}";
+                MediaVideoAadStatusTextBlock.Foreground = new Avalonia.Media.SolidColorBrush(
+                    Avalonia.Media.Color.Parse("#cb2431"));
+            }
+            finally
+            {
+                MediaVideoAadLoginButton.IsEnabled = true;
+            }
+        }
+
+        private void MediaVideoAadLogoutButton_Click(object? sender, RoutedEventArgs e)
+        {
+            var provider = new AzureTokenProvider();
+            provider.Logout();
+            MediaVideoAadStatusTextBlock.Text = "已注销";
+            MediaVideoAadStatusTextBlock.Foreground = new Avalonia.Media.SolidColorBrush(
+                Avalonia.Media.Color.Parse("#6a737d"));
+            MediaVideoAadDeviceCodePanel.IsVisible = false;
+        }
+
+        private async void MediaVideoAadCopyCodeButton_Click(object? sender, RoutedEventArgs e)
+        {
+            var text = MediaVideoAadDeviceCodeMessage.Text ?? "";
+            var codeMatch = System.Text.RegularExpressions.Regex.Match(text, @"\b[A-Z0-9]{8,}\b");
+            if (codeMatch.Success)
+            {
+                var clipboard = TopLevel.GetTopLevel(this)?.Clipboard;
+                if (clipboard != null)
+                    await clipboard.SetTextAsync(codeMatch.Value);
+            }
+        }
+
+        private void MediaVideoAadOpenLinkButton_Click(object? sender, RoutedEventArgs e)
+        {
+            if (!string.IsNullOrEmpty(_lastMediaVideoDeviceCodeUrl))
+            {
+                try
+                {
+                    System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                    {
+                        FileName = _lastMediaVideoDeviceCodeUrl,
+                        UseShellExecute = true
+                    });
+                }
+                catch { }
+            }
+        }
+
+        private void AadLogoutButton_Click(object? sender, RoutedEventArgs e)
+        {
+            var provider = new AzureTokenProvider();
+            provider.Logout();
+            AadStatusTextBlock.Text = "已注销";
+            AadStatusTextBlock.Foreground = new Avalonia.Media.SolidColorBrush(
+                Avalonia.Media.Color.Parse("#6a737d"));
+            AadDeviceCodePanel.IsVisible = false;
+        }
+
+        private async void AadCopyCodeButton_Click(object? sender, RoutedEventArgs e)
+        {
+            var text = AadDeviceCodeMessage.Text ?? "";
+            // 提取设备代码（通常是大写字母数字组合）
+            var codeMatch = System.Text.RegularExpressions.Regex.Match(text, @"\b[A-Z0-9]{8,}\b");
+            if (codeMatch.Success)
+            {
+                var clipboard = TopLevel.GetTopLevel(this)?.Clipboard;
+                if (clipboard != null)
+                    await clipboard.SetTextAsync(codeMatch.Value);
+            }
+        }
+
+        private void AadOpenLinkButton_Click(object? sender, RoutedEventArgs e)
+        {
+            if (!string.IsNullOrEmpty(_lastDeviceCodeUrl))
+            {
+                try
+                {
+                    System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                    {
+                        FileName = _lastDeviceCodeUrl,
+                        UseShellExecute = true
+                    });
+                }
+                catch { }
+            }
         }
 
         private void EnableRecordingCheckBox_IsCheckedChanged(object? sender, RoutedEventArgs e)
@@ -841,6 +1230,7 @@ namespace TranslationToolUI.Views
 
                 UpdateAiConfigFromUi();
                 _config.AiConfig = _aiConfig;
+                UpdateMediaGenConfigFromUi();
 
                 ConfigurationUpdated?.Invoke(this, _config);
 
@@ -907,6 +1297,11 @@ namespace TranslationToolUI.Views
             _aiConfig.SummaryDeploymentName = summaryDeployment;
             _aiConfig.DeploymentName = quickDeployment;
             _aiConfig.ApiVersion = ApiVersionTextBox.Text?.Trim() ?? "2024-02-01";
+            _aiConfig.AzureAuthMode = AzureAuthModeComboBox.SelectedIndex == 1
+                ? AzureAuthMode.AAD
+                : AzureAuthMode.ApiKey;
+            _aiConfig.AzureTenantId = AzureTenantIdTextBox.Text?.Trim() ?? "";
+            _aiConfig.AzureClientId = AzureClientIdTextBox.Text?.Trim() ?? "";
             _aiConfig.SummaryEnableReasoning = SummaryReasoningCheckBox.IsChecked == true;
             _aiConfig.InsightSystemPrompt = InsightSystemPromptTextBox.Text?.Trim() ?? "";
             _aiConfig.ReviewSystemPrompt = ReviewSystemPromptTextBox.Text?.Trim() ?? "";
@@ -926,6 +1321,50 @@ namespace TranslationToolUI.Views
                     IncludeInBatch = s.IncludeInBatch
                 })
                 .ToList();
+        }
+
+        private void UpdateMediaGenConfigFromUi()
+        {
+            var mc = _config.MediaGenConfig;
+            mc.ImageModel = MediaImageModelTextBox.Text?.Trim() ?? "gpt-image-1";
+            mc.ImageProviderType = MediaImageProviderTypeComboBox.SelectedIndex == 1
+                ? AiProviderType.AzureOpenAi
+                : AiProviderType.OpenAiCompatible;
+            mc.ImageApiEndpoint = MediaImageEndpointTextBox.Text?.Trim() ?? "";
+            mc.ImageApiKey = MediaImageApiKeyTextBox.Text?.Trim() ?? "";
+            mc.ImageAzureAuthMode = MediaImageAzureAuthModeComboBox.SelectedIndex == 1
+                ? AzureAuthMode.AAD
+                : AzureAuthMode.ApiKey;
+            mc.ImageAzureTenantId = MediaImageAzureTenantIdTextBox.Text?.Trim() ?? "";
+            mc.ImageAzureClientId = MediaImageAzureClientIdTextBox.Text?.Trim() ?? "";
+
+            mc.VideoUseImageEndpoint = MediaVideoUseImageEndpointCheckBox.IsChecked ?? true;
+            mc.VideoModel = MediaVideoModelTextBox.Text?.Trim() ?? "sora-2";
+            mc.VideoProviderType = MediaVideoProviderTypeComboBox.SelectedIndex == 1
+                ? AiProviderType.AzureOpenAi
+                : AiProviderType.OpenAiCompatible;
+            mc.VideoApiEndpoint = MediaVideoEndpointTextBox.Text?.Trim() ?? "";
+            mc.VideoApiKey = MediaVideoApiKeyTextBox.Text?.Trim() ?? "";
+            mc.VideoAzureAuthMode = MediaVideoAzureAuthModeComboBox.SelectedIndex == 1
+                ? AzureAuthMode.AAD
+                : AzureAuthMode.ApiKey;
+            mc.VideoAzureTenantId = MediaVideoAzureTenantIdTextBox.Text?.Trim() ?? "";
+            mc.VideoAzureClientId = MediaVideoAzureClientIdTextBox.Text?.Trim() ?? "";
+            mc.OutputDirectory = MediaOutputDirTextBox.Text?.Trim() ?? "";
+        }
+
+        private async void MediaBrowseOutputDirButton_Click(object? sender, RoutedEventArgs e)
+        {
+            var storageProvider = StorageProvider;
+            var result = await storageProvider.OpenFolderPickerAsync(new Avalonia.Platform.Storage.FolderPickerOpenOptions
+            {
+                Title = "选择 Media Studio 输出目录",
+                AllowMultiple = false
+            });
+            if (result.Count > 0)
+            {
+                MediaOutputDirTextBox.Text = result[0].Path.LocalPath;
+            }
         }
 
         private void AddPresetButton_Click(object? sender, RoutedEventArgs e)
