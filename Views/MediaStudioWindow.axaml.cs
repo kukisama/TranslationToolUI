@@ -113,6 +113,20 @@ namespace TranslationToolUI.Views
             }
         }
 
+        private void DeleteChatMessage_Click(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+        {
+            if (_viewModel?.CurrentSession == null) return;
+            if (sender is not MenuItem mi) return;
+            if (mi.Tag is not ChatMessageViewModel msg) return;
+
+            var cmd = _viewModel.CurrentSession.DeleteMessageCommand;
+            if (cmd.CanExecute(msg))
+            {
+                cmd.Execute(msg);
+                e.Handled = true;
+            }
+        }
+
         private async Task StartRenameSessionAsync()
         {
             if (_viewModel?.CurrentSession == null) return;

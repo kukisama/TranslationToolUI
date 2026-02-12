@@ -176,6 +176,7 @@ namespace TranslationToolUI.ViewModels
         public ICommand GenerateCommand { get; }
         public ICommand CancelCommand { get; }
         public ICommand OpenFileCommand { get; }
+        public ICommand DeleteMessageCommand { get; }
 
         // --- 参数选项 ---
         public List<string> ImageSizeOptions { get; } = new()
@@ -198,22 +199,22 @@ namespace TranslationToolUI.ViewModels
             1, 2, 3, 4, 5
         };
 
-        public List<string> VideoAspectRatioOptions { get; } = new()
+        public List<string> VideoAspectRatioOptions { get; private set; } = new()
         {
             "1:1", "16:9", "9:16"
         };
 
-        public List<string> VideoResolutionOptions { get; } = new()
+        public List<string> VideoResolutionOptions { get; private set; } = new()
         {
             "480p", "720p", "1080p"
         };
 
-        public List<int> VideoDurationOptions { get; } = new()
+        public List<int> VideoDurationOptions { get; private set; } = new()
         {
             5, 10, 15, 20
         };
 
-        public List<int> VideoCountOptions { get; } = new()
+        public List<int> VideoCountOptions { get; private set; } = new()
         {
             1, 2
         };
@@ -250,15 +251,21 @@ namespace TranslationToolUI.ViewModels
             OpenFileCommand = new RelayCommand(
                 param => OpenFile(param as string));
 
+            DeleteMessageCommand = new RelayCommand(
+                param => DeleteMessage(param as ChatMessageViewModel),
+                param => param is ChatMessageViewModel m && !m.IsLoading);
+
             OverrideImageSize = "1024x1024";
             OverrideImageQuality = "medium";
             OverrideImageFormat = "png";
             OverrideImageCount = 1;
 
-            SelectedVideoAspectRatio = "16:9";
-            SelectedVideoResolution = "480p";
-            OverrideVideoSeconds = 5;
-            OverrideVideoVariants = 1;
+            // 根据当前 API 模式初始化视频参数选项
+            RefreshVideoParameterOptions();
+
+            // 设置视频参数默认值
+            OverrideVideoSeconds = VideoDurationOptions[0];
+            OverrideVideoVariants = VideoCountOptions[0];
 
             RunningTasks.CollectionChanged += (_, _) =>
             {
@@ -267,6 +274,63 @@ namespace TranslationToolUI.ViewModels
                 OnPropertyChanged(nameof(HasBadge));
                 _onTaskCountChanged?.Invoke();
             };
+        }
+
+        /// <summary>
+        /// 删除一条聊天记录（只删除记录，不删除磁盘上的媒体文件）。
+        /// </summary>
+        public void DeleteMessage(ChatMessageViewModel? message)
+        {
+            if (message == null)
+                return;
+            if (message.IsLoading)
+                return;
+
+            if (Messages.Contains(message))
+            {
+                Messages.Remove(message);
+                _onRequestSave?.Invoke(this);
+            }
+        }
+
+        /// <summary>
+        /// 根据当前 VideoApiMode（sora / sora-2）刷新视频参数选项。
+        /// sora: 全参数（1:1/16:9/9:16，480p/720p/1080p，5/10/15/20秒，1/2数量）
+        /// sora-2: 仅 16:9/9:16，720p，4/8/12秒，无数量选择
+        /// </summary>
+        public void RefreshVideoParameterOptions()
+        {
+            var isSora2 = _genConfig.VideoApiMode == VideoApiMode.Videos;
+
+            if (isSora2)
+            {
+                VideoAspectRatioOptions = new List<string> { "16:9", "9:16" };
+                VideoResolutionOptions = new List<string> { "720p" };
+                VideoDurationOptions = new List<int> { 4, 8, 12 };
+                VideoCountOptions = new List<int> { 1 };
+            }
+            else
+            {
+                VideoAspectRatioOptions = new List<string> { "1:1", "16:9", "9:16" };
+                VideoResolutionOptions = new List<string> { "480p", "720p", "1080p" };
+                VideoDurationOptions = new List<int> { 5, 10, 15, 20 };
+                VideoCountOptions = new List<int> { 1, 2 };
+            }
+
+            OnPropertyChanged(nameof(VideoAspectRatioOptions));
+            OnPropertyChanged(nameof(VideoResolutionOptions));
+            OnPropertyChanged(nameof(VideoDurationOptions));
+            OnPropertyChanged(nameof(VideoCountOptions));
+
+            // 确保当前选中值在新选项中有效
+            if (!VideoAspectRatioOptions.Contains(SelectedVideoAspectRatio))
+                SelectedVideoAspectRatio = VideoAspectRatioOptions[0];
+            if (!VideoResolutionOptions.Contains(SelectedVideoResolution))
+                SelectedVideoResolution = VideoResolutionOptions[0];
+            if (OverrideVideoSeconds.HasValue && !VideoDurationOptions.Contains(OverrideVideoSeconds.Value))
+                OverrideVideoSeconds = VideoDurationOptions[0];
+            if (OverrideVideoVariants.HasValue && !VideoCountOptions.Contains(OverrideVideoVariants.Value))
+                OverrideVideoVariants = VideoCountOptions[0];
         }
 
         public void Generate()

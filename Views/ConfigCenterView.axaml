@@ -615,20 +615,11 @@
                             <StackPanel x:Name="MediaVideoApiModePanel" Spacing="5" IsVisible="False">
                                 <TextBlock Text="视频接口模式（Azure）"/>
                                 <ComboBox x:Name="MediaVideoApiModeComboBox" MinWidth="240">
-                                    <ComboBoxItem Content="Sora Jobs（/openai/v1/video/generations/jobs）"/>
-                                    <ComboBoxItem Content="Videos（/openai/v1/videos）"/>
+                                    <ComboBoxItem Content="sora（/openai/v1/video/generations/jobs）"/>
+                                    <ComboBoxItem Content="sora-2（/openai/v1/videos）"/>
                                 </ComboBox>
                                 <TextBlock x:Name="MediaVideoApiModeHintTextBlock" FontSize="10" Foreground="Gray"
                                            TextWrapping="Wrap"/>
-                            </StackPanel>
-
-                            <StackPanel x:Name="MediaVideoBaseModelPanel" Spacing="5" IsVisible="False">
-                                <TextBlock Text="部署绑定的底层模型（Azure 要求，必须为 sora）"/>
-                                <TextBox x:Name="MediaVideoBaseModelTextBox"
-                                         Text="sora"
-                                         IsReadOnly="True"/>
-                                <TextBlock FontSize="10" Foreground="Gray"
-                                           Text="提示：此项仅用于说明与自检；请求参数里不会发送它。若报错提示 deployed model must be 'sora'，通常说明你填写的部署没有绑定到底层 sora。" TextWrapping="Wrap"/>
                             </StackPanel>
                             <StackPanel x:Name="MediaVideoEndpointPanel" Spacing="8">
                                 <StackPanel Spacing="5">

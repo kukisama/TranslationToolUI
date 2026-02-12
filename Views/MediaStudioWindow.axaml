@@ -130,6 +130,11 @@
                                     <Panel>
                                         <!-- 用户消息 -->
                                         <Border Classes="user-msg" IsVisible="{Binding IsUser}">
+                                            <Border.ContextMenu>
+                                                <ContextMenu>
+                                                    <MenuItem Header="删除此条记录" Click="DeleteChatMessage_Click" Tag="{Binding}"/>
+                                                </ContextMenu>
+                                            </Border.ContextMenu>
                                             <StackPanel Spacing="4">
                                                 <SelectableTextBlock Text="{Binding Text}"
                                                          TextWrapping="Wrap"
@@ -141,6 +146,11 @@
 
                                         <!-- AI 消息 -->
                                         <Border Classes="ai-msg" IsVisible="{Binding IsAssistant}">
+                                            <Border.ContextMenu>
+                                                <ContextMenu>
+                                                    <MenuItem Header="删除此条记录" Click="DeleteChatMessage_Click" Tag="{Binding}"/>
+                                                </ContextMenu>
+                                            </Border.ContextMenu>
                                             <StackPanel Spacing="6">
                                                 <SelectableTextBlock Text="{Binding Text}"
                                                          TextWrapping="Wrap"

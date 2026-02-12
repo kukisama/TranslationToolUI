@@ -8,6 +8,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 
 namespace TranslationToolUI.Views
@@ -185,38 +186,168 @@ namespace TranslationToolUI.Views
 
         private async Task CopyToClipboardAsync()
         {
-            var clipboard = TopLevel.GetTopLevel(this)?.Clipboard;
-            if (clipboard == null)
-                return;
+            if (_filePaths.Count == 0) return;
+            var filePath = _filePaths[_currentIndex];
+            if (!File.Exists(filePath)) return;
 
-            if (_bitmap != null)
+            if (OperatingSystem.IsWindows())
             {
-                if (!await TrySetImageOnClipboardAsync(clipboard, _bitmap))
-                {
-                    await clipboard.SetTextAsync(_filePaths[_currentIndex]);
-                }
+                if (TryCopyImageToWindowsClipboard(filePath))
+                    return;
             }
-            else if (_filePaths.Count > 0)
-            {
-                await clipboard.SetTextAsync(_filePaths[_currentIndex]);
-            }
+
+            // 非 Windows 或图片复制失败时，回退到复制文件路径
+            var clipboard = TopLevel.GetTopLevel(this)?.Clipboard;
+            if (clipboard != null)
+                await clipboard.SetTextAsync(filePath);
         }
 
-        private static async Task<bool> TrySetImageOnClipboardAsync(object clipboard, Bitmap bitmap)
-        {
-            var clipboardType = clipboard.GetType();
+        // ========== Windows 剪贴板图片复制（GDI+ → CF_DIB） ==========
 
-            var setImageAsync = clipboardType.GetMethod("SetImageAsync");
-            if (setImageAsync != null)
+        [DllImport("user32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool OpenClipboard(IntPtr hWndNewOwner);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool CloseClipboard();
+
+        [DllImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool EmptyClipboard();
+
+        [DllImport("user32.dll")]
+        private static extern IntPtr SetClipboardData(uint uFormat, IntPtr hMem);
+
+        [DllImport("kernel32.dll")]
+        private static extern IntPtr GlobalAlloc(uint uFlags, UIntPtr dwBytes);
+
+        [DllImport("kernel32.dll")]
+        private static extern IntPtr GlobalLock(IntPtr hMem);
+
+        [DllImport("kernel32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool GlobalUnlock(IntPtr hMem);
+
+        [DllImport("gdiplus.dll")]
+        private static extern int GdiplusStartup(out IntPtr token, ref GdiplusStartupInput input, IntPtr output);
+
+        [DllImport("gdiplus.dll")]
+        private static extern void GdiplusShutdown(IntPtr token);
+
+        [DllImport("gdiplus.dll", CharSet = CharSet.Unicode)]
+        private static extern int GdipCreateBitmapFromFile(string filename, out IntPtr bitmap);
+
+        [DllImport("gdiplus.dll")]
+        private static extern int GdipDisposeImage(IntPtr image);
+
+        [DllImport("gdiplus.dll", CharSet = CharSet.Unicode)]
+        private static extern int GdipSaveImageToFile(IntPtr image, string filename, ref Guid clsidEncoder, IntPtr encoderParams);
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct GdiplusStartupInput
+        {
+            public uint GdiplusVersion;
+            public IntPtr DebugEventCallback;
+            public int SuppressBackgroundThread;
+            public int SuppressExternalCodecs;
+        }
+
+        private const uint CF_DIB = 8;
+        private const uint GMEM_MOVEABLE = 0x0002;
+
+        /// <summary>
+        /// 使用 GDI+ 加载图片 → 保存为 BMP → 去掉 14 字节文件头 → 以 CF_DIB 写入剪贴板。
+        /// CF_DIB 是 Word/PPT/画图 等应用粘贴图片最可靠的格式。
+        /// </summary>
+        private static bool TryCopyImageToWindowsClipboard(string filePath)
+        {
+            IntPtr gdipToken = IntPtr.Zero;
+            IntPtr gdipBitmap = IntPtr.Zero;
+            string? tempBmpPath = null;
+
+            try
             {
-                if (setImageAsync.Invoke(clipboard, new object?[] { bitmap }) is Task task)
+                // 初始化 GDI+
+                var startupInput = new GdiplusStartupInput { GdiplusVersion = 1 };
+                if (GdiplusStartup(out gdipToken, ref startupInput, IntPtr.Zero) != 0)
+                    return false;
+
+                // 用 GDI+ 加载图片文件（支持 PNG/JPG/BMP/GIF/WEBP 等）
+                if (GdipCreateBitmapFromFile(filePath, out gdipBitmap) != 0)
+                    return false;
+
+                // 保存为临时 BMP 文件（GDI+ BMP Encoder 保证输出合法的未压缩 BMP）
+                tempBmpPath = Path.Combine(Path.GetTempPath(), $"clipboard_{Guid.NewGuid():N}.bmp");
+                var bmpEncoderClsid = new Guid("557cf400-1a04-11d3-9a73-0000f81ef32e");
+                if (GdipSaveImageToFile(gdipBitmap, tempBmpPath, ref bmpEncoderClsid, IntPtr.Zero) != 0)
+                    return false;
+
+                // 释放 GDI+ 资源（不再需要）
+                GdipDisposeImage(gdipBitmap);
+                gdipBitmap = IntPtr.Zero;
+                GdiplusShutdown(gdipToken);
+                gdipToken = IntPtr.Zero;
+
+                // 读取 BMP 文件
+                var bmpData = File.ReadAllBytes(tempBmpPath);
+                if (bmpData.Length <= 54)
+                    return false;
+
+                // BMP 文件结构: [14 字节 BITMAPFILEHEADER] [BITMAPINFOHEADER + 像素数据]
+                // CF_DIB 格式 = BITMAPFILEHEADER 之后的全部内容
+                const int bmpFileHeaderSize = 14;
+                var dibLength = bmpData.Length - bmpFileHeaderSize;
+
+                var hMem = GlobalAlloc(GMEM_MOVEABLE, (UIntPtr)dibLength);
+                if (hMem == IntPtr.Zero)
+                    return false;
+
+                var pMem = GlobalLock(hMem);
+                if (pMem == IntPtr.Zero)
+                    return false;
+
+                try
                 {
-                    await task;
-                    return true;
+                    Marshal.Copy(bmpData, bmpFileHeaderSize, pMem, dibLength);
+                }
+                finally
+                {
+                    GlobalUnlock(hMem);
+                }
+
+                if (!OpenClipboard(IntPtr.Zero))
+                    return false;
+
+                try
+                {
+                    EmptyClipboard();
+                    if (SetClipboardData(CF_DIB, hMem) != IntPtr.Zero)
+                    {
+                        // 剪贴板接管了内存所有权，不需要 GlobalFree
+                        return true;
+                    }
+                    return false;
+                }
+                finally
+                {
+                    CloseClipboard();
                 }
             }
-
-            return false;
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"剪贴板图片复制失败: {ex.Message}");
+                return false;
+            }
+            finally
+            {
+                if (gdipBitmap != IntPtr.Zero) GdipDisposeImage(gdipBitmap);
+                if (gdipToken != IntPtr.Zero) GdiplusShutdown(gdipToken);
+                if (tempBmpPath != null)
+                {
+                    try { File.Delete(tempBmpPath); } catch { }
+                }
+            }
         }
 
         private void OnWindowKeyDown(object? sender, KeyEventArgs e)

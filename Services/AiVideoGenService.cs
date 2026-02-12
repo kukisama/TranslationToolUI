@@ -328,7 +328,7 @@ namespace TranslationToolUI.Services
                         ["model"] = genConfig.VideoModel,
                         ["prompt"] = prompt,
                         ["size"] = size,
-                        ["seconds"] = genConfig.VideoSeconds
+                        ["seconds"] = genConfig.VideoSeconds.ToString()
                     };
 
                     // 某些后端可能支持 n_variants；为兼容起见，仅在 >1 时发送
@@ -358,7 +358,7 @@ namespace TranslationToolUI.Services
                     model = genConfig.VideoModel,
                     prompt = prompt,
                     size = size,
-                    seconds = genConfig.VideoSeconds,
+                    seconds = genConfig.VideoSeconds.ToString(),
                     n_variants = genConfig.VideoVariants
                 };
             }

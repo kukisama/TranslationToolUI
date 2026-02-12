@@ -1,4 +1,4 @@
-using Avalonia.Controls;
+﻿using Avalonia.Controls;
 using Avalonia.Interactivity;
 using Avalonia.Platform.Storage;
 using Azure.Storage.Blobs;
@@ -135,7 +135,7 @@ namespace TranslationToolUI.Views
             MediaVideoProviderTypeComboBox.SelectionChanged += (_, _) => UpdateMediaVideoProviderFieldsVisibility();
             MediaVideoAzureAuthModeComboBox.SelectionChanged += (_, _) => UpdateMediaVideoAadFieldsVisibility();
             MediaVideoUseImageEndpointCheckBox.IsCheckedChanged += (_, _) => UpdateMediaVideoEndpointSyncState();
-            MediaVideoApiModeComboBox.SelectionChanged += (_, _) => UpdateMediaVideoBaseModelVisibility();
+            MediaVideoApiModeComboBox.SelectionChanged += (_, _) => UpdateMediaVideoApiModeVisibility();
 
             MediaImageAadLoginButton.Click += MediaImageAadLoginButton_Click;
             MediaImageAadLogoutButton.Click += MediaImageAadLogoutButton_Click;
@@ -284,7 +284,7 @@ namespace TranslationToolUI.Views
             UpdateMediaVideoAadFieldsVisibility();
             UpdateMediaVideoEndpointSyncState();
 
-            UpdateMediaVideoBaseModelVisibility();
+            UpdateMediaVideoApiModeVisibility();
         }
 
         private void LoadAiConfigValues()
@@ -365,8 +365,8 @@ namespace TranslationToolUI.Views
             // Provider 切换时也刷新 key 面板可见性
             UpdateMediaImageAadFieldsVisibility();
 
-            // 视频若复用图片终结点，则底层模型提示应跟随图片 Provider
-            UpdateMediaVideoBaseModelVisibility();
+            // 视频若复用图片终结点，则API模式提示应跟随图片 Provider
+            UpdateMediaVideoApiModeVisibility();
         }
 
         private void UpdateMediaImageAadFieldsVisibility()
@@ -383,9 +383,9 @@ namespace TranslationToolUI.Views
             var isAzure = MediaVideoProviderTypeComboBox.SelectedIndex == 1;
             MediaVideoAzureFieldsPanel.IsVisible = isAzure;
 
-            // Provider 切换时也刷新 key 面板/底层模型提示
+            // Provider 切换时也刷新 key 面板/API模式提示
             UpdateMediaVideoAadFieldsVisibility();
-            UpdateMediaVideoBaseModelVisibility();
+            UpdateMediaVideoApiModeVisibility();
         }
 
         private void UpdateMediaVideoAadFieldsVisibility()
@@ -403,10 +403,10 @@ namespace TranslationToolUI.Views
             MediaVideoEndpointPanel.IsVisible = !shared;
             MediaVideoEndpointPanel.IsEnabled = !shared;
 
-            UpdateMediaVideoBaseModelVisibility();
+            UpdateMediaVideoApiModeVisibility();
         }
 
-        private void UpdateMediaVideoBaseModelVisibility()
+        private void UpdateMediaVideoApiModeVisibility()
         {
             // “底层模型 must be sora” 仅对 Azure OpenAI 视频有效。
             // 若视频终结点与图片一致，则以图片 Provider 为准。
@@ -421,30 +421,19 @@ namespace TranslationToolUI.Views
                 ? VideoApiMode.Videos
                 : VideoApiMode.SoraJobs;
 
-            // Jobs 模式：model=部署名；且部署底模必须为 sora（用提示框强调）
-            // Videos 模式：更接近 OpenAI videos 接口；model=模型名（例如 sora-2）
-            MediaVideoBaseModelPanel.IsVisible = effectiveProviderIsAzure && apiMode == VideoApiMode.SoraJobs;
-            MediaVideoBaseModelTextBox.Text = "sora";
-
             if (effectiveProviderIsAzure)
             {
                 if (apiMode == VideoApiMode.SoraJobs)
                 {
-                    MediaVideoModelLabelTextBlock.Text = "视频部署名（Deployment name，用于请求 model 参数）";
-                    MediaVideoModelTextBox.Watermark = "例如：sora 或 sora-2（Azure Portal 的 deployment 名；请求里 model 就填它）";
                     MediaVideoApiModeHintTextBlock.Text = "使用 /openai/v1/video/generations/jobs?api-version=preview。轮询返回 job + generations[].id（用于下载）。";
                 }
                 else
                 {
-                    MediaVideoModelLabelTextBlock.Text = "视频模型名（/openai/v1/videos 模式）";
-                    MediaVideoModelTextBox.Watermark = "例如：sora-2";
                     MediaVideoApiModeHintTextBlock.Text = "使用 /openai/v1/videos。不同后端返回体可能不同，程序会自动适配并在调试日志中记录原始响应。";
                 }
             }
             else
             {
-                MediaVideoModelLabelTextBlock.Text = "视频模型名（model）";
-                MediaVideoModelTextBox.Watermark = "例如：sora-2";
                 MediaVideoApiModeHintTextBlock.Text = "";
             }
         }
