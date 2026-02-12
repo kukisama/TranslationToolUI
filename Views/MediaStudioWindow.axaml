@@ -36,7 +36,14 @@
         </Style>
         <!-- 会话列表选中项 -->
         <Style Selector="ListBoxItem:selected">
-            <Setter Property="Background" Value="#FFE3F2FD"/>
+            <Setter Property="Background" Value="#FF1976D2"/>
+            <Setter Property="Foreground" Value="White"/>
+        </Style>
+        <Style Selector="ListBoxItem:selected TextBlock">
+            <Setter Property="Foreground" Value="White"/>
+        </Style>
+        <Style Selector="ListBoxItem:selected /template/ ContentPresenter">
+            <Setter Property="Foreground" Value="White"/>
         </Style>
         <!-- 参数区域标签 -->
         <Style Selector="TextBlock.param-label">
@@ -73,10 +80,20 @@
                     <TextBlock Grid.Row="0" Text="会话列表" FontSize="13" FontWeight="SemiBold"
                                Margin="12,10,12,6" Foreground="#FF555555"/>
                     <ListBox Grid.Row="1"
+                             x:Name="SessionListBox"
                              ItemsSource="{Binding Sessions}"
                              SelectedItem="{Binding CurrentSession}"
                              Margin="4,0" Padding="0"
-                             Background="Transparent">
+                             Background="Transparent"
+                             KeyDown="SessionListBox_KeyDown">
+                        <ListBox.ContextMenu>
+                            <ContextMenu>
+                                <MenuItem Header="重命名 (F2)" Click="RenameSession_Click"/>
+                                <MenuItem Header="恢复已取消的视频作业" Click="ResumeVideoTasks_Click"/>
+                                <Separator/>
+                                <MenuItem Header="删除会话" Command="{Binding DeleteSessionCommand}"/>
+                            </ContextMenu>
+                        </ListBox.ContextMenu>
                         <ListBox.ItemTemplate>
                             <DataTemplate>
                                 <Grid ColumnDefinitions="*,Auto" Margin="4,3">

@@ -3,6 +3,7 @@ using Avalonia.Interactivity;
 using Avalonia.Platform.Storage;
 using Azure.Storage.Blobs;
 using Azure.Storage.Blobs.Models;
+using Azure.Identity;
 using Microsoft.CognitiveServices.Speech;
 using Microsoft.CognitiveServices.Speech.Translation;
 using System;
@@ -134,6 +135,7 @@ namespace TranslationToolUI.Views
             MediaVideoProviderTypeComboBox.SelectionChanged += (_, _) => UpdateMediaVideoProviderFieldsVisibility();
             MediaVideoAzureAuthModeComboBox.SelectionChanged += (_, _) => UpdateMediaVideoAadFieldsVisibility();
             MediaVideoUseImageEndpointCheckBox.IsCheckedChanged += (_, _) => UpdateMediaVideoEndpointSyncState();
+            MediaVideoApiModeComboBox.SelectionChanged += (_, _) => UpdateMediaVideoBaseModelVisibility();
 
             MediaImageAadLoginButton.Click += MediaImageAadLoginButton_Click;
             MediaImageAadLogoutButton.Click += MediaImageAadLogoutButton_Click;
@@ -267,6 +269,7 @@ namespace TranslationToolUI.Views
 
             MediaVideoUseImageEndpointCheckBox.IsChecked = mc.VideoUseImageEndpoint;
             MediaVideoModelTextBox.Text = mc.VideoModel;
+            MediaVideoApiModeComboBox.SelectedIndex = mc.VideoApiMode == VideoApiMode.Videos ? 1 : 0;
             MediaVideoProviderTypeComboBox.SelectedIndex = mc.VideoProviderType == AiProviderType.AzureOpenAi ? 1 : 0;
             MediaVideoEndpointTextBox.Text = mc.VideoApiEndpoint;
             MediaVideoApiKeyTextBox.Text = mc.VideoApiKey;
@@ -280,6 +283,8 @@ namespace TranslationToolUI.Views
             UpdateMediaVideoProviderFieldsVisibility();
             UpdateMediaVideoAadFieldsVisibility();
             UpdateMediaVideoEndpointSyncState();
+
+            UpdateMediaVideoBaseModelVisibility();
         }
 
         private void LoadAiConfigValues()
@@ -337,36 +342,59 @@ namespace TranslationToolUI.Views
             var isAzure = ProviderTypeComboBox.SelectedIndex == 1;
             AzureFieldsPanel.IsVisible = isAzure;
             ModelNamePanel.IsVisible = !isAzure;
+
+            // Provider 切换时，也同步刷新 AAD/Key 相关可见性（尤其是 API Key 面板）
+            UpdateAadFieldsVisibility();
         }
 
         private void UpdateAadFieldsVisibility()
         {
             var isAad = AzureAuthModeComboBox.SelectedIndex == 1;
             AadFieldsPanel.IsVisible = isAad;
+
+            // AAD 模式下不需要 API Key；仅在 Key 模式（或非 Azure Provider）显示。
+            var providerIsAzure = ProviderTypeComboBox.SelectedIndex == 1;
+            ApiKeyPanel.IsVisible = !providerIsAzure || !isAad;
         }
 
         private void UpdateMediaImageProviderFieldsVisibility()
         {
             var isAzure = MediaImageProviderTypeComboBox.SelectedIndex == 1;
             MediaImageAzureFieldsPanel.IsVisible = isAzure;
+
+            // Provider 切换时也刷新 key 面板可见性
+            UpdateMediaImageAadFieldsVisibility();
+
+            // 视频若复用图片终结点，则底层模型提示应跟随图片 Provider
+            UpdateMediaVideoBaseModelVisibility();
         }
 
         private void UpdateMediaImageAadFieldsVisibility()
         {
             var isAad = MediaImageAzureAuthModeComboBox.SelectedIndex == 1;
             MediaImageAadFieldsPanel.IsVisible = isAad;
+
+            var providerIsAzure = MediaImageProviderTypeComboBox.SelectedIndex == 1;
+            MediaImageApiKeyPanel.IsVisible = !providerIsAzure || !isAad;
         }
 
         private void UpdateMediaVideoProviderFieldsVisibility()
         {
             var isAzure = MediaVideoProviderTypeComboBox.SelectedIndex == 1;
             MediaVideoAzureFieldsPanel.IsVisible = isAzure;
+
+            // Provider 切换时也刷新 key 面板/底层模型提示
+            UpdateMediaVideoAadFieldsVisibility();
+            UpdateMediaVideoBaseModelVisibility();
         }
 
         private void UpdateMediaVideoAadFieldsVisibility()
         {
             var isAad = MediaVideoAzureAuthModeComboBox.SelectedIndex == 1;
             MediaVideoAadFieldsPanel.IsVisible = isAad;
+
+            var providerIsAzure = MediaVideoProviderTypeComboBox.SelectedIndex == 1;
+            MediaVideoApiKeyPanel.IsVisible = !providerIsAzure || !isAad;
         }
 
         private void UpdateMediaVideoEndpointSyncState()
@@ -374,126 +402,204 @@ namespace TranslationToolUI.Views
             var shared = MediaVideoUseImageEndpointCheckBox.IsChecked ?? true;
             MediaVideoEndpointPanel.IsVisible = !shared;
             MediaVideoEndpointPanel.IsEnabled = !shared;
+
+            UpdateMediaVideoBaseModelVisibility();
+        }
+
+        private void UpdateMediaVideoBaseModelVisibility()
+        {
+            // “底层模型 must be sora” 仅对 Azure OpenAI 视频有效。
+            // 若视频终结点与图片一致，则以图片 Provider 为准。
+            var shared = MediaVideoUseImageEndpointCheckBox.IsChecked ?? true;
+            var effectiveProviderIsAzure = shared
+                ? (MediaImageProviderTypeComboBox.SelectedIndex == 1)
+                : (MediaVideoProviderTypeComboBox.SelectedIndex == 1);
+
+            MediaVideoApiModePanel.IsVisible = effectiveProviderIsAzure;
+
+            var apiMode = MediaVideoApiModeComboBox.SelectedIndex == 1
+                ? VideoApiMode.Videos
+                : VideoApiMode.SoraJobs;
+
+            // Jobs 模式：model=部署名；且部署底模必须为 sora（用提示框强调）
+            // Videos 模式：更接近 OpenAI videos 接口；model=模型名（例如 sora-2）
+            MediaVideoBaseModelPanel.IsVisible = effectiveProviderIsAzure && apiMode == VideoApiMode.SoraJobs;
+            MediaVideoBaseModelTextBox.Text = "sora";
+
+            if (effectiveProviderIsAzure)
+            {
+                if (apiMode == VideoApiMode.SoraJobs)
+                {
+                    MediaVideoModelLabelTextBlock.Text = "视频部署名（Deployment name，用于请求 model 参数）";
+                    MediaVideoModelTextBox.Watermark = "例如：sora 或 sora-2（Azure Portal 的 deployment 名；请求里 model 就填它）";
+                    MediaVideoApiModeHintTextBlock.Text = "使用 /openai/v1/video/generations/jobs?api-version=preview。轮询返回 job + generations[].id（用于下载）。";
+                }
+                else
+                {
+                    MediaVideoModelLabelTextBlock.Text = "视频模型名（/openai/v1/videos 模式）";
+                    MediaVideoModelTextBox.Watermark = "例如：sora-2";
+                    MediaVideoApiModeHintTextBlock.Text = "使用 /openai/v1/videos。不同后端返回体可能不同，程序会自动适配并在调试日志中记录原始响应。";
+                }
+            }
+            else
+            {
+                MediaVideoModelLabelTextBlock.Text = "视频模型名（model）";
+                MediaVideoModelTextBox.Watermark = "例如：sora-2";
+                MediaVideoApiModeHintTextBlock.Text = "";
+            }
         }
 
         private string? _lastDeviceCodeUrl;
         private string? _lastMediaImageDeviceCodeUrl;
         private string? _lastMediaVideoDeviceCodeUrl;
 
-        private async void AadLoginButton_Click(object? sender, RoutedEventArgs e)
+        private static Avalonia.Media.SolidColorBrush BrushFromHex(string hex)
         {
-            AadLoginButton.IsEnabled = false;
-            AadStatusTextBlock.Text = "正在启动登录…";
-            AadDeviceCodePanel.IsVisible = false;
-            _lastDeviceCodeUrl = null;
+            return new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.Parse(hex));
+        }
+
+        private static void SetStatus(TextBlock tb, string text, string colorHex)
+        {
+            tb.Text = text;
+            tb.Foreground = BrushFromHex(colorHex);
+        }
+
+        private async Task RunAadLoginWithOptionalTenantPickAsync(
+            Button loginButton,
+            TextBlock statusTextBlock,
+            Control deviceCodePanel,
+            TextBlock deviceCodeMessage,
+            TextBox tenantIdTextBox,
+            TextBox clientIdTextBox,
+            Action<string?> setLastDeviceCodeUrl,
+            string profileKey)
+        {
+            loginButton.IsEnabled = false;
+            SetStatus(statusTextBlock, "正在启动登录…", "#6a737d");
+            deviceCodePanel.IsVisible = false;
+            setLastDeviceCodeUrl(null);
+
+            var provider = new AzureTokenProvider(profileKey);
+            var tenantId = tenantIdTextBox.Text?.Trim();
+            var clientId = clientIdTextBox.Text?.Trim();
+
+            Action<string> onDeviceCode = message =>
+            {
+                Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+                {
+                    deviceCodePanel.IsVisible = true;
+                    deviceCodeMessage.Text = message;
+
+                    // 尝试从消息中提取 URL
+                    var urlMatch = System.Text.RegularExpressions.Regex.Match(message, @"https?://\S+");
+                    if (urlMatch.Success)
+                        setLastDeviceCodeUrl(urlMatch.Value);
+                });
+            };
 
             try
             {
-                var provider = new AzureTokenProvider();
-                var tenantId = AzureTenantIdTextBox.Text?.Trim();
-                var clientId = AzureClientIdTextBox.Text?.Trim();
-
-                var success = await provider.LoginAsync(
-                    tenantId,
-                    clientId,
-                    onDeviceCode: message =>
-                    {
-                        Avalonia.Threading.Dispatcher.UIThread.Post(() =>
-                        {
-                            AadDeviceCodePanel.IsVisible = true;
-                            AadDeviceCodeMessage.Text = message;
-                            // 尝试从消息中提取 URL
-                            var urlMatch = System.Text.RegularExpressions.Regex.Match(
-                                message, @"https?://\S+");
-                            if (urlMatch.Success)
-                                _lastDeviceCodeUrl = urlMatch.Value;
-                        });
-                    });
-
-                if (success)
+                var success = await provider.LoginAutoAsync(tenantId, clientId, onDeviceCode);
+                if (!success)
                 {
-                    AadStatusTextBlock.Text = $"✓ 已登录: {provider.Username ?? "已认证"}";
-                    AadStatusTextBlock.Foreground = new Avalonia.Media.SolidColorBrush(
-                        Avalonia.Media.Color.Parse("#22863a"));
-                    AadDeviceCodePanel.IsVisible = false;
+                    SetStatus(statusTextBlock, "✗ 登录失败", "#cb2431");
+                    return;
                 }
-                else
+
+                SetStatus(statusTextBlock, $"✓ 已登录: {provider.Username ?? "已认证"}", "#22863a");
+                deviceCodePanel.IsVisible = false;
+
+                // 若用户未指定 tenantId，则在首次登录后尝试拉取租户列表并让用户选择。
+                if (string.IsNullOrWhiteSpace(tenantId))
                 {
-                    AadStatusTextBlock.Text = "✗ 登录失败";
-                    AadStatusTextBlock.Foreground = new Avalonia.Media.SolidColorBrush(
-                        Avalonia.Media.Color.Parse("#cb2431"));
+                    SetStatus(statusTextBlock, $"✓ 已登录: {provider.Username ?? "已认证"}（正在获取租户列表…）", "#22863a");
+                    IReadOnlyList<AzureTenantInfo> tenants;
+                    try
+                    {
+                        tenants = await provider.GetAvailableTenantsAsync();
+                    }
+                    catch
+                    {
+                        tenants = Array.Empty<AzureTenantInfo>();
+                    }
+
+                    if (tenants.Count == 1)
+                    {
+                        tenantIdTextBox.Text = tenants[0].TenantId;
+                        SetStatus(statusTextBlock, $"✓ 已登录: {provider.Username ?? "已认证"}（租户: {tenants[0].TenantId}）", "#22863a");
+                    }
+                    else if (tenants.Count > 1)
+                    {
+                        var picked = await TenantSelectionView.ShowAsync(this, tenants);
+                        if (picked != null && !string.IsNullOrWhiteSpace(picked.TenantId))
+                        {
+                            tenantIdTextBox.Text = picked.TenantId;
+
+                            // 切换到用户选择的租户：优先尝试静默（利用 AuthRecord），必要时会再次给出设备码。
+                            SetStatus(statusTextBlock, $"正在切换到租户: {picked.DisplayName ?? picked.TenantId}…", "#6a737d");
+                            var switched = await provider.LoginAutoAsync(picked.TenantId, clientId, onDeviceCode);
+                            if (switched)
+                            {
+                                SetStatus(statusTextBlock, $"✓ 已登录: {provider.Username ?? "已认证"}（租户: {picked.TenantId}）", "#22863a");
+                                deviceCodePanel.IsVisible = false;
+                            }
+                            else
+                            {
+                                SetStatus(statusTextBlock, "✗ 切换租户失败（请检查权限/管理员同意/条件访问策略）", "#cb2431");
+                            }
+                        }
+                        else
+                        {
+                            // 用户取消选择，不做强制切换。
+                            SetStatus(statusTextBlock, $"✓ 已登录: {provider.Username ?? "已认证"}（未选择租户）", "#22863a");
+                        }
+                    }
+                    else
+                    {
+                        // 获取不到租户列表时不阻塞使用：用户仍可手动填写 tenantId。
+                        SetStatus(statusTextBlock, $"✓ 已登录: {provider.Username ?? "已认证"}（未能获取租户列表，可手动填写租户 ID）", "#22863a");
+                    }
                 }
             }
             catch (Exception ex)
             {
-                AadStatusTextBlock.Text = $"✗ 错误: {ex.Message}";
-                AadStatusTextBlock.Foreground = new Avalonia.Media.SolidColorBrush(
-                    Avalonia.Media.Color.Parse("#cb2431"));
+                SetStatus(statusTextBlock, $"✗ 错误: {ex.Message}", "#cb2431");
             }
             finally
             {
-                AadLoginButton.IsEnabled = true;
+                loginButton.IsEnabled = true;
             }
+        }
+
+        private async void AadLoginButton_Click(object? sender, RoutedEventArgs e)
+        {
+            await RunAadLoginWithOptionalTenantPickAsync(
+                AadLoginButton,
+                AadStatusTextBlock,
+                AadDeviceCodePanel,
+                AadDeviceCodeMessage,
+                AzureTenantIdTextBox,
+                AzureClientIdTextBox,
+                url => _lastDeviceCodeUrl = url,
+                profileKey: "ai");
         }
 
         private async void MediaImageAadLoginButton_Click(object? sender, RoutedEventArgs e)
         {
-            MediaImageAadLoginButton.IsEnabled = false;
-            MediaImageAadStatusTextBlock.Text = "正在启动登录…";
-            MediaImageAadDeviceCodePanel.IsVisible = false;
-            _lastMediaImageDeviceCodeUrl = null;
-
-            try
-            {
-                var provider = new AzureTokenProvider();
-                var tenantId = MediaImageAzureTenantIdTextBox.Text?.Trim();
-                var clientId = MediaImageAzureClientIdTextBox.Text?.Trim();
-
-                var success = await provider.LoginAsync(
-                    tenantId,
-                    clientId,
-                    onDeviceCode: message =>
-                    {
-                        Avalonia.Threading.Dispatcher.UIThread.Post(() =>
-                        {
-                            MediaImageAadDeviceCodePanel.IsVisible = true;
-                            MediaImageAadDeviceCodeMessage.Text = message;
-                            var urlMatch = System.Text.RegularExpressions.Regex.Match(
-                                message, @"https?://\S+");
-                            if (urlMatch.Success)
-                                _lastMediaImageDeviceCodeUrl = urlMatch.Value;
-                        });
-                    });
-
-                if (success)
-                {
-                    MediaImageAadStatusTextBlock.Text = $"✓ 已登录: {provider.Username ?? "已认证"}";
-                    MediaImageAadStatusTextBlock.Foreground = new Avalonia.Media.SolidColorBrush(
-                        Avalonia.Media.Color.Parse("#22863a"));
-                    MediaImageAadDeviceCodePanel.IsVisible = false;
-                }
-                else
-                {
-                    MediaImageAadStatusTextBlock.Text = "✗ 登录失败";
-                    MediaImageAadStatusTextBlock.Foreground = new Avalonia.Media.SolidColorBrush(
-                        Avalonia.Media.Color.Parse("#cb2431"));
-                }
-            }
-            catch (Exception ex)
-            {
-                MediaImageAadStatusTextBlock.Text = $"✗ 错误: {ex.Message}";
-                MediaImageAadStatusTextBlock.Foreground = new Avalonia.Media.SolidColorBrush(
-                    Avalonia.Media.Color.Parse("#cb2431"));
-            }
-            finally
-            {
-                MediaImageAadLoginButton.IsEnabled = true;
-            }
+            await RunAadLoginWithOptionalTenantPickAsync(
+                MediaImageAadLoginButton,
+                MediaImageAadStatusTextBlock,
+                MediaImageAadDeviceCodePanel,
+                MediaImageAadDeviceCodeMessage,
+                MediaImageAzureTenantIdTextBox,
+                MediaImageAzureClientIdTextBox,
+                url => _lastMediaImageDeviceCodeUrl = url,
+                profileKey: "media-image");
         }
 
         private void MediaImageAadLogoutButton_Click(object? sender, RoutedEventArgs e)
         {
-            var provider = new AzureTokenProvider();
+            var provider = new AzureTokenProvider("media-image");
             provider.Logout();
             MediaImageAadStatusTextBlock.Text = "已注销";
             MediaImageAadStatusTextBlock.Foreground = new Avalonia.Media.SolidColorBrush(
@@ -531,62 +637,20 @@ namespace TranslationToolUI.Views
 
         private async void MediaVideoAadLoginButton_Click(object? sender, RoutedEventArgs e)
         {
-            MediaVideoAadLoginButton.IsEnabled = false;
-            MediaVideoAadStatusTextBlock.Text = "正在启动登录…";
-            MediaVideoAadDeviceCodePanel.IsVisible = false;
-            _lastMediaVideoDeviceCodeUrl = null;
-
-            try
-            {
-                var provider = new AzureTokenProvider();
-                var tenantId = MediaVideoAzureTenantIdTextBox.Text?.Trim();
-                var clientId = MediaVideoAzureClientIdTextBox.Text?.Trim();
-
-                var success = await provider.LoginAsync(
-                    tenantId,
-                    clientId,
-                    onDeviceCode: message =>
-                    {
-                        Avalonia.Threading.Dispatcher.UIThread.Post(() =>
-                        {
-                            MediaVideoAadDeviceCodePanel.IsVisible = true;
-                            MediaVideoAadDeviceCodeMessage.Text = message;
-                            var urlMatch = System.Text.RegularExpressions.Regex.Match(
-                                message, @"https?://\S+");
-                            if (urlMatch.Success)
-                                _lastMediaVideoDeviceCodeUrl = urlMatch.Value;
-                        });
-                    });
-
-                if (success)
-                {
-                    MediaVideoAadStatusTextBlock.Text = $"✓ 已登录: {provider.Username ?? "已认证"}";
-                    MediaVideoAadStatusTextBlock.Foreground = new Avalonia.Media.SolidColorBrush(
-                        Avalonia.Media.Color.Parse("#22863a"));
-                    MediaVideoAadDeviceCodePanel.IsVisible = false;
-                }
-                else
-                {
-                    MediaVideoAadStatusTextBlock.Text = "✗ 登录失败";
-                    MediaVideoAadStatusTextBlock.Foreground = new Avalonia.Media.SolidColorBrush(
-                        Avalonia.Media.Color.Parse("#cb2431"));
-                }
-            }
-            catch (Exception ex)
-            {
-                MediaVideoAadStatusTextBlock.Text = $"✗ 错误: {ex.Message}";
-                MediaVideoAadStatusTextBlock.Foreground = new Avalonia.Media.SolidColorBrush(
-                    Avalonia.Media.Color.Parse("#cb2431"));
-            }
-            finally
-            {
-                MediaVideoAadLoginButton.IsEnabled = true;
-            }
+            await RunAadLoginWithOptionalTenantPickAsync(
+                MediaVideoAadLoginButton,
+                MediaVideoAadStatusTextBlock,
+                MediaVideoAadDeviceCodePanel,
+                MediaVideoAadDeviceCodeMessage,
+                MediaVideoAzureTenantIdTextBox,
+                MediaVideoAzureClientIdTextBox,
+                url => _lastMediaVideoDeviceCodeUrl = url,
+                profileKey: "media-video");
         }
 
         private void MediaVideoAadLogoutButton_Click(object? sender, RoutedEventArgs e)
         {
-            var provider = new AzureTokenProvider();
+            var provider = new AzureTokenProvider("media-video");
             provider.Logout();
             MediaVideoAadStatusTextBlock.Text = "已注销";
             MediaVideoAadStatusTextBlock.Foreground = new Avalonia.Media.SolidColorBrush(
@@ -624,7 +688,7 @@ namespace TranslationToolUI.Views
 
         private void AadLogoutButton_Click(object? sender, RoutedEventArgs e)
         {
-            var provider = new AzureTokenProvider();
+            var provider = new AzureTokenProvider("ai");
             provider.Logout();
             AadStatusTextBlock.Text = "已注销";
             AadStatusTextBlock.Foreground = new Avalonia.Media.SolidColorBrush(
@@ -743,6 +807,90 @@ namespace TranslationToolUI.Views
             else if (_subscriptions.Count > 1 && _config.ActiveSubscriptionIndex >= 0 && _config.ActiveSubscriptionIndex < _subscriptions.Count)
             {
                 ForceUpdateListBoxSelection(_config.ActiveSubscriptionIndex);
+            }
+
+            // 刷新 AAD 登录状态展示：关闭窗口不会“丢登录”，这里只是把已保存的认证记录显示出来。
+            // 注意：这里不主动拿 Token（避免触发交互式登录），只读取已保存的 AuthenticationRecord。
+            await RefreshSavedAadStatusIndicatorsAsync();
+        }
+
+        private static async Task<string?> TryReadSavedAadUsernameAsync(string profileKey, CancellationToken ct = default)
+        {
+            try
+            {
+                var path = Path.Combine(PathManager.Instance.AppDataPath, $"azure_auth_record_{profileKey}.json");
+                if (!File.Exists(path))
+                    return null;
+
+                await using var stream = File.OpenRead(path);
+                var record = await AuthenticationRecord.DeserializeAsync(stream, ct);
+                return string.IsNullOrWhiteSpace(record?.Username) ? null : record.Username;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private async Task RefreshSavedAadStatusIndicatorsAsync()
+        {
+            // --- AI 聊天 ---
+            if (ProviderTypeComboBox.SelectedIndex == 1 && AzureAuthModeComboBox.SelectedIndex == 1)
+            {
+                var username = await TryReadSavedAadUsernameAsync("ai");
+                SetStatus(AadStatusTextBlock,
+                    username != null ? $"✓ 已保存登录: {username}" : "未登录（无保存记录）",
+                    username != null ? "#22863a" : "#6a737d");
+            }
+            else
+            {
+                AadStatusTextBlock.Text = "";
+            }
+
+            // --- Media 图片 ---
+            if (MediaImageProviderTypeComboBox.SelectedIndex == 1 && MediaImageAzureAuthModeComboBox.SelectedIndex == 1)
+            {
+                var username = await TryReadSavedAadUsernameAsync("media-image");
+                SetStatus(MediaImageAadStatusTextBlock,
+                    username != null ? $"✓ 已保存登录: {username}" : "未登录（无保存记录）",
+                    username != null ? "#22863a" : "#6a737d");
+            }
+            else
+            {
+                MediaImageAadStatusTextBlock.Text = "";
+            }
+
+            // --- Media 视频 ---
+            // 若视频终结点与图片一致，则实际会复用图片的登录状态；这里仍显示 media-video 的保存状态（若存在）供排查。
+            var videoUsesImageEndpoint = MediaVideoUseImageEndpointCheckBox.IsChecked ?? true;
+            var videoProviderIsAzure = videoUsesImageEndpoint
+                ? MediaImageProviderTypeComboBox.SelectedIndex == 1
+                : MediaVideoProviderTypeComboBox.SelectedIndex == 1;
+            var videoAuthIsAad = videoUsesImageEndpoint
+                ? MediaImageAzureAuthModeComboBox.SelectedIndex == 1
+                : MediaVideoAzureAuthModeComboBox.SelectedIndex == 1;
+
+            if (videoProviderIsAzure && videoAuthIsAad)
+            {
+                var username = await TryReadSavedAadUsernameAsync("media-video");
+
+                // 共享终结点时更推荐看 media-image 的登录状态
+                if (videoUsesImageEndpoint)
+                {
+                    SetStatus(MediaVideoAadStatusTextBlock,
+                        "使用图片终结点时将复用图片登录状态（如需单独视频登录，请取消勾选共享终结点）",
+                        "#6a737d");
+                }
+                else
+                {
+                    SetStatus(MediaVideoAadStatusTextBlock,
+                        username != null ? $"✓ 已保存登录: {username}" : "未登录（无保存记录）",
+                        username != null ? "#22863a" : "#6a737d");
+                }
+            }
+            else
+            {
+                MediaVideoAadStatusTextBlock.Text = "";
             }
         }
 
@@ -1339,7 +1487,23 @@ namespace TranslationToolUI.Views
             mc.ImageAzureClientId = MediaImageAzureClientIdTextBox.Text?.Trim() ?? "";
 
             mc.VideoUseImageEndpoint = MediaVideoUseImageEndpointCheckBox.IsChecked ?? true;
-            mc.VideoModel = MediaVideoModelTextBox.Text?.Trim() ?? "sora-2";
+
+            // 视频模型字段：
+            // - OpenAI 兼容：通常填写模型名（例如 sora-2）
+            // - Azure OpenAI：该字段会作为“部署名 / model 参数”使用，且后端要求部署的模型为 'sora'
+            var videoUsesImageEndpoint = mc.VideoUseImageEndpoint;
+            var effectiveProviderIsAzure = videoUsesImageEndpoint
+                ? (MediaImageProviderTypeComboBox.SelectedIndex == 1)
+                : (MediaVideoProviderTypeComboBox.SelectedIndex == 1);
+
+            var rawVideoModel = MediaVideoModelTextBox.Text?.Trim();
+            mc.VideoModel = string.IsNullOrWhiteSpace(rawVideoModel)
+                ? "sora-2"
+                : rawVideoModel;
+
+            mc.VideoApiMode = MediaVideoApiModeComboBox.SelectedIndex == 1
+                ? VideoApiMode.Videos
+                : VideoApiMode.SoraJobs;
             mc.VideoProviderType = MediaVideoProviderTypeComboBox.SelectedIndex == 1
                 ? AiProviderType.AzureOpenAi
                 : AiProviderType.OpenAiCompatible;

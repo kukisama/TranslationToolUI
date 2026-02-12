@@ -31,6 +31,10 @@ namespace TranslationToolUI.Models
 
         // --- 视频默认参数 ---
         public string VideoModel { get; set; } = "sora-2";
+        /// <summary>
+        /// 视频 API 模式（主要用于 Azure OpenAI）。
+        /// </summary>
+        public VideoApiMode VideoApiMode { get; set; } = VideoApiMode.SoraJobs;
         public int VideoWidth { get; set; } = 854;
         public int VideoHeight { get; set; } = 480;
         public int VideoSeconds { get; set; } = 5;

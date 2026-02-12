@@ -445,21 +445,38 @@ namespace TranslationToolUI.ViewModels
             var loadingMessage = new ChatMessageViewModel(new MediaChatMessage
             {
                 Role = "assistant",
-                Text = "已提交提示词，生成中...",
+                Text = "生成中 0秒",
                 Timestamp = DateTime.Now
             })
             { IsLoading = true };
             Messages.Add(loadingMessage);
 
             var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+            string currentApiStatus = ""; // 记录当前 API 返回的状态
+            bool isDownloading = false;   // 标记是否已进入下载阶段
+            double recordedGenerateSeconds = 0;
+            var downloadStopwatch = new System.Diagnostics.Stopwatch();
             var timer = new System.Threading.Timer(_ =>
             {
                 Dispatcher.UIThread.Post(() =>
                 {
                     if (loadingMessage.IsLoading)
                     {
-                        var elapsed = stopwatch.Elapsed;
-                        loadingMessage.Text = $"生成中... 已耗时 {elapsed.TotalSeconds:F0} 秒";
+                        if (isDownloading)
+                        {
+                            // 阶段3：succeeded 后下载中
+                            loadingMessage.Text = $"生成进度 succeeded 耗时{recordedGenerateSeconds:F0}秒，下载中 {downloadStopwatch.Elapsed.TotalSeconds:F0}秒";
+                        }
+                        else if (!string.IsNullOrEmpty(currentApiStatus))
+                        {
+                            // 阶段2：有状态了
+                            loadingMessage.Text = $"生成进度 {currentApiStatus} {stopwatch.Elapsed.TotalSeconds:F0}秒";
+                        }
+                        else
+                        {
+                            // 阶段1：刚提交
+                            loadingMessage.Text = $"生成中 {stopwatch.Elapsed.TotalSeconds:F0}秒";
+                        }
                     }
                 });
             }, null, 1000, 1000);
@@ -471,12 +488,16 @@ namespace TranslationToolUI.ViewModels
             var effectiveConfig = new MediaGenConfig
             {
                 VideoModel = _genConfig.VideoModel,
+                VideoApiMode = _genConfig.VideoApiMode,
                 VideoWidth = videoWidth,
                 VideoHeight = videoHeight,
                 VideoSeconds = OverrideVideoSeconds ?? _genConfig.VideoSeconds,
                 VideoVariants = OverrideVideoVariants ?? _genConfig.VideoVariants,
                 VideoPollIntervalMs = _genConfig.VideoPollIntervalMs
             };
+
+            // 记录该任务创建时的模式，方便重启/恢复时走同一路径。
+            task.RemoteVideoApiMode = effectiveConfig.VideoApiMode;
 
             var videoConfig = BuildVideoAiConfig();
 
@@ -489,7 +510,7 @@ namespace TranslationToolUI.ViewModels
             {
                 try
                 {
-                    await _videoService.GenerateVideoAsync(
+                    var (_, generateSec, downloadSec, downloadUrl) = await _videoService.GenerateVideoAsync(
                         videoConfig, prompt, effectiveConfig, outputPath, ct,
                         p => Dispatcher.UIThread.Post(() =>
                         {
@@ -501,19 +522,58 @@ namespace TranslationToolUI.ViewModels
                             task.RemoteVideoId = videoId;
                             StatusText = $"视频任务已创建，等待生成... (ID: {videoId})";
                             _onRequestSave?.Invoke(this);
+                        }),
+                        status => Dispatcher.UIThread.Post(() =>
+                        {
+                            currentApiStatus = status;
+                            StatusText = $"视频状态: {status}";
+                        }),
+                        genId => Dispatcher.UIThread.Post(() =>
+                        {
+                            task.RemoteGenerationId = genId;
+
+                            // 拿到 generationId 就可以提前构造并写入下载 URL（不等到真正下载完成）
+                            if (!string.IsNullOrWhiteSpace(task.RemoteVideoId))
+                            {
+                                var candidates = _videoService.BuildDownloadCandidateUrls(
+                                    videoConfig,
+                                    task.RemoteVideoId,
+                                    genId,
+                                    effectiveConfig.VideoApiMode);
+                                var preferred = candidates.Count > 0 ? candidates[0] : null;
+                                if (!string.IsNullOrWhiteSpace(preferred))
+                                {
+                                    task.RemoteDownloadUrl = preferred;
+                                }
+                            }
+                            _onRequestSave?.Invoke(this);
+                        }),
+                        genSeconds => Dispatcher.UIThread.Post(() =>
+                        {
+                            // succeeded → 记录生成耗时，切换到下载阶段
+                            recordedGenerateSeconds = genSeconds;
+                            task.GenerateSeconds = genSeconds;
+                            isDownloading = true;
+                            downloadStopwatch.Start();
+                            _onRequestSave?.Invoke(this);
                         }));
 
                     Dispatcher.UIThread.Post(() =>
                     {
                         task.Status = MediaGenStatus.Completed;
                         task.ResultFilePath = outputPath;
+                        task.GenerateSeconds = generateSec;
+                        task.DownloadSeconds = downloadSec;
+                        task.RemoteDownloadUrl = downloadUrl;
 
-                        var elapsedSec = stopwatch.Elapsed.TotalSeconds;
                         stopwatch.Stop();
                         timer.Dispose();
 
                         loadingMessage.IsLoading = false;
-                        loadingMessage.Text = $"✅ 视频已生成，耗时 {elapsedSec:F1} 秒";
+                        loadingMessage.GenerateSeconds = generateSec;
+                        loadingMessage.DownloadSeconds = downloadSec;
+                        var totalSec = generateSec + downloadSec;
+                        loadingMessage.Text = $"✅ 视频已生成（AI生成 {generateSec:F1}s + 下载 {downloadSec:F1}s = 总计 {totalSec:F1}s）";
                         loadingMessage.MediaPaths.Clear();
                         loadingMessage.MediaPaths.Add(outputPath);
 
@@ -560,6 +620,7 @@ namespace TranslationToolUI.ViewModels
 
         /// <summary>
         /// 恢复一个中断的视频任务（基于 RemoteVideoId 继续轮询+下载）
+        /// 若 RemoteGenerationId 已存在，则跳过轮询直接下载。
         /// </summary>
         public void ResumeVideoTask(MediaGenTask task)
         {
@@ -588,68 +649,185 @@ namespace TranslationToolUI.ViewModels
                 VideoPollIntervalMs = _genConfig.VideoPollIntervalMs
             };
 
+            var apiMode = task.RemoteVideoApiMode ?? _genConfig.VideoApiMode;
+
             // 添加恢复中的提示消息
             var loadingMessage = new ChatMessageViewModel(new MediaChatMessage
             {
                 Role = "assistant",
-                Text = $"恢复视频生成... (ID: {task.RemoteVideoId})",
+                Text = $"生成中 0秒 (恢复 ID: {task.RemoteVideoId})",
                 Timestamp = DateTime.Now
             })
             { IsLoading = true };
             Messages.Add(loadingMessage);
 
+
             var ct = _cts.Token;
             var videoId = task.RemoteVideoId;
+            var existingGenId = task.RemoteGenerationId;
+
+            // 如果已知 generationId，提前写入 RemoteDownloadUrl（不等到真正下载完成）
+            if (!string.IsNullOrEmpty(existingGenId))
+            {
+                var candidates = _videoService.BuildDownloadCandidateUrls(
+                    videoConfig,
+                    videoId,
+                    existingGenId,
+                    apiMode);
+                var preferred = candidates.Count > 0 ? candidates[0] : null;
+                if (!string.IsNullOrWhiteSpace(preferred))
+                {
+                    task.RemoteDownloadUrl = preferred;
+                    _onRequestSave?.Invoke(this);
+                }
+            }
 
             _ = System.Threading.Tasks.Task.Run(async () =>
             {
+                var generateSw = System.Diagnostics.Stopwatch.StartNew();
+                var downloadSw = new System.Diagnostics.Stopwatch();
+                bool isDownloadPhase = false;
+                double recordedGenSec = 0;
                 try
                 {
-                    // 直接从轮询开始（跳过创建步骤）
-                    var retryCount = 0;
-                    const int maxRetries = 3;
-
-                    while (!ct.IsCancellationRequested)
+                    string? generationId = existingGenId;
+                    // 用 Timer 定时刷新显示文字（生成+下载阶段都可用）
+                    string currentStatus = "";
+                    using var pollTimer = new System.Threading.Timer(_ =>
                     {
-                        try
+                        Dispatcher.UIThread.Post(() =>
                         {
-                            var (status, progress) = await _videoService.PollStatusAsync(
-                                videoConfig, videoId, ct);
-                            Dispatcher.UIThread.Post(() =>
+                            if (loadingMessage.IsLoading)
                             {
-                                task.Progress = progress;
-                                StatusText = progress < 100
-                                    ? $"恢复视频中... {progress}%"
-                                    : "视频生成完成";
-                            });
-                            retryCount = 0;
+                                if (isDownloadPhase)
+                                {
+                                    loadingMessage.Text = $"生成进度 succeeded 耗时{recordedGenSec:F0}秒，下载中 {downloadSw.Elapsed.TotalSeconds:F0}秒";
+                                }
+                                else if (!string.IsNullOrEmpty(currentStatus))
+                                {
+                                    loadingMessage.Text = $"生成进度 {currentStatus} {generateSw.Elapsed.TotalSeconds:F0}秒";
+                                }
+                                else
+                                {
+                                    loadingMessage.Text = $"生成中 {generateSw.Elapsed.TotalSeconds:F0}秒";
+                                }
+                            }
+                        });
+                    }, null, 1000, 1000);
 
-                            if (status == "completed") break;
-                            if (status == "failed")
-                                throw new InvalidOperationException("视频生成失败");
-
-                            await System.Threading.Tasks.Task.Delay(
-                                effectiveConfig.VideoPollIntervalMs, ct);
-                        }
-                        catch (HttpRequestException) when (retryCount < maxRetries)
+                    // 如果已有 generationId，跳过轮询直接下载
+                    if (!string.IsNullOrEmpty(generationId))
+                    {
+                        generateSw.Stop(); // 无需生成等待
+                        isDownloadPhase = true;
+                        downloadSw.Start();
+                        Dispatcher.UIThread.Post(() =>
                         {
-                            retryCount++;
-                            await System.Threading.Tasks.Task.Delay(
-                                effectiveConfig.VideoPollIntervalMs, ct);
+                            loadingMessage.Text = $"生成进度 succeeded 耗时0秒，下载中 0秒";
+                            StatusText = "跳过轮询，直接下载视频...";
+                        });
+                    }
+                    else
+                    {
+                        var retryCount = 0;
+                        const int maxRetries = 3;
+                        while (!ct.IsCancellationRequested)
+                        {
+                            try
+                            {
+                                var (status, progress, genId, failureReason) = await _videoService.PollStatusDetailsAsync(
+                                    videoConfig, videoId, ct, apiMode);
+                                Dispatcher.UIThread.Post(() =>
+                                {
+                                    task.Progress = progress;
+                                    currentStatus = status;
+                                    StatusText = $"视频状态: {status}";
+                                });
+                                retryCount = 0;
+
+                                if (!string.IsNullOrWhiteSpace(genId))
+                                {
+                                    generationId = genId;
+                                    Dispatcher.UIThread.Post(() =>
+                                    {
+                                        task.RemoteGenerationId = genId;
+
+                                        // 解析到 generationId 就立刻构造并写入下载 URL，便于恢复
+                                        var candidates = _videoService.BuildDownloadCandidateUrls(
+                                            videoConfig,
+                                            videoId,
+                                            genId,
+                                            apiMode);
+                                        var preferred = candidates.Count > 0 ? candidates[0] : null;
+                                        if (!string.IsNullOrWhiteSpace(preferred))
+                                        {
+                                            task.RemoteDownloadUrl = preferred;
+                                        }
+                                        _onRequestSave?.Invoke(this);
+                                    });
+                                }
+
+                                if (status is "succeeded" or "completed" or "success")
+                                {
+                                    generateSw.Stop();
+                                    recordedGenSec = generateSw.Elapsed.TotalSeconds;
+                                    Dispatcher.UIThread.Post(() =>
+                                    {
+                                        task.GenerateSeconds = recordedGenSec;
+                                        _onRequestSave?.Invoke(this);
+                                    });
+                                    break;
+                                }
+                                if (status is "failed" or "error" or "cancelled" or "canceled")
+                                {
+                                    var detail = string.IsNullOrWhiteSpace(failureReason)
+                                        ? status
+                                        : $"{status} ({failureReason})";
+                                    throw new InvalidOperationException($"视频生成失败: {detail}");
+                                }
+
+                                await System.Threading.Tasks.Task.Delay(
+                                    effectiveConfig.VideoPollIntervalMs, ct);
+                            }
+                            catch (HttpRequestException) when (retryCount < maxRetries)
+                            {
+                                retryCount++;
+                                await System.Threading.Tasks.Task.Delay(
+                                    effectiveConfig.VideoPollIntervalMs, ct);
+                            }
                         }
+
+                        ct.ThrowIfCancellationRequested();
+                        // 进入下载阶段
+                        isDownloadPhase = true;
+                        downloadSw.Start();
+                        Dispatcher.UIThread.Post(() =>
+                        {
+                            loadingMessage.Text = $"生成进度 succeeded 耗时{recordedGenSec:F0}秒，下载中 0秒";
+                            StatusText = "下载视频中...";
+                        });
                     }
 
-                    ct.ThrowIfCancellationRequested();
+                    var dlUrl = await _videoService.DownloadVideoAsync(videoConfig, videoId, outputPath, ct,
+                        generationId, apiMode);
+                    downloadSw.Stop();
 
-                    await _videoService.DownloadVideoAsync(videoConfig, videoId, outputPath, ct);
+                    var genSec = recordedGenSec > 0 ? recordedGenSec : generateSw.Elapsed.TotalSeconds;
+                    var dlSec = downloadSw.Elapsed.TotalSeconds;
 
                     Dispatcher.UIThread.Post(() =>
                     {
                         task.Status = MediaGenStatus.Completed;
                         task.ResultFilePath = outputPath;
+                        task.GenerateSeconds = genSec;
+                        task.DownloadSeconds = dlSec;
+                        task.RemoteDownloadUrl = dlUrl;
 
                         loadingMessage.IsLoading = false;
-                        loadingMessage.Text = "✅ 视频已恢复生成";
+                        loadingMessage.GenerateSeconds = genSec;
+                        loadingMessage.DownloadSeconds = dlSec;
+                        var totalSec = genSec + dlSec;
+                        loadingMessage.Text = $"✅ 视频已恢复（等待 {genSec:F1}s + 下载 {dlSec:F1}s = 总计 {totalSec:F1}s）";
                         loadingMessage.MediaPaths.Clear();
                         loadingMessage.MediaPaths.Add(outputPath);
 

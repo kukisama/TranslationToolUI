@@ -13,7 +13,7 @@ namespace TranslationToolUI.ViewModels
 {
     public partial class MainWindowViewModel
     {
-        private readonly AzureTokenProvider _azureTokenProvider = new();
+        private readonly AzureTokenProvider _azureTokenProvider = new("ai");
         private readonly AiInsightService _aiInsightService;
         private string _insightMarkdown = "";
         private string _insightUserInput = "";
@@ -26,6 +26,26 @@ namespace TranslationToolUI.ViewModels
         private string _autoInsightPrompt = "请对以上翻译记录进行会议摘要。总结会议的主要议题、关键讨论内容和结论。";
         private DispatcherTimer? _autoInsightTimer;
         private int _lastAutoInsightHistoryCount;
+
+        private async Task TrySilentLoginForAiAsync()
+        {
+            try
+            {
+                var ai = _config.AiConfig;
+                if (ai == null)
+                    return;
+                if (ai.ProviderType != AiProviderType.AzureOpenAi)
+                    return;
+                if (ai.AzureAuthMode != AzureAuthMode.AAD)
+                    return;
+
+                await _azureTokenProvider.TrySilentLoginAsync(ai.AzureTenantId, ai.AzureClientId);
+            }
+            catch
+            {
+                // 静默失败不影响功能，后续用户可手动登录
+            }
+        }
 
         public string InsightMarkdown
         {

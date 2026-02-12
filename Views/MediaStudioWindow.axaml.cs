@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Linq;
+using System.Threading.Tasks;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
@@ -73,6 +74,131 @@ namespace TranslationToolUI.Views
         {
             _viewModel?.Dispose();
             base.OnClosing(e);
+        }
+
+        private void SessionListBox_KeyDown(object? sender, KeyEventArgs e)
+        {
+            if (e.Key == Key.F2)
+            {
+                _ = StartRenameSessionAsync();
+                e.Handled = true;
+            }
+        }
+
+        private void RenameSession_Click(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+        {
+            _ = StartRenameSessionAsync();
+        }
+
+        private void ResumeVideoTasks_Click(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+        {
+            if (_viewModel?.CurrentSession == null) return;
+
+            var session = _viewModel.CurrentSession;
+            var cancelledTasks = session.TaskHistory
+                .Where(t => t.Type == MediaGenType.Video
+                    && (t.Status == MediaGenStatus.Cancelled || t.Status == MediaGenStatus.Failed)
+                    && !string.IsNullOrEmpty(t.RemoteVideoId))
+                .ToList();
+
+            if (cancelledTasks.Count == 0)
+            {
+                // 无可恢复的任务
+                return;
+            }
+
+            foreach (var task in cancelledTasks)
+            {
+                session.ResumeVideoTask(task);
+            }
+        }
+
+        private async Task StartRenameSessionAsync()
+        {
+            if (_viewModel?.CurrentSession == null) return;
+
+            var currentName = _viewModel.CurrentSession.SessionName;
+
+            // 使用简单的输入对话框
+            var dialog = new Window
+            {
+                Title = "重命名会话",
+                Width = 360,
+                Height = 150,
+                WindowStartupLocation = WindowStartupLocation.CenterOwner,
+                CanResize = false,
+                ShowInTaskbar = false
+            };
+
+            var textBox = new TextBox
+            {
+                Text = currentName,
+                Margin = new Thickness(16, 16, 16, 8),
+                Watermark = "输入新名称..."
+            };
+
+            var okButton = new Button
+            {
+                Content = "确定",
+                HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right,
+                Padding = new Thickness(20, 6),
+                IsDefault = true
+            };
+
+            var cancelButton = new Button
+            {
+                Content = "取消",
+                HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right,
+                Padding = new Thickness(20, 6),
+                Margin = new Thickness(0, 0, 8, 0),
+                IsCancel = true
+            };
+
+            string? result = null;
+            okButton.Click += (_, _) =>
+            {
+                result = textBox.Text?.Trim();
+                dialog.Close();
+            };
+            cancelButton.Click += (_, _) => dialog.Close();
+
+            textBox.KeyDown += (_, e) =>
+            {
+                if (e.Key == Key.Enter)
+                {
+                    result = textBox.Text?.Trim();
+                    dialog.Close();
+                    e.Handled = true;
+                }
+            };
+
+            var buttonPanel = new StackPanel
+            {
+                Orientation = Avalonia.Layout.Orientation.Horizontal,
+                HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right,
+                Margin = new Thickness(16, 0, 16, 16),
+                Spacing = 8
+            };
+            buttonPanel.Children.Add(cancelButton);
+            buttonPanel.Children.Add(okButton);
+
+            var stack = new StackPanel();
+            stack.Children.Add(textBox);
+            stack.Children.Add(buttonPanel);
+            dialog.Content = stack;
+
+            dialog.Opened += (_, _) =>
+            {
+                textBox.Focus();
+                textBox.SelectAll();
+            };
+
+            await dialog.ShowDialog(this);
+
+            if (!string.IsNullOrWhiteSpace(result) && result != currentName)
+            {
+                _viewModel.RenameCurrentSession(result);
+            }
         }
 
         private void MediaThumbnail_PointerPressed(object? sender, PointerPressedEventArgs e)

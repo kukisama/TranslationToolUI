@@ -1,10 +1,15 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Net.Http;
+using System.Net.Http.Headers;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Azure.Core;
 using Azure.Identity;
+using TranslationToolUI.Models;
 
 namespace TranslationToolUI.Services
 {
@@ -14,13 +19,30 @@ namespace TranslationToolUI.Services
     /// </summary>
     public class AzureTokenProvider
     {
+        private static readonly HttpClient _httpClient = new()
+        {
+            Timeout = TimeSpan.FromSeconds(20)
+        };
+
+        private readonly string _profileKey;
+
         private TokenCredential? _credential;
         private readonly string _scope = "https://cognitiveservices.azure.com/.default";
+        private readonly string _armScope = "https://management.azure.com/.default";
         private AccessToken _cachedToken;
         private readonly SemaphoreSlim _lock = new(1, 1);
 
-        private static string AuthRecordPath =>
-            Path.Combine(PathManager.Instance.AppDataPath, "azure_auth_record.json");
+        private string AuthRecordPath =>
+            Path.Combine(PathManager.Instance.AppDataPath, $"azure_auth_record_{_profileKey}.json");
+
+        private string TokenCacheName => $"TranslationToolUI_{_profileKey}";
+
+        public AzureTokenProvider(string? profileKey = null)
+        {
+            _profileKey = string.IsNullOrWhiteSpace(profileKey)
+                ? "shared"
+                : profileKey.Trim();
+        }
 
         /// <summary>
         /// 当前是否已登录（持有有效 credential）
@@ -68,7 +90,7 @@ namespace TranslationToolUI.Services
                 {
                     TokenCachePersistenceOptions = new TokenCachePersistenceOptions
                     {
-                        Name = "TranslationToolUI"
+                        Name = TokenCacheName
                     },
                     DeviceCodeCallback = (code, cancellation) =>
                     {
@@ -119,6 +141,103 @@ namespace TranslationToolUI.Services
         }
 
         /// <summary>
+        /// 使用交互式浏览器登录（系统浏览器）。更适合多账号切换。
+        /// </summary>
+        public async Task<bool> LoginInteractiveAsync(
+            string? tenantId,
+            string? clientId,
+            CancellationToken ct = default)
+        {
+            try
+            {
+                AuthenticationRecord? record = null;
+                if (File.Exists(AuthRecordPath))
+                {
+                    try
+                    {
+                        using var stream = File.OpenRead(AuthRecordPath);
+                        record = await AuthenticationRecord.DeserializeAsync(stream, ct);
+                    }
+                    catch
+                    {
+                        File.Delete(AuthRecordPath);
+                    }
+                }
+
+                var options = new InteractiveBrowserCredentialOptions
+                {
+                    TokenCachePersistenceOptions = new TokenCachePersistenceOptions
+                    {
+                        Name = TokenCacheName
+                    }
+                };
+
+                if (!string.IsNullOrWhiteSpace(tenantId))
+                    options.TenantId = tenantId;
+                if (!string.IsNullOrWhiteSpace(clientId))
+                    options.ClientId = clientId;
+                if (record != null)
+                    options.AuthenticationRecord = record;
+
+                var credential = new InteractiveBrowserCredential(options);
+
+                _cachedToken = await credential.GetTokenAsync(
+                    new TokenRequestContext(new[] { _scope }), ct);
+
+                _credential = credential;
+
+                try
+                {
+                    var newRecord = await credential.AuthenticateAsync(
+                        new TokenRequestContext(new[] { _scope }), ct);
+                    using var stream = File.Create(AuthRecordPath);
+                    await newRecord.SerializeAsync(stream, ct);
+                    Username = newRecord.Username;
+                }
+                catch
+                {
+                    // 保存失败不影响登录结果
+                }
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"AAD 交互式登录失败: {ex.Message}");
+                _credential = null;
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// 自动登录：优先静默恢复；若失败则优先交互式浏览器；最后回退设备代码流。
+        /// </summary>
+        public async Task<bool> LoginAutoAsync(
+            string? tenantId,
+            string? clientId,
+            Action<string>? onDeviceCode = null,
+            CancellationToken ct = default)
+        {
+            try
+            {
+                if (await TrySilentLoginAsync(tenantId, clientId, ct))
+                    return true;
+            }
+            catch
+            {
+                // 静默失败不阻断
+            }
+
+            // 交互式优先：更符合“少登录 + 易切换账号”的体验
+            var interactiveOk = await LoginInteractiveAsync(tenantId, clientId, ct);
+            if (interactiveOk)
+                return true;
+
+            // 最后回退设备代码
+            return await LoginAsync(tenantId, clientId, onDeviceCode, ct);
+        }
+
+        /// <summary>
         /// 尝试使用已保存的凭据静默获取 Token（不弹窗）
         /// </summary>
         public async Task<bool> TrySilentLoginAsync(
@@ -139,7 +258,7 @@ namespace TranslationToolUI.Services
                     AuthenticationRecord = record,
                     TokenCachePersistenceOptions = new TokenCachePersistenceOptions
                     {
-                        Name = "TranslationToolUI"
+                        Name = TokenCacheName
                     },
                     // 静默模式下不希望弹窗，但 DeviceCodeCredential 需要回调
                     DeviceCodeCallback = (_, _) => Task.CompletedTask
@@ -193,6 +312,70 @@ namespace TranslationToolUI.Services
             finally
             {
                 _lock.Release();
+            }
+        }
+
+        /// <summary>
+        /// 获取当前账号可访问的租户列表（通过 ARM tenants API）。
+        /// 需要先完成一次 LoginAsync/TrySilentLoginAsync。
+        /// </summary>
+        public async Task<IReadOnlyList<AzureTenantInfo>> GetAvailableTenantsAsync(CancellationToken ct = default)
+        {
+            if (_credential == null)
+                throw new InvalidOperationException("未登录，请先调用 LoginAsync");
+
+            try
+            {
+                var armToken = await _credential.GetTokenAsync(
+                    new TokenRequestContext(new[] { _armScope }), ct);
+
+                using var request = new HttpRequestMessage(
+                    HttpMethod.Get,
+                    "https://management.azure.com/tenants?api-version=2020-01-01");
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", armToken.Token);
+
+                using var response = await _httpClient.SendAsync(request, ct);
+                if (!response.IsSuccessStatusCode)
+                {
+                    Debug.WriteLine($"获取租户列表失败: {(int)response.StatusCode} {response.ReasonPhrase}");
+                    return Array.Empty<AzureTenantInfo>();
+                }
+
+                var json = await response.Content.ReadAsStringAsync(ct);
+                using var doc = JsonDocument.Parse(json);
+
+                if (!doc.RootElement.TryGetProperty("value", out var valueElem)
+                    || valueElem.ValueKind != JsonValueKind.Array)
+                {
+                    return Array.Empty<AzureTenantInfo>();
+                }
+
+                var list = new List<AzureTenantInfo>();
+                foreach (var item in valueElem.EnumerateArray())
+                {
+                    var tid = item.TryGetProperty("tenantId", out var tidElem)
+                        ? tidElem.GetString()
+                        : null;
+                    if (string.IsNullOrWhiteSpace(tid))
+                        continue;
+
+                    var name = item.TryGetProperty("displayName", out var nameElem)
+                        ? nameElem.GetString()
+                        : null;
+
+                    list.Add(new AzureTenantInfo
+                    {
+                        TenantId = tid.Trim(),
+                        DisplayName = name?.Trim() ?? ""
+                    });
+                }
+
+                return list;
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"获取租户列表异常: {ex.Message}");
+                return Array.Empty<AzureTenantInfo>();
             }
         }
 

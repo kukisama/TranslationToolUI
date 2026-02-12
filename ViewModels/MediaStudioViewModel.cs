@@ -22,8 +22,8 @@ namespace TranslationToolUI.ViewModels
         private readonly MediaGenConfig _genConfig;
         private readonly AiImageGenService _imageService = new();
         private readonly AiVideoGenService _videoService = new();
-        private readonly AzureTokenProvider _imageTokenProvider = new();
-        private readonly AzureTokenProvider _videoTokenProvider;
+        private readonly AzureTokenProvider _imageTokenProvider = new("media-image");
+        private readonly AzureTokenProvider _videoTokenProvider = new("media-video");
         private readonly string _studioDirectory;
 
         // --- 会话管理 ---
@@ -74,12 +74,10 @@ namespace TranslationToolUI.ViewModels
         {
             _aiConfig = aiConfig;
             _genConfig = genConfig;
-            _videoTokenProvider = _genConfig.VideoUseImageEndpoint
-                ? _imageTokenProvider
-                : new AzureTokenProvider();
 
             _imageService.SetTokenProvider(_imageTokenProvider);
-            _videoService.SetTokenProvider(_videoTokenProvider);
+            // 当视频终结点与图片一致时，复用同一套 AAD 登录状态（避免“图片已登录但视频仍提示未登录”的困惑）
+            _videoService.SetTokenProvider(_genConfig.VideoUseImageEndpoint ? _imageTokenProvider : _videoTokenProvider);
 
             var sessionsPath = PathManager.Instance.SessionsPath;
             _studioDirectory = Path.Combine(sessionsPath, "media-studio");
@@ -139,6 +137,7 @@ namespace TranslationToolUI.ViewModels
                     _genConfig.ImageAzureClientId);
             }
 
+            // 视频使用独立终结点时，才需要单独的登录状态
             if (!_genConfig.VideoUseImageEndpoint
                 && _genConfig.VideoProviderType == AiProviderType.AzureOpenAi
                 && _genConfig.VideoAzureAuthMode == AzureAuthMode.AAD)
@@ -339,7 +338,12 @@ namespace TranslationToolUI.ViewModels
                         ResultFilePath = t.ResultFilePath,
                         ErrorMessage = t.ErrorMessage,
                         CreatedAt = t.CreatedAt,
-                        RemoteVideoId = t.RemoteVideoId
+                        RemoteVideoId = t.RemoteVideoId,
+                        RemoteVideoApiMode = t.RemoteVideoApiMode,
+                        RemoteGenerationId = t.RemoteGenerationId,
+                        GenerateSeconds = t.GenerateSeconds,
+                        DownloadSeconds = t.DownloadSeconds,
+                        RemoteDownloadUrl = t.RemoteDownloadUrl
                     }).ToList()
                 };
 

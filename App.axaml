@@ -5,5 +5,15 @@
              <!-- "Default" ThemeVariant follows system theme variant. "Dark" or "Light" are other available options. -->    <Application.Styles>
         <FluentTheme />
         <StyleInclude Source="avares://AvaloniaEdit/Themes/Fluent/AvaloniaEdit.xaml" />
+
+        <!-- 全局文本选中样式：蓝底白字（类似 CMD 终端） -->
+        <Style Selector="TextBox">
+            <Setter Property="SelectionBrush" Value="#FF1976D2"/>
+            <Setter Property="SelectionForegroundBrush" Value="White"/>
+        </Style>
+        <Style Selector="SelectableTextBlock">
+            <Setter Property="SelectionBrush" Value="#FF1976D2"/>
+            <Setter Property="SelectionForegroundBrush" Value="White"/>
+        </Style>
     </Application.Styles>
 </Application>

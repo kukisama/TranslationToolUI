@@ -99,10 +99,29 @@ namespace TranslationToolUI.Services
         /// </summary>
         protected static string BuildVideoCreateUrl(AiConfig config)
         {
+            return BuildVideoCreateUrl(config, VideoApiMode.SoraJobs);
+        }
+
+        /// <summary>
+        /// 构建 Videos API URL（创建）
+        /// 
+        /// - Azure OpenAI:
+        ///   - SoraJobs: /openai/v1/video/generations/jobs?api-version=preview
+        ///   - Videos:   /openai/v1/videos(?api-version=preview)
+        /// - OpenAI Compatible: /v1/videos
+        /// </summary>
+        protected static string BuildVideoCreateUrl(AiConfig config, VideoApiMode apiMode)
+        {
             var baseUrl = config.ApiEndpoint.TrimEnd('/');
 
             if (config.ProviderType == AiProviderType.AzureOpenAi)
             {
+                if (apiMode == VideoApiMode.Videos)
+                {
+                    // 注：部分示例不带 api-version，但 Azure 通常要求。这里默认带上，必要时由调用方回退到不带参数。
+                    return $"{baseUrl}/openai/v1/videos?api-version=preview";
+                }
+
                 return $"{baseUrl}/openai/v1/video/generations/jobs?api-version=preview";
             }
 
@@ -116,10 +135,23 @@ namespace TranslationToolUI.Services
         /// </summary>
         protected static string BuildVideoPollUrl(AiConfig config, string videoId)
         {
+            return BuildVideoPollUrl(config, videoId, VideoApiMode.SoraJobs);
+        }
+
+        /// <summary>
+        /// 构建 Videos API URL（轮询状态）
+        /// </summary>
+        protected static string BuildVideoPollUrl(AiConfig config, string videoId, VideoApiMode apiMode)
+        {
             var baseUrl = config.ApiEndpoint.TrimEnd('/');
 
             if (config.ProviderType == AiProviderType.AzureOpenAi)
             {
+                if (apiMode == VideoApiMode.Videos)
+                {
+                    return $"{baseUrl}/openai/v1/videos/{videoId}?api-version=preview";
+                }
+
                 return $"{baseUrl}/openai/v1/video/generations/jobs/{videoId}?api-version=preview";
             }
 
@@ -133,16 +165,94 @@ namespace TranslationToolUI.Services
         /// </summary>
         protected static string BuildVideoDownloadUrl(AiConfig config, string videoId)
         {
+            return BuildVideoDownloadUrl(config, videoId, VideoApiMode.SoraJobs);
+        }
+
+        /// <summary>
+        /// 构建 Videos API URL（下载内容）
+        /// </summary>
+        protected static string BuildVideoDownloadUrl(AiConfig config, string videoId, VideoApiMode apiMode)
+        {
             var baseUrl = config.ApiEndpoint.TrimEnd('/');
 
             if (config.ProviderType == AiProviderType.AzureOpenAi)
             {
+                if (apiMode == VideoApiMode.Videos)
+                {
+                    return $"{baseUrl}/openai/v1/videos/{videoId}/content?api-version=preview";
+                }
+
                 return $"{baseUrl}/openai/v1/video/generations/jobs/{videoId}/content?api-version=preview";
             }
 
             if (baseUrl.EndsWith("/v1"))
                 return $"{baseUrl}/videos/{videoId}/content";
             return $"{baseUrl}/v1/videos/{videoId}/content";
+        }
+
+        /// <summary>
+        /// 构建 Videos API URL（下载内容备用路径）。
+        /// 
+        /// 备注：部分实现可能使用 /content/video。
+        /// </summary>
+        protected static string BuildVideoDownloadUrlAlt(AiConfig config, string videoId, VideoApiMode apiMode)
+        {
+            var baseUrl = config.ApiEndpoint.TrimEnd('/');
+
+            if (config.ProviderType == AiProviderType.AzureOpenAi)
+            {
+                if (apiMode == VideoApiMode.Videos)
+                {
+                    return $"{baseUrl}/openai/v1/videos/{videoId}/content/video?api-version=preview";
+                }
+
+                return $"{baseUrl}/openai/v1/video/generations/jobs/{videoId}/content?api-version=preview";
+            }
+
+            if (baseUrl.EndsWith("/v1"))
+                return $"{baseUrl}/videos/{videoId}/content";
+            return $"{baseUrl}/v1/videos/{videoId}/content";
+        }
+
+        /// <summary>
+        /// 构建 Videos API URL（下载内容，使用 generationId）。
+        /// 
+        /// 说明：Azure 视频任务轮询返回的 generations[].id（gen_...）在部分实现中才是内容下载的标识。
+        /// 若 jobs/{taskId}/content 返回 404，可回退尝试此路径。
+        /// </summary>
+        protected static string BuildVideoGenerationDownloadUrl(AiConfig config, string generationId)
+        {
+            var baseUrl = config.ApiEndpoint.TrimEnd('/');
+
+            if (config.ProviderType == AiProviderType.AzureOpenAi)
+            {
+                // 官方示例：/openai/v1/video/generations/{generationId}/content/video?api-version=preview
+                return $"{baseUrl}/openai/v1/video/generations/{generationId}/content/video?api-version=preview";
+            }
+
+            // OpenAI Compatible：目前项目只实现 /videos/{id}/content；如后续 provider 返回 generationId，可在此扩展。
+            if (baseUrl.EndsWith("/v1"))
+                return $"{baseUrl}/videos/{generationId}/content";
+            return $"{baseUrl}/v1/videos/{generationId}/content";
+        }
+
+        /// <summary>
+        /// 构建 Videos API URL（下载内容，使用 generationId，非 /video 子路径）。
+        /// 
+        /// 备注：不同后端/版本可能会把内容端点暴露为 /content 或 /content/video。
+        /// </summary>
+        protected static string BuildVideoGenerationDownloadUrlAlt(AiConfig config, string generationId)
+        {
+            var baseUrl = config.ApiEndpoint.TrimEnd('/');
+
+            if (config.ProviderType == AiProviderType.AzureOpenAi)
+            {
+                return $"{baseUrl}/openai/v1/video/generations/{generationId}/content?api-version=preview";
+            }
+
+            if (baseUrl.EndsWith("/v1"))
+                return $"{baseUrl}/videos/{generationId}/content";
+            return $"{baseUrl}/v1/videos/{generationId}/content";
         }
     }
 }

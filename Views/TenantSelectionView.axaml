@@ -1,0 +1,28 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d" d:DesignWidth="520" d:DesignHeight="230"
+        x:Class="TranslationToolUI.Views.TenantSelectionView"
+        Title="选择 Azure 目录(租户)"
+        Width="520" Height="230"
+        WindowStartupLocation="CenterOwner">
+
+    <Grid RowDefinitions="Auto,Auto,Auto,*" Margin="16" RowSpacing="10">
+        <TextBlock Grid.Row="0"
+                   Text="检测到该账号存在多个 Azure 目录(租户)。请选择要用于访问资源的租户："
+                   TextWrapping="Wrap"/>
+
+        <ComboBox Grid.Row="1" x:Name="TenantComboBox" MinWidth="420"/>
+
+        <TextBlock Grid.Row="2" x:Name="TenantHintTextBlock"
+                   FontSize="11" Foreground="Gray"
+                   TextWrapping="Wrap"
+                   Text="提示：选择后会尝试切换到该租户并获取 Azure OpenAI 所需的令牌。"/>
+
+        <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="10">
+            <Button x:Name="OkButton" Content="确定" Width="90" IsDefault="True"/>
+            <Button x:Name="CancelButton" Content="取消" Width="90" IsCancel="True"/>
+        </StackPanel>
+    </Grid>
+</Window>

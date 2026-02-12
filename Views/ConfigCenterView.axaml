@@ -190,12 +190,14 @@
 
                         <StackPanel Spacing="5">
                             <TextBlock Text="API 密钥"/>
-                            <TextBox x:Name="ApiKeyTextBox"
-                                     Watermark="sk-..."
-                                     PasswordChar="*"
-                                     RevealPassword="{Binding IsChecked, ElementName=ShowApiKeyCheckBox}"/>
-                            <CheckBox x:Name="ShowApiKeyCheckBox" Content="显示密钥"
-                                      FontSize="10" Margin="0,2,0,0"/>
+                            <StackPanel x:Name="ApiKeyPanel" Spacing="0">
+                                <TextBox x:Name="ApiKeyTextBox"
+                                         Watermark="sk-..."
+                                         PasswordChar="*"
+                                         RevealPassword="{Binding IsChecked, ElementName=ShowApiKeyCheckBox}"/>
+                                <CheckBox x:Name="ShowApiKeyCheckBox" Content="显示密钥"
+                                          FontSize="10" Margin="0,2,0,0"/>
+                            </StackPanel>
                         </StackPanel>
 
                         <StackPanel x:Name="ModelNamePanel" Spacing="8">
@@ -544,12 +546,14 @@
 
                             <StackPanel Spacing="5">
                                 <TextBlock Text="API 密钥"/>
-                                <TextBox x:Name="MediaImageApiKeyTextBox"
-                                         Watermark="sk-..."
-                                         PasswordChar="*"
-                                         RevealPassword="{Binding IsChecked, ElementName=MediaImageShowApiKeyCheckBox}"/>
-                                <CheckBox x:Name="MediaImageShowApiKeyCheckBox" Content="显示密钥"
-                                          FontSize="10" Margin="0,2,0,0"/>
+                                <StackPanel x:Name="MediaImageApiKeyPanel" Spacing="0">
+                                    <TextBox x:Name="MediaImageApiKeyTextBox"
+                                             Watermark="sk-..."
+                                             PasswordChar="*"
+                                             RevealPassword="{Binding IsChecked, ElementName=MediaImageShowApiKeyCheckBox}"/>
+                                    <CheckBox x:Name="MediaImageShowApiKeyCheckBox" Content="显示密钥"
+                                              FontSize="10" Margin="0,2,0,0"/>
+                                </StackPanel>
                             </StackPanel>
 
                             <StackPanel x:Name="MediaImageAzureFieldsPanel" Spacing="10" IsVisible="False">
@@ -603,9 +607,28 @@
                             <CheckBox x:Name="MediaVideoUseImageEndpointCheckBox"
                                       Content="视频终结点与图片一致"/>
                             <StackPanel Spacing="5">
-                                <TextBlock Text="视频模型 / 部署名"/>
+                                <TextBlock x:Name="MediaVideoModelLabelTextBlock" Text="视频部署名（Azure）/模型名（OpenAI 兼容）"/>
                                 <TextBox x:Name="MediaVideoModelTextBox"
-                                         Watermark="例如: sora-2 / 部署名"/>
+                                         Watermark="OpenAI 兼容：填模型名（例如 sora-2）；Azure：填部署名（例如 sora-2）"/>
+                            </StackPanel>
+
+                            <StackPanel x:Name="MediaVideoApiModePanel" Spacing="5" IsVisible="False">
+                                <TextBlock Text="视频接口模式（Azure）"/>
+                                <ComboBox x:Name="MediaVideoApiModeComboBox" MinWidth="240">
+                                    <ComboBoxItem Content="Sora Jobs（/openai/v1/video/generations/jobs）"/>
+                                    <ComboBoxItem Content="Videos（/openai/v1/videos）"/>
+                                </ComboBox>
+                                <TextBlock x:Name="MediaVideoApiModeHintTextBlock" FontSize="10" Foreground="Gray"
+                                           TextWrapping="Wrap"/>
+                            </StackPanel>
+
+                            <StackPanel x:Name="MediaVideoBaseModelPanel" Spacing="5" IsVisible="False">
+                                <TextBlock Text="部署绑定的底层模型（Azure 要求，必须为 sora）"/>
+                                <TextBox x:Name="MediaVideoBaseModelTextBox"
+                                         Text="sora"
+                                         IsReadOnly="True"/>
+                                <TextBlock FontSize="10" Foreground="Gray"
+                                           Text="提示：此项仅用于说明与自检；请求参数里不会发送它。若报错提示 deployed model must be 'sora'，通常说明你填写的部署没有绑定到底层 sora。" TextWrapping="Wrap"/>
                             </StackPanel>
                             <StackPanel x:Name="MediaVideoEndpointPanel" Spacing="8">
                                 <StackPanel Spacing="5">
@@ -626,12 +649,14 @@
 
                                 <StackPanel Spacing="5">
                                     <TextBlock Text="API 密钥"/>
-                                    <TextBox x:Name="MediaVideoApiKeyTextBox"
-                                             Watermark="sk-..."
-                                             PasswordChar="*"
-                                             RevealPassword="{Binding IsChecked, ElementName=MediaVideoShowApiKeyCheckBox}"/>
-                                    <CheckBox x:Name="MediaVideoShowApiKeyCheckBox" Content="显示密钥"
-                                              FontSize="10" Margin="0,2,0,0"/>
+                                    <StackPanel x:Name="MediaVideoApiKeyPanel" Spacing="0">
+                                        <TextBox x:Name="MediaVideoApiKeyTextBox"
+                                                 Watermark="sk-..."
+                                                 PasswordChar="*"
+                                                 RevealPassword="{Binding IsChecked, ElementName=MediaVideoShowApiKeyCheckBox}"/>
+                                        <CheckBox x:Name="MediaVideoShowApiKeyCheckBox" Content="显示密钥"
+                                                  FontSize="10" Margin="0,2,0,0"/>
+                                    </StackPanel>
                                 </StackPanel>
 
                                 <StackPanel x:Name="MediaVideoAzureFieldsPanel" Spacing="10" IsVisible="False">

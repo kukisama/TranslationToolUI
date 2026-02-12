@@ -305,6 +305,9 @@ namespace TranslationToolUI.ViewModels
 
                     TriggerSubscriptionValidation();
                 });
+
+                // AAD 模式下尝试静默登录（不弹窗）
+                _ = TrySilentLoginForAiAsync();
             }
             catch (Exception ex)
             {
@@ -448,6 +451,9 @@ namespace TranslationToolUI.ViewModels
             }
 
             TriggerSubscriptionValidation();
+
+            // AAD 模式下尝试静默登录（不弹窗）
+            _ = TrySilentLoginForAiAsync();
 
             _ = Task.Run(async () =>
             {
