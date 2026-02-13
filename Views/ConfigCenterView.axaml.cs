@@ -108,10 +108,12 @@ namespace TranslationToolUI.Views
             UpdateButton.Click += UpdateButton_Click;
             DeleteButton.Click += DeleteButton_Click;
             SpeechTestButton.Click += SpeechTestButton_Click;
+            TestAllSubscriptionsButton.Click += TestAllSubscriptionsButton_Click;
             BatchStorageValidateButton.Click += BatchStorageValidateButton_Click;
             SubscriptionListBox.SelectionChanged += SubscriptionListBox_SelectionChanged;
             SubscriptionListBox.DoubleTapped += SubscriptionListBox_DoubleTapped;
             SubscriptionListBox.PointerPressed += SubscriptionListBox_PointerPressed;
+            EndpointTextBox.TextChanged += (_, _) => UpdateEndpointParsedRegionDisplay();
 
             EnableRecordingCheckBox.IsCheckedChanged += EnableRecordingCheckBox_IsCheckedChanged;
             EnableAutoTimeoutCheckBox.IsCheckedChanged += EnableAutoTimeoutCheckBox_IsCheckedChanged;
@@ -154,8 +156,7 @@ namespace TranslationToolUI.Views
         {
             SubscriptionListBox.ItemsSource = _subscriptions;
 
-            RegionComboBox.SelectedIndex = 0;
-            FilterModalParticlesCheckBox.IsChecked = true;
+            EndpointTextBox.Text = "";
             MaxHistoryItemsNumeric.Value = 15;
             RealtimeMaxLengthNumeric.Value = 150;
             ChunkDurationMsNumeric.Value = 200;
@@ -179,6 +180,9 @@ namespace TranslationToolUI.Views
 
             ExportSrtCheckBox.IsChecked = false;
             ExportVttCheckBox.IsChecked = false;
+
+            // 默认字号
+            SelectFontSizeComboBox(38);
 
             SessionDirectoryTextBox.Text = PathManager.Instance.SessionsPath;
             BatchStorageConnectionStringTextBox.Text = "";
@@ -228,6 +232,9 @@ namespace TranslationToolUI.Views
 
             ExportSrtCheckBox.IsChecked = _config.ExportSrtSubtitles;
             ExportVttCheckBox.IsChecked = _config.ExportVttSubtitles;
+
+            // 默认字号
+            SelectFontSizeComboBox(_config.DefaultFontSize);
 
             SessionDirectoryTextBox.Text = _config.SessionDirectory;
             BatchStorageConnectionStringTextBox.Text = _config.BatchStorageConnectionString;
@@ -931,15 +938,8 @@ namespace TranslationToolUI.Views
             SubscriptionNameTextBox.Text = subscription.Name;
             SubscriptionKeyTextBox.Text = subscription.SubscriptionKey;
 
-            for (var i = 0; i < RegionComboBox.Items.Count; i++)
-            {
-                if (RegionComboBox.Items[i] is ComboBoxItem item &&
-                    item.Tag?.ToString() == subscription.ServiceRegion)
-                {
-                    RegionComboBox.SelectedIndex = i;
-                    break;
-                }
-            }
+            EndpointTextBox.Text = subscription.GetEffectiveEndpoint();
+            UpdateEndpointParsedRegionDisplay();
         }
 
         private async void AddButton_Click(object? sender, RoutedEventArgs e)
@@ -957,9 +957,15 @@ namespace TranslationToolUI.Views
             try
             {
                 var subscriptionKey = SubscriptionKeyTextBox.Text.Trim();
-                var region = (RegionComboBox.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "southeastasia";
+                var endpoint = EndpointTextBox.Text?.Trim() ?? "";
+                var region = AzureSubscription.ParseRegionFromEndpoint(endpoint);
+                if (string.IsNullOrWhiteSpace(region))
+                {
+                    ShowMessage("无法从终结点解析区域，请检查格式。\n示例: https://southeastasia.api.cognitive.microsoft.com/");
+                    return;
+                }
 
-                var (isValid, message) = await ValidateAzureSubscriptionAsync(subscriptionKey, region);
+                var (isValid, message) = await ValidateAzureSubscriptionAsync(subscriptionKey, region, endpoint);
 
                 if (!isValid)
                 {
@@ -971,7 +977,8 @@ namespace TranslationToolUI.Views
                 {
                     Name = SubscriptionNameTextBox.Text.Trim(),
                     SubscriptionKey = subscriptionKey,
-                    ServiceRegion = region
+                    ServiceRegion = region,
+                    Endpoint = endpoint
                 };
                 _subscriptions.Add(newSubscription);
                 ForceUpdateListBoxSelection(_subscriptions.Count - 1);
@@ -1010,9 +1017,15 @@ namespace TranslationToolUI.Views
             try
             {
                 var subscriptionKey = SubscriptionKeyTextBox.Text.Trim();
-                var region = (RegionComboBox.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "southeastasia";
+                var endpoint = EndpointTextBox.Text?.Trim() ?? "";
+                var region = AzureSubscription.ParseRegionFromEndpoint(endpoint);
+                if (string.IsNullOrWhiteSpace(region))
+                {
+                    ShowMessage("无法从终结点解析区域，请检查格式。");
+                    return;
+                }
 
-                var (isValid, message) = await ValidateAzureSubscriptionAsync(subscriptionKey, region);
+                var (isValid, message) = await ValidateAzureSubscriptionAsync(subscriptionKey, region, endpoint);
 
                 if (!isValid)
                 {
@@ -1022,6 +1035,7 @@ namespace TranslationToolUI.Views
                 _selectedSubscription.Name = SubscriptionNameTextBox.Text.Trim();
                 _selectedSubscription.SubscriptionKey = subscriptionKey;
                 _selectedSubscription.ServiceRegion = region;
+                _selectedSubscription.Endpoint = endpoint;
 
                 var selectedIndex = SubscriptionListBox.SelectedIndex;
                 SubscriptionListBox.ItemsSource = null;
@@ -1065,10 +1079,16 @@ namespace TranslationToolUI.Views
 
             try
             {
-                var region = (RegionComboBox.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "southeastasia";
+                var endpoint = EndpointTextBox.Text?.Trim() ?? "";
+                var region = AzureSubscription.ParseRegionFromEndpoint(endpoint);
+                if (string.IsNullOrWhiteSpace(region))
+                {
+                    ShowMessage("无法从终结点解析区域，请检查格式。");
+                    return;
+                }
                 var subscriptionKey = SubscriptionKeyTextBox.Text.Trim();
 
-                var (isValid, message) = await ValidateAzureSubscriptionAsync(subscriptionKey, region);
+                var (isValid, message) = await ValidateAzureSubscriptionAsync(subscriptionKey, region, endpoint);
 
                 if (isValid)
                 {
@@ -1090,13 +1110,74 @@ namespace TranslationToolUI.Views
             }
         }
 
-        private async Task<(bool IsValid, string Message)> ValidateAzureSubscriptionAsync(string subscriptionKey, string region)
+        private async void TestAllSubscriptionsButton_Click(object? sender, RoutedEventArgs e)
+        {
+            if (_subscriptions.Count == 0)
+            {
+                ShowMessage("订阅列表为空，请先添加订阅");
+                return;
+            }
+
+            TestAllSubscriptionsButton.IsEnabled = false;
+            TestAllSubscriptionsButton.Content = "测试中...";
+            TestAllResultTextBlock.Text = "正在测试所有订阅...";
+            TestAllResultTextBlock.IsVisible = true;
+
+            try
+            {
+                var results = new List<(string Name, string Region, bool IsValid, long ElapsedMs, string Message)>();
+
+                foreach (var sub in _subscriptions)
+                {
+                    var sw = System.Diagnostics.Stopwatch.StartNew();
+                    var (isValid, message) = await _subscriptionValidator.ValidateAsync(sub, CancellationToken.None);
+                    sw.Stop();
+                    results.Add((sub.Name, sub.ServiceRegion, isValid, sw.ElapsedMilliseconds, message));
+                }
+
+                // Sort by speed (valid first, then by elapsed time)
+                results.Sort((a, b) =>
+                {
+                    if (a.IsValid != b.IsValid) return a.IsValid ? -1 : 1;
+                    return a.ElapsedMs.CompareTo(b.ElapsedMs);
+                });
+
+                var resultText = "测试结果（按速度排序）：\n";
+                foreach (var (name, region, isValid, elapsedMs, message) in results)
+                {
+                    var icon = isValid ? "✓" : "✗";
+                    resultText += $"{icon} {name} ({region}) — {elapsedMs}ms";
+                    if (!isValid) resultText += $" [{message}]";
+                    resultText += "\n";
+                }
+
+                if (results.Any(r => r.IsValid))
+                {
+                    var fastest = results.First(r => r.IsValid);
+                    resultText += $"\n🏆 最快: {fastest.Name} ({fastest.Region}) — {fastest.ElapsedMs}ms";
+                }
+
+                TestAllResultTextBlock.Text = resultText.TrimEnd();
+            }
+            catch (Exception ex)
+            {
+                TestAllResultTextBlock.Text = $"测试失败: {ex.Message}";
+            }
+            finally
+            {
+                TestAllSubscriptionsButton.IsEnabled = true;
+                TestAllSubscriptionsButton.Content = "全部测试速度";
+            }
+        }
+
+        private async Task<(bool IsValid, string Message)> ValidateAzureSubscriptionAsync(string subscriptionKey, string region, string endpoint = "")
         {
             var subscription = new AzureSubscription
             {
                 Name = "(test)",
                 SubscriptionKey = subscriptionKey?.Trim() ?? "",
-                ServiceRegion = region?.Trim() ?? ""
+                ServiceRegion = region?.Trim() ?? "",
+                Endpoint = endpoint?.Trim() ?? ""
             };
 
             return await _subscriptionValidator.ValidateAsync(subscription, CancellationToken.None);
@@ -1165,7 +1246,8 @@ namespace TranslationToolUI.Views
         {
             SubscriptionNameTextBox.Text = "";
             SubscriptionKeyTextBox.Text = "";
-            RegionComboBox.SelectedIndex = 0;
+            EndpointTextBox.Text = "";
+            EndpointParsedRegionTextBlock.Text = "";
         }
 
         private void ShowMessage(string message)
@@ -1243,14 +1325,15 @@ namespace TranslationToolUI.Views
 
                 foreach (var subscription in _subscriptions)
                 {
-                    var (isValid, _) = await ValidateAzureSubscriptionAsync(subscription.SubscriptionKey, subscription.ServiceRegion);
+                    var (isValid, _) = await ValidateAzureSubscriptionAsync(
+                        subscription.SubscriptionKey, subscription.GetEffectiveRegion(), subscription.Endpoint);
                     if (isValid)
                     {
                         validSubscriptions.Add(subscription);
                     }
                     else
                     {
-                        invalidSubscriptions += $"• {subscription.Name} ({subscription.ServiceRegion})\n";
+                        invalidSubscriptions += $"• {subscription.Name} ({subscription.GetEffectiveRegion()})\n";
                     }
                 }
 
@@ -1316,6 +1399,9 @@ namespace TranslationToolUI.Views
 
                 _config.ExportSrtSubtitles = ExportSrtCheckBox.IsChecked ?? false;
                 _config.ExportVttSubtitles = ExportVttCheckBox.IsChecked ?? false;
+
+                _config.DefaultFontSize = GetSelectedFontSize();
+                Controls.AdvancedRichTextBox.DefaultFontSizeValue = _config.DefaultFontSize;
 
                 _config.UseSpeechSubtitleForReview = UseSpeechSubtitleForReviewCheckBox.IsChecked ?? false;
 
@@ -1659,6 +1745,54 @@ namespace TranslationToolUI.Views
             {
                 AiTestButton.IsEnabled = true;
                 AiTestButton.Content = "测试连接";
+            }
+        }
+
+        private void SelectFontSizeComboBox(int fontSize)
+        {
+            for (var i = 0; i < DefaultFontSizeComboBox.Items.Count; i++)
+            {
+                if (DefaultFontSizeComboBox.Items[i] is ComboBoxItem item &&
+                    item.Tag?.ToString() == fontSize.ToString())
+                {
+                    DefaultFontSizeComboBox.SelectedIndex = i;
+                    return;
+                }
+            }
+            // Fallback to 38 (index 7)
+            DefaultFontSizeComboBox.SelectedIndex = 7;
+        }
+
+        private int GetSelectedFontSize()
+        {
+            if (DefaultFontSizeComboBox.SelectedItem is ComboBoxItem item &&
+                int.TryParse(item.Tag?.ToString(), out var size))
+            {
+                return size;
+            }
+            return 38;
+        }
+
+        private void UpdateEndpointParsedRegionDisplay()
+        {
+            var endpoint = EndpointTextBox.Text?.Trim() ?? "";
+            if (string.IsNullOrWhiteSpace(endpoint))
+            {
+                EndpointParsedRegionTextBlock.Text = "";
+                return;
+            }
+
+            var region = AzureSubscription.ParseRegionFromEndpoint(endpoint);
+            if (!string.IsNullOrWhiteSpace(region))
+            {
+                var type = endpoint.Contains(".azure.cn", StringComparison.OrdinalIgnoreCase) ? "中国区" : "国际版";
+                EndpointParsedRegionTextBlock.Text = $"✓ 已识别区域: {region} ({type})";
+                EndpointParsedRegionTextBlock.Foreground = Avalonia.Media.Brushes.DarkGreen;
+            }
+            else
+            {
+                EndpointParsedRegionTextBlock.Text = "✗ 无法识别区域，请检查终结点格式";
+                EndpointParsedRegionTextBlock.Foreground = Avalonia.Media.Brushes.Red;
             }
         }
     }

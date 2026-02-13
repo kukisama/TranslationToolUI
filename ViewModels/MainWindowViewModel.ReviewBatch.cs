@@ -2374,7 +2374,7 @@ namespace TranslationToolUI.ViewModels
             BatchSubtitleSplitOptions splitOptions,
             Action<string, string>? onBatchLog = null)
         {
-            var endpoint = $"https://{subscription.ServiceRegion}.api.cognitive.microsoft.com/speechtotext/v3.1/transcriptions";
+            var endpoint = subscription.GetBatchTranscriptionEndpoint();
             var requestBody = new
             {
                 displayName = $"Batch-{DateTime.Now:yyyyMMdd_HHmmss}",
@@ -3035,7 +3035,16 @@ namespace TranslationToolUI.ViewModels
                 throw new FileNotFoundException("未找到音频文件", audioPath);
             }
 
-            var speechConfig = SpeechConfig.FromSubscription(subscription.SubscriptionKey, subscription.ServiceRegion);
+            SpeechConfig speechConfig;
+            if (subscription.IsChinaEndpoint)
+            {
+                var host = new Uri(subscription.GetCognitiveServicesHost());
+                speechConfig = SpeechConfig.FromHost(host, subscription.SubscriptionKey);
+            }
+            else
+            {
+                speechConfig = SpeechConfig.FromSubscription(subscription.SubscriptionKey, subscription.ServiceRegion);
+            }
             speechConfig.SpeechRecognitionLanguage = GetTranscriptionSourceLanguage();
 
             var cues = new List<SubtitleCue>();

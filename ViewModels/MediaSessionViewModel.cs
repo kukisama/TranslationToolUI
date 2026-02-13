@@ -25,6 +25,7 @@ namespace TranslationToolUI.ViewModels
         private readonly Action _onTaskCountChanged;
         private readonly Action<MediaSessionViewModel>? _onRequestSave;
         private CancellationTokenSource _cts = new();
+        private readonly SemaphoreSlim _videoFrameBackfillLock = new(1, 1);
 
         public string SessionId { get; }
 
@@ -622,6 +623,8 @@ namespace TranslationToolUI.ViewModels
                             _onRequestSave?.Invoke(this);
                         }));
 
+                    var frameResult = await VideoFrameExtractorService.TryExtractFirstAndLastFrameAsync(outputPath, ct);
+
                     Dispatcher.UIThread.Post(() =>
                     {
                         task.Status = MediaGenStatus.Completed;
@@ -639,7 +642,18 @@ namespace TranslationToolUI.ViewModels
                         var totalSec = generateSec + downloadSec;
                         loadingMessage.Text = $"✅ 视频已生成（AI生成 {generateSec:F1}s + 下载 {downloadSec:F1}s = 总计 {totalSec:F1}s）";
                         loadingMessage.MediaPaths.Clear();
-                        loadingMessage.MediaPaths.Add(outputPath);
+                        if (!string.IsNullOrWhiteSpace(frameResult.FirstFramePath))
+                        {
+                            loadingMessage.MediaPaths.Add(frameResult.FirstFramePath);
+                        }
+                        if (!string.IsNullOrWhiteSpace(frameResult.LastFramePath))
+                        {
+                            loadingMessage.MediaPaths.Add(frameResult.LastFramePath);
+                        }
+                        if (loadingMessage.MediaPaths.Count == 0)
+                        {
+                            loadingMessage.MediaPaths.Add(outputPath);
+                        }
 
                         RunningTasks.Remove(task);
                         UpdateGeneratingState();
@@ -876,6 +890,8 @@ namespace TranslationToolUI.ViewModels
                         generationId, apiMode);
                     downloadSw.Stop();
 
+                    var frameResult = await VideoFrameExtractorService.TryExtractFirstAndLastFrameAsync(outputPath, ct);
+
                     var genSec = recordedGenSec > 0 ? recordedGenSec : generateSw.Elapsed.TotalSeconds;
                     var dlSec = downloadSw.Elapsed.TotalSeconds;
 
@@ -893,7 +909,18 @@ namespace TranslationToolUI.ViewModels
                         var totalSec = genSec + dlSec;
                         loadingMessage.Text = $"✅ 视频已恢复（等待 {genSec:F1}s + 下载 {dlSec:F1}s = 总计 {totalSec:F1}s）";
                         loadingMessage.MediaPaths.Clear();
-                        loadingMessage.MediaPaths.Add(outputPath);
+                        if (!string.IsNullOrWhiteSpace(frameResult.FirstFramePath))
+                        {
+                            loadingMessage.MediaPaths.Add(frameResult.FirstFramePath);
+                        }
+                        if (!string.IsNullOrWhiteSpace(frameResult.LastFramePath))
+                        {
+                            loadingMessage.MediaPaths.Add(frameResult.LastFramePath);
+                        }
+                        if (loadingMessage.MediaPaths.Count == 0)
+                        {
+                            loadingMessage.MediaPaths.Add(outputPath);
+                        }
 
                         RunningTasks.Remove(task);
                         UpdateGeneratingState();
@@ -951,8 +978,151 @@ namespace TranslationToolUI.ViewModels
             StatusText = "已取消所有任务";
         }
 
+        /// <summary>
+        /// 会话激活时，自动为历史“视频已生成/视频已恢复”消息补齐首帧和尾帧。
+        /// </summary>
+        public async System.Threading.Tasks.Task BackfillVideoFramesForExistingMessagesAsync(CancellationToken cancellationToken = default)
+        {
+            if (!OperatingSystem.IsWindows())
+            {
+                return;
+            }
+
+            if (!await _videoFrameBackfillLock.WaitAsync(0, cancellationToken))
+            {
+                return;
+            }
+
+            try
+            {
+                var candidates = Messages
+                    .Where(IsTargetVideoMessage)
+                    .ToList();
+
+                var changed = false;
+                foreach (var message in candidates)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+
+                    var mediaPaths = message.MediaPaths.ToList();
+                    if (mediaPaths.Count == 0)
+                    {
+                        continue;
+                    }
+
+                    var hasFirst = mediaPaths.Any(VideoFrameExtractorService.IsFirstFrameImagePath);
+                    var hasLast = mediaPaths.Any(VideoFrameExtractorService.IsLastFrameImagePath);
+                    if (hasFirst && hasLast)
+                    {
+                        continue;
+                    }
+
+                    var videoPath = ResolveVideoPathForMessage(mediaPaths);
+                    if (string.IsNullOrWhiteSpace(videoPath) || !File.Exists(videoPath))
+                    {
+                        continue;
+                    }
+
+                    var frameResult = await VideoFrameExtractorService
+                        .TryExtractFirstAndLastFrameAsync(videoPath, cancellationToken)
+                        .ConfigureAwait(false);
+
+                    if (string.IsNullOrWhiteSpace(frameResult.FirstFramePath)
+                        && string.IsNullOrWhiteSpace(frameResult.LastFramePath))
+                    {
+                        continue;
+                    }
+
+                    await Dispatcher.UIThread.InvokeAsync(() =>
+                    {
+                        message.MediaPaths.Clear();
+                        if (!string.IsNullOrWhiteSpace(frameResult.FirstFramePath))
+                        {
+                            message.MediaPaths.Add(frameResult.FirstFramePath);
+                        }
+
+                        if (!string.IsNullOrWhiteSpace(frameResult.LastFramePath))
+                        {
+                            message.MediaPaths.Add(frameResult.LastFramePath);
+                        }
+
+                        if (message.MediaPaths.Count == 0)
+                        {
+                            message.MediaPaths.Add(videoPath);
+                        }
+                    });
+
+                    changed = true;
+                }
+
+                if (changed)
+                {
+                    await Dispatcher.UIThread.InvokeAsync(() => _onRequestSave?.Invoke(this));
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                // 忽略取消
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"历史视频补帧失败: {ex.Message}");
+            }
+            finally
+            {
+                _videoFrameBackfillLock.Release();
+            }
+        }
+
+        private static bool IsTargetVideoMessage(ChatMessageViewModel message)
+        {
+            if (message.Role == "user" || message.IsLoading)
+            {
+                return false;
+            }
+
+            if (message.MediaPaths.Count == 0)
+            {
+                return false;
+            }
+
+            var text = message.Text ?? string.Empty;
+            return text.Contains("视频已生成", StringComparison.Ordinal)
+                || text.Contains("视频已恢复", StringComparison.Ordinal);
+        }
+
+        private static string? ResolveVideoPathForMessage(IReadOnlyList<string> mediaPaths)
+        {
+            foreach (var path in mediaPaths)
+            {
+                if (string.IsNullOrWhiteSpace(path))
+                {
+                    continue;
+                }
+
+                if (Path.GetExtension(path).Equals(".mp4", StringComparison.OrdinalIgnoreCase)
+                    && File.Exists(path))
+                {
+                    return path;
+                }
+
+                if (VideoFrameExtractorService.TryResolveVideoPathFromFirstFrame(path, out var fromFirst)
+                    && File.Exists(fromFirst))
+                {
+                    return fromFirst;
+                }
+            }
+
+            return null;
+        }
+
         private void OpenFile(string? filePath)
         {
+            if (VideoFrameExtractorService.TryResolveVideoPathFromFirstFrame(filePath, out var videoPath))
+            {
+                filePath = videoPath;
+            }
+
             if (string.IsNullOrEmpty(filePath) || !File.Exists(filePath)) return;
 
             try

@@ -54,17 +54,16 @@
                             </StackPanel>
 
                             <StackPanel Spacing="5">
-                                <TextBlock Text="服务区域"/>
-                                <ComboBox x:Name="RegionComboBox">
-                                    <ComboBoxItem Tag="southeastasia" Content="东南亚（新加坡）"/>
-                                    <ComboBoxItem Tag="eastasia" Content="东亚（香港）"/>
-                                    <ComboBoxItem Tag="eastus" Content="美国东部"/>
-                                    <ComboBoxItem Tag="westus" Content="美国西部"/>
-                                    <ComboBoxItem Tag="westeurope" Content="西欧"/>
-                                    <ComboBoxItem Tag="northeurope" Content="北欧"/>
-                                    <ComboBoxItem Tag="japaneast" Content="日本东部"/>
-                                    <ComboBoxItem Tag="koreacentral" Content="韩国中部"/>
-                                </ComboBox>
+                                <TextBlock Text="终结点"/>
+                                <TextBox x:Name="EndpointTextBox"
+                                         Watermark="例如: https://southeastasia.api.cognitive.microsoft.com/"
+                                         MaxWidth="400"
+                                         Width="400"/>
+                                <TextBlock FontSize="10" Foreground="Gray"
+                                           Text="国际版: https://{区域}.api.cognitive.microsoft.com/&#x0a;中国版: https://{区域}.api.cognitive.azure.cn/"
+                                           TextWrapping="Wrap"/>
+                                <TextBlock x:Name="EndpointParsedRegionTextBlock" FontSize="10" Foreground="DarkGreen"
+                                           TextWrapping="Wrap"/>
                             </StackPanel>
 
                             <StackPanel Orientation="Horizontal" Spacing="5" Margin="0,20,0,0">
@@ -72,6 +71,15 @@
                                 <Button x:Name="UpdateButton" Content="更新" Width="60"/>
                                 <Button x:Name="DeleteButton" Content="删除" Width="60"/>
                                 <Button x:Name="SpeechTestButton" Content="测试" Width="60"/>
+                            </StackPanel>
+
+                            <Separator Margin="0,12,0,4"/>
+
+                            <StackPanel Spacing="5">
+                                <Button x:Name="TestAllSubscriptionsButton" Content="全部测试速度" Padding="12,6"/>
+                                <TextBlock FontSize="10" Foreground="Gray" Text="测试所有订阅的接口响应速度，帮助选择最快的终结点" TextWrapping="Wrap"/>
+                                <TextBlock x:Name="TestAllResultTextBlock" FontSize="11" Foreground="Gray"
+                                           TextWrapping="Wrap" IsVisible="False"/>
                             </StackPanel>
                         </StackPanel>
                     </Grid>
@@ -428,6 +436,31 @@
                             <CheckBox x:Name="ExportSrtCheckBox" Content="生成 SRT 字幕" IsChecked="False"/>
                             <CheckBox x:Name="ExportVttCheckBox" Content="生成 VTT 字幕" IsChecked="False"/>
                             <TextBlock FontSize="10" Foreground="Gray" Text="字幕与录音同目录保存，可同时勾选" TextWrapping="Wrap"/>
+                        </StackPanel>
+
+                        <Separator Margin="0,8,0,8"/>
+
+                        <TextBlock Text="实时翻译字号" FontWeight="Bold"/>
+
+                        <StackPanel Spacing="5">
+                            <TextBlock Text="默认字号"/>
+                            <ComboBox x:Name="DefaultFontSizeComboBox" MinWidth="100">
+                                <ComboBoxItem Tag="24" Content="24"/>
+                                <ComboBoxItem Tag="26" Content="26"/>
+                                <ComboBoxItem Tag="28" Content="28"/>
+                                <ComboBoxItem Tag="30" Content="30"/>
+                                <ComboBoxItem Tag="32" Content="32"/>
+                                <ComboBoxItem Tag="34" Content="34"/>
+                                <ComboBoxItem Tag="36" Content="36"/>
+                                <ComboBoxItem Tag="38" Content="38"/>
+                                <ComboBoxItem Tag="40" Content="40"/>
+                                <ComboBoxItem Tag="42" Content="42"/>
+                                <ComboBoxItem Tag="44" Content="44"/>
+                                <ComboBoxItem Tag="46" Content="46"/>
+                                <ComboBoxItem Tag="48" Content="48"/>
+                                <ComboBoxItem Tag="50" Content="50"/>
+                            </ComboBox>
+                            <TextBlock FontSize="10" Foreground="Gray" Text="实时翻译编辑器启动时的默认字号" TextWrapping="Wrap"/>
                         </StackPanel>
                     </StackPanel>
                 </ScrollViewer>

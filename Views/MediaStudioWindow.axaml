@@ -15,6 +15,7 @@
 
     <Window.Resources>
         <controls:FilePathToBitmapConverter x:Key="FilePathToBitmapConverter"/>
+        <controls:FirstFrameBadgeVisibilityConverter x:Key="FirstFrameBadgeVisibilityConverter"/>
     </Window.Resources>
 
     <Window.Styles>
@@ -174,26 +175,46 @@
                                                                     Cursor="Hand"
                                                                     PointerPressed="MediaThumbnail_PointerPressed"
                                                                     Tag="{Binding $parent[ItemsControl].DataContext}">
-                                                                <StackPanel Spacing="4">
-                                                                    <!-- 图片预览 -->
+                                                                <Grid>
+                                                                    <!-- 图片预览（点击即可大图/播放） -->
                                                                     <Image x:Name="PreviewImage"
                                                                            MaxWidth="200" MaxHeight="200"
-                                                                       Stretch="Uniform"
-                                                                       Source="{Binding Converter={StaticResource FilePathToBitmapConverter}}"/>
-                                                                    <!-- 文件路径及按钮 -->
-                                                                    <StackPanel Orientation="Horizontal" Spacing="4"
-                                                                                HorizontalAlignment="Center">
-                                                                        <Button Content="打开" Padding="8,2"
-                                                                                FontSize="11"
-                                                                                Command="{Binding $parent[ItemsControl].DataContext.OpenFileCommand, FallbackValue={x:Null}}"
-                                                                                CommandParameter="{Binding}"/>
-                                                                        <Button Content="大图" Padding="8,2"
-                                                                                FontSize="11"
-                                                                                Click="PreviewLargeImage_Click"
-                                                                        Tag="{Binding $parent[ItemsControl].DataContext}"
-                                                                        CommandParameter="{Binding}"/>
-                                                                    </StackPanel>
-                                                                </StackPanel>
+                                                                           Stretch="Uniform"
+                                                                           Source="{Binding Converter={StaticResource FilePathToBitmapConverter}}"/>
+
+                                                                    <!-- 首帧专属播放提示 -->
+                                                                    <Border HorizontalAlignment="Left"
+                                                                            VerticalAlignment="Top"
+                                                                            Margin="6"
+                                                                            CornerRadius="10"
+                                                                            Padding="10,4"
+                                                                            Background="#CC000000"
+                                                                            IsVisible="{Binding Converter={StaticResource FirstFrameBadgeVisibilityConverter}}">
+                                                                        <TextBlock Text="▶ 播放视频"
+                                                                                   FontSize="13"
+                                                                                   FontWeight="SemiBold"
+                                                                                   Foreground="White"/>
+                                                                    </Border>
+
+                                                                    <!-- 首帧中心播放图示（更大更直观） -->
+                                                                    <Border HorizontalAlignment="Center"
+                                                                            VerticalAlignment="Center"
+                                                                            Width="56"
+                                                                            Height="56"
+                                                                            CornerRadius="28"
+                                                                            Background="#B3000000"
+                                                                            BorderBrush="#E6FFFFFF"
+                                                                            BorderThickness="2"
+                                                                            IsVisible="{Binding Converter={StaticResource FirstFrameBadgeVisibilityConverter}}">
+                                                                        <TextBlock Text="▶"
+                                                                                   FontSize="28"
+                                                                                   FontWeight="Bold"
+                                                                                   Foreground="White"
+                                                                                   HorizontalAlignment="Center"
+                                                                                   VerticalAlignment="Center"
+                                                                                   Margin="2,0,0,0"/>
+                                                                    </Border>
+                                                                </Grid>
                                                             </Border>
                                                         </DataTemplate>
                                                     </ItemsControl.ItemTemplate>

@@ -38,6 +38,10 @@ namespace TranslationToolUI.ViewModels
                 if (SetProperty(ref _currentSession, value))
                 {
                     OnPropertyChanged(nameof(HasCurrentSession));
+                    if (value != null)
+                    {
+                        _ = value.BackfillVideoFramesForExistingMessagesAsync();
+                    }
                 }
             }
         }

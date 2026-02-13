@@ -157,9 +157,8 @@ namespace TranslationToolUI.ViewModels
 
                 if (value)
                 {
-                    IsAudioDeviceSelectionEnabled = false;
+                    // 翻译进行中允许实时切换输入/输出设备，仅禁用刷新
                     IsAudioDeviceRefreshEnabled = false;
-                    IsOutputDeviceSelectionEnabled = false;
                     OnPropertyChanged(nameof(IsInputDeviceUiEnabled));
                     OnPropertyChanged(nameof(IsOutputDeviceUiEnabled));
                 }
@@ -184,6 +183,12 @@ namespace TranslationToolUI.ViewModels
         {
             get => _statusMessage;
             set => SetProperty(ref _statusMessage, value);
+        }
+
+        public string AudioDiagnosticStatus
+        {
+            get => _audioDiagnosticStatus;
+            set => SetProperty(ref _audioDiagnosticStatus, value);
         }
 
         public ObservableCollection<TranslationItem> History
@@ -247,12 +252,13 @@ namespace TranslationToolUI.ViewModels
             {
                 _translationService = new SpeechTranslationService(
                     _config,
-                    message => AppendBatchDebugLog("RecorderStats", message));
+                    AppendAudioStreamAuditLog);
                 _translationService.OnRealtimeTranslationReceived += OnRealtimeTranslationReceived;
                 _translationService.OnFinalTranslationReceived += OnFinalTranslationReceived;
                 _translationService.OnStatusChanged += OnStatusChanged;
                 _translationService.OnReconnectTriggered += OnReconnectTriggered;
                 _translationService.OnAudioLevelUpdated += OnAudioLevelUpdated;
+                _translationService.OnDiagnosticsUpdated += OnDiagnosticsUpdated;
             }
 
             await _translationService.StartTranslationAsync();
@@ -275,6 +281,7 @@ namespace TranslationToolUI.ViewModels
             IsTranslating = false;
             IsConfigurationEnabled = true;
             StatusMessage = "已停止";
+            AudioDiagnosticStatus = "诊断: 已停止";
             AudioLevel = 0;
             ResetAudioLevelHistory();
 
@@ -567,6 +574,25 @@ namespace TranslationToolUI.ViewModels
             {
                 StatusMessage = message;
             });
+        }
+
+        private void OnDiagnosticsUpdated(object? sender, string message)
+        {
+            Dispatcher.UIThread.Post(() =>
+            {
+                AudioDiagnosticStatus = message;
+            });
+        }
+
+        private void AppendAudioStreamAuditLog(string message)
+        {
+            var eventName = message.StartsWith("[翻译流]", StringComparison.Ordinal)
+                ? "翻译流"
+                : message.StartsWith("[录制流]", StringComparison.Ordinal)
+                    ? "录制流"
+                    : "音频流";
+
+            AppendBatchDebugLog(eventName, message);
         }
     }
 }

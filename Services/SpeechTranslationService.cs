@@ -32,6 +32,14 @@ namespace TranslationToolUI.Services
         private AudioConfig? _audioConfig;
         private PushAudioInputStream? _pushStream;
         private WasapiPcm16AudioSource? _naudioSource;
+        private readonly object _audioSourceSwapLock = new();
+        private readonly object _liveRoutingDebounceLock = new();
+        private readonly object _liveRoutingApplyLock = new();
+        private CancellationTokenSource? _liveRoutingDebounceCts;
+        private int _liveRoutingDebouncePendingCount;
+        private int _liveRoutingRequestVersion;
+        private string _recognizeInputDeviceIdInUse = "";
+        private string _recognizeOutputDeviceIdInUse = "";
 
         private HighQualityRecorder? _highQualityRecorder;
         private Task? _pendingTranscodeTask;
@@ -48,7 +56,13 @@ namespace TranslationToolUI.Services
         private Task? _noResponseMonitorTask;
         private DateTime _lastRecognitionUtc = DateTime.MinValue;
         private DateTime _lastAudioActivityUtc = DateTime.MinValue;
+        private DateTime _lastDiagnosticsUtc = DateTime.MinValue;
         private double _smoothedAudioLevel;
+        private bool _lastChunkHadActivity;
+        private bool _recognizeLoopbackEnabled;
+        private bool _recognizeMicEnabled;
+        private bool _recordLoopbackEnabled;
+        private bool _recordMicEnabled;
         private AutoGainProcessor _autoGainProcessor;
 
         public event EventHandler<TranslationItem>? OnRealtimeTranslationReceived;
@@ -56,6 +70,7 @@ namespace TranslationToolUI.Services
         public event EventHandler<string>? OnStatusChanged;
         public event EventHandler<string>? OnReconnectTriggered;
         public event EventHandler<double>? OnAudioLevelUpdated;
+        public event EventHandler<string>? OnDiagnosticsUpdated;
         public SpeechTranslationService(AzureSpeechConfig config, Action<string>? auditLog = null)
         {
             _config = config;
@@ -119,6 +134,7 @@ namespace TranslationToolUI.Services
                 _isTranslating = true;
                 _lastRecognitionUtc = DateTime.UtcNow;
                 _lastAudioActivityUtc = DateTime.UtcNow;
+                PublishDiagnostics(force: true);
                 StartNoResponseMonitor();
 
                 var inputName = GetInputDisplayName();
@@ -142,6 +158,12 @@ namespace TranslationToolUI.Services
             try
             {
                 StopNoResponseMonitor();
+                lock (_liveRoutingDebounceLock)
+                {
+                    _liveRoutingDebounceCts?.Cancel();
+                    _liveRoutingDebounceCts?.Dispose();
+                    _liveRoutingDebounceCts = null;
+                }
                 await _recognizer.StopContinuousRecognitionAsync();
                 _recognizer.Recognized -= OnRecognized;
                 _recognizer.Recognizing -= OnRecognizing;
@@ -153,6 +175,7 @@ namespace TranslationToolUI.Services
                 _recognizer = null;
                 _isTranslating = false;
                 PublishAudioLevel(0);
+                OnDiagnosticsUpdated?.Invoke(this, "诊断: 已停止");
 
                 DisposeSubtitleWriters();
 
@@ -539,6 +562,162 @@ namespace TranslationToolUI.Services
             }
         }
 
+        public bool TryApplyLiveAudioRoutingFromCurrentConfig(int fadeMilliseconds = 30)
+        {
+            if (!_isTranslating || _naudioSource == null)
+            {
+                return false;
+            }
+
+            ScheduleDebouncedLiveRoutingApply(Math.Clamp(fadeMilliseconds, 10, 50));
+            return true;
+        }
+
+        private void ScheduleDebouncedLiveRoutingApply(int fadeMilliseconds)
+        {
+            lock (_liveRoutingDebounceLock)
+            {
+                var hadPending = _liveRoutingDebounceCts != null;
+                var version = ++_liveRoutingRequestVersion;
+                _liveRoutingDebounceCts?.Cancel();
+                _liveRoutingDebounceCts?.Dispose();
+                _liveRoutingDebounceCts = new CancellationTokenSource();
+                var token = _liveRoutingDebounceCts.Token;
+                _liveRoutingDebouncePendingCount = hadPending
+                    ? _liveRoutingDebouncePendingCount + 1
+                    : 1;
+
+                _auditLog?.Invoke($"[翻译流] 实时路由立即应用 次数={_liveRoutingDebouncePendingCount} 淡入毫秒={fadeMilliseconds}");
+
+                _ = Task.Run(async () =>
+                {
+                    if (token.IsCancellationRequested)
+                    {
+                        return;
+                    }
+
+                    ApplyLiveRoutingNow(fadeMilliseconds, version);
+                    await Task.CompletedTask;
+                }, token);
+            }
+        }
+
+        private void ApplyLiveRoutingNow(int fadeMilliseconds, int requestVersion)
+        {
+            if (!_isTranslating || _naudioSource == null)
+            {
+                return;
+            }
+
+            lock (_liveRoutingApplyLock)
+            {
+                if (requestVersion != _liveRoutingRequestVersion)
+                {
+                    _auditLog?.Invoke($"[翻译流] 实时路由应用 已跳过 version={requestVersion} current={_liveRoutingRequestVersion}");
+                    return;
+                }
+
+                try
+                {
+                    var debounceCount = _liveRoutingDebouncePendingCount;
+                    _liveRoutingDebouncePendingCount = 0;
+
+                    var (recLoopback, recMic) = GetRecognitionRouting();
+                    var prevRecLoopback = _recognizeLoopbackEnabled;
+                    var prevRecMic = _recognizeMicEnabled;
+                    _recognizeLoopbackEnabled = recLoopback;
+                    _recognizeMicEnabled = recMic;
+
+                    var inputChanged = recMic && !string.Equals(_recognizeInputDeviceIdInUse, _config.SelectedAudioDeviceId ?? "", StringComparison.Ordinal);
+                    var outputChanged = recLoopback && !string.Equals(_recognizeOutputDeviceIdInUse, _config.SelectedOutputDeviceId ?? "", StringComparison.Ordinal);
+                    var topologyChanged = _naudioSource.HasLoopbackCapture != recLoopback ||
+                                          _naudioSource.HasMicCapture != recMic;
+                    var deviceChanged = inputChanged || outputChanged;
+                    _auditLog?.Invoke($"[翻译流] 实时路由应用 合并次数={debounceCount} 识别目标[回环:{recLoopback},麦:{recMic}] 拓扑变更={topologyChanged} 设备变更={deviceChanged}");
+
+                    if (topologyChanged || deviceChanged)
+                    {
+                        RebuildRecognitionAudioSource(recLoopback, recMic,
+                            topologyChanged ? "拓扑变化" : "设备切换");
+                    }
+                    else
+                    {
+                        _naudioSource.UpdateRouting(recLoopback, recMic, fadeMilliseconds);
+                    }
+
+                    if (prevRecMic != recMic || prevRecLoopback != recLoopback)
+                    {
+                        _auditLog?.Invoke($"[翻译流] 识别切换信号 回环:{prevRecLoopback}->{recLoopback} 麦克风:{prevRecMic}->{recMic}");
+                    }
+
+                    if (_highQualityRecorder != null)
+                    {
+                        var (recordLoopback, recordMic) = GetRecordingRouting();
+                        var prevRecordLoopback = _recordLoopbackEnabled;
+                        var prevRecordMic = _recordMicEnabled;
+                        _recordLoopbackEnabled = recordLoopback;
+                        _recordMicEnabled = recordMic;
+                        _highQualityRecorder.UpdateRouting(recordLoopback, recordMic, fadeMilliseconds);
+
+                        if (prevRecordMic != recordMic || prevRecordLoopback != recordLoopback)
+                        {
+                            _auditLog?.Invoke($"[录制流] 录制切换信号 回环:{prevRecordLoopback}->{recordLoopback} 麦克风:{prevRecordMic}->{recordMic}");
+                        }
+                    }
+
+                    OnStatusChanged?.Invoke(this,
+                        $"已热切换音频路由：识别(回环={(recLoopback ? "开" : "关")},麦克风={(recMic ? "开" : "关")})");
+                    PublishDiagnostics(force: true);
+                }
+                catch (Exception ex)
+                {
+                    OnStatusChanged?.Invoke(this, $"音频热切换失败: {ex.Message}");
+                }
+            }
+        }
+
+        private void RebuildRecognitionAudioSource(bool enableLoopback, bool enableMic, string reason)
+        {
+            lock (_audioSourceSwapLock)
+            {
+                var oldSource = _naudioSource;
+                if (oldSource == null)
+                {
+                    return;
+                }
+
+                var newSource = new WasapiPcm16AudioSource(
+                    _config.SelectedOutputDeviceId,
+                    _config.SelectedAudioDeviceId,
+                    _config.ChunkDurationMs,
+                    enableLoopback,
+                    enableMic);
+
+                _auditLog?.Invoke($"[翻译流] 识别热重建 开始 原因={reason} 目标[回环:{enableLoopback},麦:{enableMic}] 旧拓扑[回环:{oldSource.HasLoopbackCapture},麦:{oldSource.HasMicCapture}] 输入设备ID='{_config.SelectedAudioDeviceId}' 输出设备ID='{_config.SelectedOutputDeviceId}'");
+
+                newSource.Pcm16ChunkReady += OnPcm16ChunkReady;
+                newSource.StartAsync().GetAwaiter().GetResult();
+                _recognizeInputDeviceIdInUse = _config.SelectedAudioDeviceId ?? "";
+                _recognizeOutputDeviceIdInUse = _config.SelectedOutputDeviceId ?? "";
+
+                _naudioSource = newSource;
+
+                try
+                {
+                    oldSource.Pcm16ChunkReady -= OnPcm16ChunkReady;
+                    oldSource.DisposeAsync().AsTask().GetAwaiter().GetResult();
+                }
+                catch
+                {
+                    // ignore old source disposal failures
+                }
+
+                _auditLog?.Invoke($"[翻译流] 识别热重建 完成 新拓扑[回环:{newSource.HasLoopbackCapture},麦:{newSource.HasMicCapture}]");
+                OnStatusChanged?.Invoke(this,
+                    $"识别采集已实时切换：回环={(enableLoopback ? "开" : "关")}, 麦克风={(enableMic ? "开" : "关")}");
+            }
+        }
+
         private AudioConfig CreateAudioConfigAndStartSource()
         {
             if (!OperatingSystem.IsWindows())
@@ -555,15 +734,18 @@ namespace TranslationToolUI.Services
             var streamFormat = AudioStreamFormat.GetWaveFormatPCM(16000, 16, 1);
             _pushStream = AudioInputStream.CreatePushStream(streamFormat);
 
-            var mode = _config.AudioSourceMode;
-            var deviceId = mode switch
-            {
-                AudioSourceMode.Loopback => _config.SelectedOutputDeviceId,
-                AudioSourceMode.DefaultMic => null,
-                _ => _config.SelectedAudioDeviceId
-            };
-
-            _naudioSource = new WasapiPcm16AudioSource(mode == AudioSourceMode.DefaultMic ? AudioSourceMode.CaptureDevice : mode, deviceId, _config.ChunkDurationMs);
+            var (recognizeLoopback, recognizeMic) = GetRecognitionRouting();
+            _recognizeLoopbackEnabled = recognizeLoopback;
+            _recognizeMicEnabled = recognizeMic;
+            _auditLog?.Invoke($"[翻译流] 识别路由 音源模式={_config.AudioSourceMode} 输入识别={_config.UseInputForRecognition} 输出识别={_config.UseOutputForRecognition} => 回环={recognizeLoopback} 麦克风={recognizeMic} 输入设备ID='{_config.SelectedAudioDeviceId}' 输出设备ID='{_config.SelectedOutputDeviceId}'");
+            _naudioSource = new WasapiPcm16AudioSource(
+                _config.SelectedOutputDeviceId,
+                _config.SelectedAudioDeviceId,
+                _config.ChunkDurationMs,
+                recognizeLoopback,
+                recognizeMic);
+            _recognizeInputDeviceIdInUse = _config.SelectedAudioDeviceId ?? "";
+            _recognizeOutputDeviceIdInUse = _config.SelectedOutputDeviceId ?? "";
             _naudioSource.Pcm16ChunkReady += OnPcm16ChunkReady;
 
             try
@@ -576,11 +758,15 @@ namespace TranslationToolUI.Services
                     try
                     {
                         var (autoGainEnabled, targetRms, minGain, maxGain, smoothing) = GetAutoGainSettings();
+                        var (recordLoopback, recordMic) = GetRecordingRouting();
+                        _recordLoopbackEnabled = recordLoopback;
+                        _recordMicEnabled = recordMic;
                         _highQualityRecorder = new HighQualityRecorder(
                             _currentAudioMp3Path,
                             _config.SelectedOutputDeviceId,
                             _config.SelectedAudioDeviceId,
-                            _config.RecordingMode,
+                            recordLoopback,
+                            recordMic,
                             _config.RecordingMp3BitrateKbps,
                             autoGainEnabled,
                             targetRms,
@@ -619,9 +805,49 @@ namespace TranslationToolUI.Services
             return AudioConfig.FromStreamInput(_pushStream);
         }
 
+        private (bool enableLoopback, bool enableMic) GetRecognitionRouting()
+        {
+            if (_config.AudioSourceMode == AudioSourceMode.Loopback)
+            {
+                // 用户明确选择环回时，严格只走环回，不做麦克风回退
+                return (true, false);
+            }
+
+            if (_config.AudioSourceMode == AudioSourceMode.DefaultMic)
+            {
+                return (false, true);
+            }
+
+            var enableLoopback = _config.UseOutputForRecognition;
+            var enableMic = _config.UseInputForRecognition;
+
+            return (enableLoopback, enableMic);
+        }
+
+        private (bool enableLoopback, bool enableMic) GetRecordingRouting()
+        {
+            return _config.RecordingMode switch
+            {
+                RecordingMode.LoopbackOnly => (true, false),
+                RecordingMode.LoopbackWithMic => (true, true),
+                _ => (true, true)
+            };
+        }
+
         private SpeechTranslationConfig CreateSpeechConfig()
         {
-            var speechConfig = SpeechTranslationConfig.FromSubscription(_config.SubscriptionKey, _config.ServiceRegion);
+            var activeSubscription = _config.GetActiveSubscription();
+            SpeechTranslationConfig speechConfig;
+
+            if (activeSubscription != null && activeSubscription.IsChinaEndpoint)
+            {
+                var host = new Uri(activeSubscription.GetCognitiveServicesHost());
+                speechConfig = SpeechTranslationConfig.FromHost(host, _config.SubscriptionKey);
+            }
+            else
+            {
+                speechConfig = SpeechTranslationConfig.FromSubscription(_config.SubscriptionKey, _config.ServiceRegion);
+            }
             if (!IsAutoDetectSourceLanguage())
             {
                 speechConfig.SpeechRecognitionLanguage = _config.SourceLanguage;
@@ -667,12 +893,14 @@ namespace TranslationToolUI.Services
                     _autoGainProcessor.ProcessInPlace(chunk, chunk.Length);
                 }
 
-                if (HasAudioActivity(chunk, _config.AudioActivityThreshold))
+                _lastChunkHadActivity = HasAudioActivity(chunk, _config.AudioActivityThreshold);
+                if (_lastChunkHadActivity)
                 {
                     _lastAudioActivityUtc = DateTime.UtcNow;
                 }
                 UpdateAudioLevel(chunk);
                 _pushStream?.Write(chunk);
+                PublishDiagnostics();
             }
             catch
             {
@@ -730,6 +958,31 @@ namespace TranslationToolUI.Services
             OnAudioLevelUpdated?.Invoke(this, Math.Clamp(level, 0, 1));
         }
 
+        private void PublishDiagnostics(bool force = false)
+        {
+            var now = DateTime.UtcNow;
+            if (!force && (now - _lastDiagnosticsUtc).TotalMilliseconds < 400)
+            {
+                return;
+            }
+
+            _lastDiagnosticsUtc = now;
+            var sinceRecognition = _lastRecognitionUtc == DateTime.MinValue
+                ? -1
+                : (int)Math.Max(0, (now - _lastRecognitionUtc).TotalSeconds);
+
+            var recognitionPart = sinceRecognition < 0
+                ? "尚无识别"
+                : $"最近识别:{sinceRecognition}s";
+
+            var message =
+                $"诊断 识别[回环:{(_recognizeLoopbackEnabled ? "开" : "关")},麦:{(_recognizeMicEnabled ? "开" : "关")}] " +
+                $"录制[回环:{(_recordLoopbackEnabled ? "开" : "关")},麦:{(_recordMicEnabled ? "开" : "关")}] " +
+                $"活动:{(_lastChunkHadActivity ? "有" : "无")} 峰值:{_smoothedAudioLevel:F2} {recognitionPart}";
+
+            OnDiagnosticsUpdated?.Invoke(this, message);
+        }
+
         private static bool HasAudioActivity(byte[] chunk, int threshold)
         {
             var sampleThreshold = (short)Math.Clamp(Math.Abs(threshold), 50, 8000);
@@ -777,6 +1030,12 @@ namespace TranslationToolUI.Services
                     var thresholdSeconds = Math.Max(1, _config.NoResponseRestartSeconds);
                     var threshold = TimeSpan.FromSeconds(thresholdSeconds);
                     var now = DateTime.UtcNow;
+
+                    if (now - _lastAudioActivityUtc > threshold)
+                    {
+                        // 静音属于有效输入状态：保持当前路由并继续推流，不做自动回退或重建设备
+                        continue;
+                    }
 
                     if (now - _lastRecognitionUtc < threshold)
                     {

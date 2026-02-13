@@ -283,6 +283,10 @@ namespace TranslationToolUI.ViewModels
 
                     OnPropertyChanged(nameof(IsAiConfigured));
                     OnPropertyChanged(nameof(InsightPresetButtons));
+
+                    // Apply default font size from config
+                    Controls.AdvancedRichTextBox.DefaultFontSizeValue = _config.DefaultFontSize;
+
                     NormalizeSpeechSubtitleOption();
                     OnPropertyChanged(nameof(IsSpeechSubtitleOptionEnabled));
                     OnPropertyChanged(nameof(UseSpeechSubtitleForReview));

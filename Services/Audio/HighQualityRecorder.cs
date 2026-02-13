@@ -13,11 +13,11 @@ namespace TranslationToolUI.Services.Audio
 {
     public sealed class HighQualityRecorder : IAsyncDisposable
     {
-        private readonly RecordingMode _mode;
         private readonly string? _loopbackDeviceId;
         private readonly string? _micDeviceId;
         private readonly string _mp3Path;
         private readonly int _mp3BitrateKbps;
+        private readonly object _mixLock = new();
         private readonly bool _autoGainEnabled;
         private readonly double _autoGainTargetRms;
         private readonly double _autoGainMinGain;
@@ -28,10 +28,20 @@ namespace TranslationToolUI.Services.Audio
         private WasapiCapture? _micCapture;
         private BufferedWaveProvider? _loopbackBuffer;
         private BufferedWaveProvider? _micBuffer;
+        private VolumeSampleProvider? _loopbackVolume;
+        private VolumeSampleProvider? _micVolume;
+        private float _loopbackCurrentVolume;
+        private float _micCurrentVolume;
+        private float _loopbackTargetVolume;
+        private float _micTargetVolume;
+        private bool _loopbackCaptureRunning;
+        private bool _micCaptureRunning;
         private IWaveProvider? _waveProvider;
         private Stream? _writerStream;
         private CancellationTokenSource? _cts;
         private Task? _writerTask;
+        private CancellationTokenSource? _fadeCts;
+        private Task? _fadeTask;
         private readonly AutoResetEvent _dataAvailableEvent = new(false);
         private readonly Action<string>? _log;
         private long _loopbackBytes;
@@ -41,12 +51,15 @@ namespace TranslationToolUI.Services.Audio
         private double _loopbackPeak;
         private double _micPeak;
 
-        public HighQualityRecorder(string mp3Path, string? loopbackDeviceId, string? micDeviceId, RecordingMode mode, int mp3BitrateKbps, bool autoGainEnabled, double autoGainTargetRms, double autoGainMinGain, double autoGainMaxGain, double autoGainSmoothing, Action<string>? log = null)
+        public HighQualityRecorder(string mp3Path, string? loopbackDeviceId, string? micDeviceId, bool enableLoopback, bool enableMic, int mp3BitrateKbps, bool autoGainEnabled, double autoGainTargetRms, double autoGainMinGain, double autoGainMaxGain, double autoGainSmoothing, Action<string>? log = null)
         {
             _mp3Path = mp3Path;
             _loopbackDeviceId = string.IsNullOrWhiteSpace(loopbackDeviceId) ? null : loopbackDeviceId;
             _micDeviceId = string.IsNullOrWhiteSpace(micDeviceId) ? null : micDeviceId;
-            _mode = mode;
+            _loopbackCurrentVolume = enableLoopback ? 1f : 0f;
+            _micCurrentVolume = enableMic ? 1f : 0f;
+            _loopbackTargetVolume = _loopbackCurrentVolume;
+            _micTargetVolume = _micCurrentVolume;
             _mp3BitrateKbps = Math.Clamp(mp3BitrateKbps, 32, 320);
             _autoGainEnabled = autoGainEnabled;
             _autoGainTargetRms = autoGainTargetRms;
@@ -55,6 +68,10 @@ namespace TranslationToolUI.Services.Audio
             _autoGainSmoothing = autoGainSmoothing;
             _log = log;
         }
+
+        public bool HasLoopbackCapture => _loopbackCapture != null;
+
+        public bool HasMicCapture => _micCapture != null;
 
         public Task StartAsync(CancellationToken cancellationToken = default)
         {
@@ -69,58 +86,76 @@ namespace TranslationToolUI.Services.Audio
             }
 
             using var enumerator = new MMDeviceEnumerator();
-            var loopbackDevice = _loopbackDeviceId != null
-                ? enumerator.GetDevice(_loopbackDeviceId)
-                : enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);
+            var loopbackDevice = GetDevice(enumerator, _loopbackDeviceId, DataFlow.Render);
+            var micDevice = GetDevice(enumerator, _micDeviceId, DataFlow.Capture);
 
-            if (loopbackDevice == null)
+            if (loopbackDevice == null && micDevice == null)
             {
-                throw new InvalidOperationException("Unable to resolve loopback device.");
+                throw new InvalidOperationException("Unable to resolve recording device.");
             }
 
-            _loopbackCapture = new WasapiLoopbackCapture(loopbackDevice);
-            _loopbackBuffer = new BufferedWaveProvider(_loopbackCapture.WaveFormat)
+            if (loopbackDevice != null)
             {
-                DiscardOnBufferOverflow = true,
-                BufferDuration = TimeSpan.FromSeconds(5),
+                _loopbackCapture = new WasapiLoopbackCapture(loopbackDevice);
+                _loopbackBuffer = new BufferedWaveProvider(_loopbackCapture.WaveFormat)
+                {
+                    DiscardOnBufferOverflow = true,
+                    BufferDuration = TimeSpan.FromSeconds(5),
+                    ReadFully = true
+                };
+
+                _loopbackCapture.DataAvailable += OnLoopbackDataAvailable;
+                _loopbackCapture.RecordingStopped += OnRecordingStopped;
+            }
+
+            if (micDevice != null)
+            {
+                _micCapture = new WasapiCapture(micDevice);
+                _micBuffer = new BufferedWaveProvider(_micCapture.WaveFormat)
+                {
+                    DiscardOnBufferOverflow = true,
+                    BufferDuration = TimeSpan.FromSeconds(5),
+                    ReadFully = true
+                };
+
+                _micCapture.DataAvailable += OnMicDataAvailable;
+                _micCapture.RecordingStopped += OnRecordingStopped;
+            }
+
+            var targetFormat = _loopbackBuffer?.WaveFormat ?? _micBuffer?.WaveFormat
+                ?? throw new InvalidOperationException("No audio source initialized.");
+
+            var providers = new System.Collections.Generic.List<ISampleProvider>(2);
+
+            if (_loopbackBuffer != null)
+            {
+                var loopbackSample = ConvertToMatch(_loopbackBuffer.ToSampleProvider(), targetFormat);
+                _loopbackVolume = new VolumeSampleProvider(loopbackSample)
+                {
+                    Volume = _loopbackCurrentVolume
+                };
+                providers.Add(_loopbackVolume);
+            }
+
+            if (_micBuffer != null)
+            {
+                var micSample = ConvertToMatch(_micBuffer.ToSampleProvider(), targetFormat);
+                _micVolume = new VolumeSampleProvider(micSample)
+                {
+                    Volume = _micCurrentVolume
+                };
+                providers.Add(_micVolume);
+            }
+
+            if (providers.Count == 0)
+            {
+                throw new InvalidOperationException("No audio source initialized.");
+            }
+
+            ISampleProvider mixedSample = new MixingSampleProvider(providers)
+            {
                 ReadFully = true
             };
-
-            _loopbackCapture.DataAvailable += OnLoopbackDataAvailable;
-            _loopbackCapture.RecordingStopped += OnRecordingStopped;
-
-            ISampleProvider loopbackSample = _loopbackBuffer.ToSampleProvider();
-            var targetFormat = loopbackSample.WaveFormat;
-
-            ISampleProvider? mixedSample = loopbackSample;
-
-            if (_mode == RecordingMode.LoopbackWithMic)
-            {
-                var micDevice = _micDeviceId != null
-                    ? enumerator.GetDevice(_micDeviceId)
-                    : enumerator.GetDefaultAudioEndpoint(DataFlow.Capture, Role.Multimedia);
-
-                if (micDevice != null)
-                {
-                    _micCapture = new WasapiCapture(micDevice);
-                    _micBuffer = new BufferedWaveProvider(_micCapture.WaveFormat)
-                    {
-                        DiscardOnBufferOverflow = true,
-                        BufferDuration = TimeSpan.FromSeconds(5),
-                        ReadFully = true
-                    };
-
-                    _micCapture.DataAvailable += OnMicDataAvailable;
-                    _micCapture.RecordingStopped += OnRecordingStopped;
-
-                    var micSample = ConvertToMatch(_micBuffer.ToSampleProvider(), targetFormat);
-                    var mixer = new MixingSampleProvider(new[] { loopbackSample, micSample })
-                    {
-                        ReadFully = true
-                    };
-                    mixedSample = mixer;
-                }
-            }
 
             if (_autoGainEnabled)
             {
@@ -138,14 +173,37 @@ namespace TranslationToolUI.Services.Audio
             _cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             _writerTask = Task.Run(() => WriterLoop(_cts.Token), CancellationToken.None);
 
-            _loopbackCapture.StartRecording();
-            _micCapture?.StartRecording();
+            if (_loopbackCapture != null && _loopbackCurrentVolume > 0.0001f)
+            {
+                _loopbackCapture.StartRecording();
+                _loopbackCaptureRunning = true;
+            }
 
-            _log?.Invoke($"HqRecorder start mode={_mode} loopbackId='{loopbackDevice.ID}' " +
-                         $"loopbackFmt='{_loopbackCapture.WaveFormat}' micId='{_micDeviceId ?? ""}' " +
-                         $"micFmt='{_micCapture?.WaveFormat}' mp3='{_mp3Path}' bitrate={_mp3BitrateKbps}");
+            if (_micCapture != null && _micCurrentVolume > 0.0001f)
+            {
+                _micCapture.StartRecording();
+                _micCaptureRunning = true;
+            }
+
+            _log?.Invoke($"[录制流] 录制器启动 回环设备ID='{loopbackDevice?.ID ?? ""}' " +
+                         $"回环格式='{_loopbackCapture?.WaveFormat}' 麦克风设备ID='{micDevice?.ID ?? ""}' " +
+                         $"麦克风格式='{_micCapture?.WaveFormat}' 录回环={(_loopbackCurrentVolume > 0.5f)} 录麦={(_micCurrentVolume > 0.5f)} " +
+                         $"输出MP3='{_mp3Path}' 比特率={_mp3BitrateKbps}");
 
             return Task.CompletedTask;
+        }
+
+        public void UpdateRouting(bool enableLoopback, bool enableMic, int fadeMilliseconds = 30)
+        {
+            lock (_mixLock)
+            {
+                _loopbackTargetVolume = enableLoopback ? 1f : 0f;
+                _micTargetVolume = enableMic ? 1f : 0f;
+            }
+
+            TryStartCaptureIfNeeded();
+
+            StartFadeTask(Math.Clamp(fadeMilliseconds, 10, 50));
         }
 
         public async Task StopAsync()
@@ -158,12 +216,14 @@ namespace TranslationToolUI.Services.Audio
 
             cts.Cancel();
             _dataAvailableEvent.Set();
+            _fadeCts?.Cancel();
 
             if (_loopbackCapture != null)
             {
                 try
                 {
                     _loopbackCapture.StopRecording();
+                    _loopbackCaptureRunning = false;
                 }
                 catch
                 {
@@ -176,6 +236,7 @@ namespace TranslationToolUI.Services.Audio
                 try
                 {
                     _micCapture.StopRecording();
+                    _micCaptureRunning = false;
                 }
                 catch
                 {
@@ -188,6 +249,18 @@ namespace TranslationToolUI.Services.Audio
                 try
                 {
                     await _writerTask.ConfigureAwait(false);
+                }
+                catch
+                {
+                    // ignore
+                }
+            }
+
+            if (_fadeTask != null)
+            {
+                try
+                {
+                    await _fadeTask.ConfigureAwait(false);
                 }
                 catch
                 {
@@ -265,13 +338,22 @@ namespace TranslationToolUI.Services.Audio
                 return;
             }
 
-              _log($"HqRecorder bytes loopback={_loopbackBytes} mic={_micBytes} peak={_lastPeak:F4} " +
-                  $"loopPeak={_loopbackPeak:F4} micPeak={_micPeak:F4}");
+              _log($"[录制流] 录制统计 回环字节={_loopbackBytes} 麦字节={_micBytes} 总峰值={_lastPeak:F4} " +
+                  $"回环峰值={_loopbackPeak:F4} 麦峰值={_micPeak:F4}");
             _lastStatsUtc = now;
         }
 
         private void OnRecordingStopped(object? sender, StoppedEventArgs e)
         {
+            if (sender == _loopbackCapture)
+            {
+                _loopbackCaptureRunning = false;
+            }
+            else if (sender == _micCapture)
+            {
+                _micCaptureRunning = false;
+            }
+
             try
             {
                 _dataAvailableEvent.Set();
@@ -430,10 +512,162 @@ namespace TranslationToolUI.Services.Audio
             return sample;
         }
 
+        private static MMDevice? GetDevice(MMDeviceEnumerator enumerator, string? deviceId, DataFlow flow)
+        {
+            try
+            {
+                if (!string.IsNullOrWhiteSpace(deviceId))
+                {
+                    try
+                    {
+                        return enumerator.GetDevice(deviceId);
+                    }
+                    catch
+                    {
+                        // fallback to default endpoint when persisted device id is stale/missing
+                    }
+                }
+
+                return enumerator.GetDefaultAudioEndpoint(flow, Role.Multimedia);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private void StartFadeTask(int fadeMilliseconds)
+        {
+            _fadeCts?.Cancel();
+            _fadeCts?.Dispose();
+            _fadeCts = new CancellationTokenSource();
+            var token = _fadeCts.Token;
+
+            _fadeTask = Task.Run(async () =>
+            {
+                var steps = Math.Max(1, fadeMilliseconds / 10);
+                for (var i = 0; i < steps && !token.IsCancellationRequested; i++)
+                {
+                    lock (_mixLock)
+                    {
+                        _loopbackCurrentVolume = StepVolume(_loopbackCurrentVolume, _loopbackTargetVolume, steps - i);
+                        _micCurrentVolume = StepVolume(_micCurrentVolume, _micTargetVolume, steps - i);
+
+                        if (_loopbackVolume != null)
+                        {
+                            _loopbackVolume.Volume = _loopbackCurrentVolume;
+                        }
+
+                        if (_micVolume != null)
+                        {
+                            _micVolume.Volume = _micCurrentVolume;
+                        }
+                    }
+
+                    try
+                    {
+                        await Task.Delay(10, token).ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        break;
+                    }
+                }
+
+                lock (_mixLock)
+                {
+                    _loopbackCurrentVolume = _loopbackTargetVolume;
+                    _micCurrentVolume = _micTargetVolume;
+
+                    if (_loopbackVolume != null)
+                    {
+                        _loopbackVolume.Volume = _loopbackCurrentVolume;
+                    }
+
+                    if (_micVolume != null)
+                    {
+                        _micVolume.Volume = _micCurrentVolume;
+                    }
+                }
+
+                TryStopCaptureIfMuted();
+            }, token);
+        }
+
+        private void TryStartCaptureIfNeeded()
+        {
+            if (_loopbackCapture != null && !_loopbackCaptureRunning && _loopbackTargetVolume > 0.0001f)
+            {
+                try
+                {
+                    _loopbackCapture.StartRecording();
+                    _loopbackCaptureRunning = true;
+                }
+                catch
+                {
+                    // ignore
+                }
+            }
+
+            if (_micCapture != null && !_micCaptureRunning && _micTargetVolume > 0.0001f)
+            {
+                try
+                {
+                    _micCapture.StartRecording();
+                    _micCaptureRunning = true;
+                }
+                catch
+                {
+                    // ignore
+                }
+            }
+        }
+
+        private void TryStopCaptureIfMuted()
+        {
+            if (_loopbackCapture != null && _loopbackCaptureRunning && _loopbackTargetVolume <= 0.0001f)
+            {
+                try
+                {
+                    _loopbackCapture.StopRecording();
+                    _loopbackCaptureRunning = false;
+                }
+                catch
+                {
+                    // ignore
+                }
+            }
+
+            if (_micCapture != null && _micCaptureRunning && _micTargetVolume <= 0.0001f)
+            {
+                try
+                {
+                    _micCapture.StopRecording();
+                    _micCaptureRunning = false;
+                }
+                catch
+                {
+                    // ignore
+                }
+            }
+        }
+
+        private static float StepVolume(float current, float target, int remainSteps)
+        {
+            if (remainSteps <= 1)
+            {
+                return target;
+            }
+
+            return current + ((target - current) / remainSteps);
+        }
+
         private void Cleanup()
         {
             _cts?.Dispose();
             _cts = null;
+            _fadeCts?.Dispose();
+            _fadeCts = null;
 
             if (_loopbackCapture != null)
             {
@@ -452,10 +686,13 @@ namespace TranslationToolUI.Services.Audio
             }
 
             _writerTask = null;
+            _fadeTask = null;
             _writerStream?.Dispose();
             _writerStream = null;
             _loopbackBuffer = null;
             _micBuffer = null;
+            _loopbackVolume = null;
+            _micVolume = null;
             _waveProvider = null;
         }
     }

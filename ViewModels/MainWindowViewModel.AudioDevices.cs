@@ -59,6 +59,7 @@ namespace TranslationToolUI.ViewModels
                 if (_config.AudioSourceMode != mode)
                 {
                     _config.AudioSourceMode = mode;
+                    LogAudioModeSnapshot("音源模式已切换");
 
                     if (_translationService != null)
                     {
@@ -122,9 +123,9 @@ namespace TranslationToolUI.ViewModels
             set => SetOutputRecognitionEnabled(value);
         }
 
-        public bool IsInputDeviceUiEnabled => IsAudioDeviceSelectionEnabled && IsInputRecognitionEnabled;
+        public bool IsInputDeviceUiEnabled => IsAudioDeviceSelectionEnabled;
 
-        public bool IsOutputDeviceUiEnabled => IsOutputDeviceSelectionEnabled && IsOutputRecognitionEnabled;
+        public bool IsOutputDeviceUiEnabled => IsOutputDeviceSelectionEnabled;
 
         public bool IsAudioDeviceRefreshEnabled
         {
@@ -161,6 +162,8 @@ namespace TranslationToolUI.ViewModels
             AppendBatchDebugLog("InputSelectChange",
                 $"device='{device?.DisplayName ?? ""}' id='{device?.DeviceId ?? ""}' persist={persistSelection} suppress={_suppressDeviceSelectionPersistence}");
 
+            var nextEnabled = device != null && !string.IsNullOrWhiteSpace(device.DeviceId);
+
             if (_suppressDeviceSelectionPersistence && device == null)
             {
                 return;
@@ -181,20 +184,17 @@ namespace TranslationToolUI.ViewModels
                 return;
             }
 
-            var deviceId = device?.DeviceId ?? "";
-            if (_config.SelectedAudioDeviceId != deviceId)
+            var deviceId = nextEnabled ? (device?.DeviceId ?? "") : "";
+            var recognitionChanged = _config.UseInputForRecognition != nextEnabled;
+            var deviceChanged = _config.SelectedAudioDeviceId != deviceId;
+
+            if (recognitionChanged || deviceChanged)
             {
+                _config.UseInputForRecognition = nextEnabled;
                 _config.SelectedAudioDeviceId = deviceId;
+                UpdateRecognitionModeFromToggles();
 
-                if (_translationService != null)
-                {
-                    _translationService.UpdateConfig(_config);
-                }
-
-                if (persistSelection)
-                {
-                    QueueConfigSave("InputDeviceSelected");
-                }
+                QueueConfigSave("InputDeviceSelected");
             }
         }
 
@@ -202,6 +202,8 @@ namespace TranslationToolUI.ViewModels
         {
             AppendBatchDebugLog("OutputSelectChange",
                 $"device='{device?.DisplayName ?? ""}' id='{device?.DeviceId ?? ""}' persist={persistSelection} suppress={_suppressDeviceSelectionPersistence}");
+
+            var nextEnabled = device != null && !string.IsNullOrWhiteSpace(device.DeviceId);
 
             if (_suppressDeviceSelectionPersistence && device == null)
             {
@@ -223,15 +225,15 @@ namespace TranslationToolUI.ViewModels
                 return;
             }
 
-            var deviceId = device?.DeviceId ?? "";
-            if (_config.SelectedOutputDeviceId != deviceId)
-            {
-                _config.SelectedOutputDeviceId = deviceId;
+            var deviceId = nextEnabled ? (device?.DeviceId ?? "") : "";
+            var recognitionChanged = _config.UseOutputForRecognition != nextEnabled;
+            var deviceChanged = _config.SelectedOutputDeviceId != deviceId;
 
-                if (_translationService != null)
-                {
-                    _translationService.UpdateConfig(_config);
-                }
+            if (recognitionChanged || deviceChanged)
+            {
+                _config.UseOutputForRecognition = nextEnabled;
+                _config.SelectedOutputDeviceId = deviceId;
+                UpdateRecognitionModeFromToggles();
 
                 QueueConfigSave("OutputDeviceSelected");
             }
@@ -245,10 +247,18 @@ namespace TranslationToolUI.ViewModels
             }
 
             _config.RecordingMode = mode;
+            LogAudioModeSnapshot("录制模式已切换");
 
-            if (_translationService != null)
+            if (_translationService != null && !IsTranslating)
             {
                 _translationService.UpdateConfig(_config);
+            }
+            else if (_translationService != null && IsTranslating)
+            {
+                var applied = _translationService.TryApplyLiveAudioRoutingFromCurrentConfig();
+                StatusMessage = applied
+                    ? $"录制模式已切换为{(mode == RecordingMode.LoopbackOnly ? "仅环回" : "环回+麦克风")}（已实时生效）"
+                    : $"录制模式已切换为{(mode == RecordingMode.LoopbackOnly ? "仅环回" : "环回+麦克风")}，将在下次启动翻译时生效";
             }
 
             _ = Task.Run(async () => await _configService.SaveConfigAsync(_config));
@@ -263,15 +273,9 @@ namespace TranslationToolUI.ViewModels
                 return;
             }
 
-            if (!enabled && !_config.UseOutputForRecognition)
-            {
-                StatusMessage = "输入与输出不能同时关闭";
-                OnPropertyChanged(nameof(IsInputRecognitionEnabled));
-                return;
-            }
-
             _config.UseInputForRecognition = enabled;
             UpdateRecognitionModeFromToggles();
+            LogAudioModeSnapshot("输入识别开关");
             QueueConfigSave("InputRecognitionToggle");
             OnPropertyChanged(nameof(IsInputRecognitionEnabled));
             OnPropertyChanged(nameof(IsInputDeviceUiEnabled));
@@ -285,15 +289,9 @@ namespace TranslationToolUI.ViewModels
                 return;
             }
 
-            if (!enabled && !_config.UseInputForRecognition)
-            {
-                StatusMessage = "输入与输出不能同时关闭";
-                OnPropertyChanged(nameof(IsOutputRecognitionEnabled));
-                return;
-            }
-
             _config.UseOutputForRecognition = enabled;
             UpdateRecognitionModeFromToggles();
+            LogAudioModeSnapshot("输出识别开关");
             QueueConfigSave("OutputRecognitionToggle");
             OnPropertyChanged(nameof(IsOutputRecognitionEnabled));
             OnPropertyChanged(nameof(IsInputDeviceUiEnabled));
@@ -315,19 +313,52 @@ namespace TranslationToolUI.ViewModels
 
             if (_translationService != null)
             {
-                _translationService.UpdateConfig(_config);
+                if (IsTranslating)
+                {
+                    _translationService.TryApplyLiveAudioRoutingFromCurrentConfig();
+                }
+                else
+                {
+                    _translationService.UpdateConfig(_config);
+                }
             }
+
+            LogAudioModeSnapshot("识别路由已更新");
 
             OnPropertyChanged(nameof(AudioSourceModeIndex));
         }
 
+        private void LogAudioModeSnapshot(string eventName)
+        {
+            AppendBatchDebugLog(eventName,
+                $"音源模式={FormatAudioSourceMode(_config.AudioSourceMode)} 输入识别={(_config.UseInputForRecognition ? "开" : "关")} 输出识别={(_config.UseOutputForRecognition ? "开" : "关")} " +
+                $"录制模式={FormatRecordingMode(_config.RecordingMode)} 翻译中={IsTranslating} " +
+                $"输入设备ID='{_config.SelectedAudioDeviceId}' 输出设备ID='{_config.SelectedOutputDeviceId}'");
+        }
+
+        private static string FormatAudioSourceMode(AudioSourceMode mode)
+        {
+            return mode switch
+            {
+                AudioSourceMode.DefaultMic => "默认麦克风",
+                AudioSourceMode.CaptureDevice => "选择输入设备",
+                AudioSourceMode.Loopback => "系统回环",
+                _ => mode.ToString()
+            };
+        }
+
+        private static string FormatRecordingMode(RecordingMode mode)
+        {
+            return mode switch
+            {
+                RecordingMode.LoopbackOnly => "仅环回",
+                RecordingMode.LoopbackWithMic => "环回+麦克风",
+                _ => mode.ToString()
+            };
+        }
+
         private void NormalizeRecognitionToggles()
         {
-            if (!_config.UseInputForRecognition && !_config.UseOutputForRecognition)
-            {
-                _config.UseInputForRecognition = true;
-            }
-
             UpdateRecognitionModeFromToggles();
         }
 
@@ -365,12 +396,24 @@ namespace TranslationToolUI.ViewModels
                 }
 
                 var inputDevices = AudioDeviceEnumerator.GetActiveDevices(AudioDeviceType.Capture);
+                _audioDevices.Add(new AudioDeviceInfo
+                {
+                    DeviceId = "",
+                    DisplayName = "无",
+                    DeviceType = AudioDeviceType.Capture
+                });
                 foreach (var device in inputDevices)
                 {
                     _audioDevices.Add(device);
                 }
 
                 var outputDevices = AudioDeviceEnumerator.GetActiveDevices(AudioDeviceType.Render);
+                _outputDevices.Add(new AudioDeviceInfo
+                {
+                    DeviceId = "",
+                    DisplayName = "无",
+                    DeviceType = AudioDeviceType.Render
+                });
                 foreach (var device in outputDevices)
                 {
                     _outputDevices.Add(device);
@@ -391,13 +434,13 @@ namespace TranslationToolUI.ViewModels
                 OnPropertyChanged(nameof(IsOutputDeviceUiEnabled));
 
                 var targetInputId = currentInputId;
-                if (string.IsNullOrWhiteSpace(targetInputId)
-                    || _audioDevices.All(d => d.DeviceId != targetInputId))
+                if (!string.IsNullOrWhiteSpace(targetInputId)
+                    && _audioDevices.All(d => d.DeviceId != targetInputId))
                 {
                     targetInputId = AudioDeviceEnumerator.GetDefaultDeviceId(AudioDeviceType.Capture) ?? "";
                     if (string.IsNullOrWhiteSpace(targetInputId))
                     {
-                        targetInputId = _audioDevices.FirstOrDefault()?.DeviceId ?? "";
+                        targetInputId = _audioDevices.FirstOrDefault(d => !string.IsNullOrWhiteSpace(d.DeviceId))?.DeviceId ?? "";
                     }
                 }
 
@@ -406,13 +449,13 @@ namespace TranslationToolUI.ViewModels
                 SetSelectedAudioDevice(inputSelection, persistSelection: false);
 
                 var targetOutputId = currentOutputId;
-                if (string.IsNullOrWhiteSpace(targetOutputId)
-                    || _outputDevices.All(d => d.DeviceId != targetOutputId))
+                if (!string.IsNullOrWhiteSpace(targetOutputId)
+                    && _outputDevices.All(d => d.DeviceId != targetOutputId))
                 {
                     targetOutputId = AudioDeviceEnumerator.GetDefaultDeviceId(AudioDeviceType.Render) ?? "";
                     if (string.IsNullOrWhiteSpace(targetOutputId))
                     {
-                        targetOutputId = _outputDevices.FirstOrDefault()?.DeviceId ?? "";
+                        targetOutputId = _outputDevices.FirstOrDefault(d => !string.IsNullOrWhiteSpace(d.DeviceId))?.DeviceId ?? "";
                     }
                 }
 

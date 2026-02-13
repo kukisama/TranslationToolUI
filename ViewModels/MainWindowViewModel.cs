@@ -43,6 +43,7 @@ namespace TranslationToolUI.ViewModels
         private AzureSpeechConfig _config;
         private bool _isTranslating = false;
         private string _statusMessage = "就绪";
+        private string _audioDiagnosticStatus = "诊断: 未启动";
         private string _currentOriginal = "";
         private string _currentTranslated = "";
         private ObservableCollection<TranslationItem> _history;

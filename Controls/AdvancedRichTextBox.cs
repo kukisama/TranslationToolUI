@@ -18,6 +18,9 @@ namespace TranslationToolUI.Controls
    
         private ComboBox _fontSizeCombo = null!;
 
+        /// <summary>默认字号，可从配置加载</summary>
+        public static int DefaultFontSizeValue { get; set; } = 38;
+
         public new event PropertyChangedEventHandler? PropertyChanged;
 
         public static readonly StyledProperty<string> TextProperty =
@@ -48,7 +51,7 @@ namespace TranslationToolUI.Controls
             {
                 Background = new SolidColorBrush(Color.FromRgb(255, 255, 255)),
                 FontFamily = new FontFamily("Consolas, 'Courier New', monospace"),
-                FontSize = 14,
+                FontSize = DefaultFontSizeValue,
                 ShowLineNumbers = false,
                 WordWrap = true,
                 MinHeight = 200,
@@ -128,8 +131,8 @@ namespace TranslationToolUI.Controls
                 Width = 60,
                 Height = 25,
                 VerticalAlignment = VerticalAlignment.Center,
-                ItemsSource = new[] { "10", "12", "14", "16", "18", "20", "22", "24", "26", "28", "30", "32", "34", "36", "38" },
-                SelectedItem = "14"
+                ItemsSource = new[] { "24", "26", "28", "30", "32", "34", "36", "38", "40", "42", "44", "46", "48", "50" },
+                SelectedItem = DefaultFontSizeValue.ToString()
             };
             _fontSizeCombo.SelectionChanged += OnFontSizeChanged;
             _toolbar.Children.Add(_fontSizeCombo);

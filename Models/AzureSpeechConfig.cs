@@ -26,11 +26,85 @@ namespace TranslationToolUI.Models
         public string Name { get; set; } = "";
         public string SubscriptionKey { get; set; } = "";
         public string ServiceRegion { get; set; } = "southeastasia";
+        public string Endpoint { get; set; } = "";
 
         public bool IsValid()
         {
             return !string.IsNullOrEmpty(SubscriptionKey) &&
-                   !string.IsNullOrEmpty(ServiceRegion);
+                   !string.IsNullOrEmpty(GetEffectiveRegion());
+        }
+
+        /// <summary>Get region from Endpoint, or fallback to ServiceRegion</summary>
+        public string GetEffectiveRegion()
+        {
+            if (!string.IsNullOrWhiteSpace(Endpoint))
+            {
+                var parsed = ParseRegionFromEndpoint(Endpoint);
+                if (!string.IsNullOrWhiteSpace(parsed)) return parsed;
+            }
+            return ServiceRegion;
+        }
+
+        /// <summary>Get the stored endpoint, or construct one from ServiceRegion for backward compat</summary>
+        public string GetEffectiveEndpoint()
+        {
+            if (!string.IsNullOrWhiteSpace(Endpoint))
+                return Endpoint.TrimEnd('/');
+            return $"https://{ServiceRegion}.api.cognitive.microsoft.com";
+        }
+
+        /// <summary>Whether this is a China Azure endpoint (.azure.cn)</summary>
+        [System.Text.Json.Serialization.JsonIgnore]
+        public bool IsChinaEndpoint => GetEffectiveEndpoint().Contains(".azure.cn", StringComparison.OrdinalIgnoreCase);
+
+        /// <summary>Get the cognitive services host base URL</summary>
+        public string GetCognitiveServicesHost()
+        {
+            var region = GetEffectiveRegion();
+            if (IsChinaEndpoint)
+                return $"https://{region}.api.cognitive.azure.cn";
+            return $"https://{region}.api.cognitive.microsoft.com";
+        }
+
+        /// <summary>Get the token issuing endpoint</summary>
+        public string GetTokenEndpoint()
+        {
+            return $"{GetCognitiveServicesHost()}/sts/v1.0/issueToken";
+        }
+
+        /// <summary>Get the batch transcription API endpoint</summary>
+        public string GetBatchTranscriptionEndpoint()
+        {
+            return $"{GetCognitiveServicesHost()}/speechtotext/v3.1/transcriptions";
+        }
+
+        /// <summary>Parse region from an endpoint URL</summary>
+        public static string? ParseRegionFromEndpoint(string endpoint)
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(endpoint)) return null;
+                endpoint = endpoint.Trim();
+                if (!endpoint.StartsWith("http", StringComparison.OrdinalIgnoreCase))
+                    endpoint = "https://" + endpoint;
+
+                var uri = new Uri(endpoint);
+                var host = uri.Host;
+
+                // Pattern: {region}.api.cognitive.microsoft.com
+                if (host.EndsWith(".api.cognitive.microsoft.com", StringComparison.OrdinalIgnoreCase))
+                    return host.Replace(".api.cognitive.microsoft.com", "", StringComparison.OrdinalIgnoreCase);
+
+                // Pattern: {region}.api.cognitive.azure.cn
+                if (host.EndsWith(".api.cognitive.azure.cn", StringComparison.OrdinalIgnoreCase))
+                    return host.Replace(".api.cognitive.azure.cn", "", StringComparison.OrdinalIgnoreCase);
+
+                return null;
+            }
+            catch
+            {
+                return null;
+            }
         }
     }
 
@@ -77,6 +151,8 @@ namespace TranslationToolUI.Models
 
         public bool ExportSrtSubtitles { get; set; } = false;
         public bool ExportVttSubtitles { get; set; } = false;
+
+        public int DefaultFontSize { get; set; } = 38;
 
         public string? SessionDirectoryOverride { get; set; }
 
@@ -132,7 +208,7 @@ namespace TranslationToolUI.Models
         [JsonIgnore]
         public string ServiceRegion
         {
-            get => GetActiveSubscription()?.ServiceRegion ?? "southeastasia";
+            get => GetActiveSubscription()?.GetEffectiveRegion() ?? "southeastasia";
         }
 
         public bool IsValid()

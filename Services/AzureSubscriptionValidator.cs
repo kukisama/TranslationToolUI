@@ -26,12 +26,13 @@ namespace TranslationToolUI.Services
                 return (false, "订阅密钥为空或长度不正确");
             }
 
-            if (string.IsNullOrWhiteSpace(subscription.ServiceRegion))
+            var region = subscription.GetEffectiveRegion();
+            if (string.IsNullOrWhiteSpace(region))
             {
-                return (false, "服务区域为空");
+                return (false, "无法从终结点解析服务区域");
             }
 
-            var tokenEndpoint = $"https://{subscription.ServiceRegion}.api.cognitive.microsoft.com/sts/v1.0/issueToken";
+            var tokenEndpoint = subscription.GetTokenEndpoint();
 
             using var request = new HttpRequestMessage(HttpMethod.Post, tokenEndpoint)
             {

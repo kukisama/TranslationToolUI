@@ -4,32 +4,59 @@ using System.Threading.Tasks;
 using NAudio.CoreAudioApi;
 using NAudio.Wave;
 using NAudio.Wave.SampleProviders;
-using TranslationToolUI.Models;
 
 namespace TranslationToolUI.Services.Audio
 {
     public sealed class WasapiPcm16AudioSource : IAsyncDisposable
     {
-        private readonly AudioSourceMode _mode;
-        private readonly string? _deviceId;
+        private readonly string? _loopbackDeviceId;
+        private readonly string? _micDeviceId;
         private readonly int _chunkDurationMs;
+        private readonly object _mixLock = new();
 
-        private IWaveIn? _capture;
-        private BufferedWaveProvider? _buffered;
+        private WasapiLoopbackCapture? _loopbackCapture;
+        private WasapiCapture? _micCapture;
+        private BufferedWaveProvider? _loopbackBuffer;
+        private BufferedWaveProvider? _micBuffer;
+
+        private VolumeSampleProvider? _loopbackVolume;
+        private VolumeSampleProvider? _micVolume;
+        private float _loopbackCurrentVolume;
+        private float _micCurrentVolume;
+        private float _loopbackTargetVolume;
+        private float _micTargetVolume;
+
         private IWaveProvider? _pcm16Provider;
         private CancellationTokenSource? _cts;
         private Task? _readerTask;
+        private CancellationTokenSource? _fadeCts;
+        private Task? _fadeTask;
         private readonly AutoResetEvent _dataAvailableEvent = new(false);
+        private bool _silenceOnlyMode;
+        private byte[]? _silenceChunkTemplate;
 
         public WaveFormat OutputWaveFormat { get; } = new WaveFormat(16000, 16, 1);
 
+        public bool HasLoopbackCapture => _loopbackCapture != null;
+
+        public bool HasMicCapture => _micCapture != null;
+
         public event Action<byte[]>? Pcm16ChunkReady;
 
-        public WasapiPcm16AudioSource(AudioSourceMode mode, string? deviceId, int chunkDurationMs)
+        public WasapiPcm16AudioSource(
+            string? loopbackDeviceId,
+            string? micDeviceId,
+            int chunkDurationMs,
+            bool enableLoopback,
+            bool enableMic)
         {
-            _mode = mode;
-            _deviceId = string.IsNullOrWhiteSpace(deviceId) ? null : deviceId;
+            _loopbackDeviceId = string.IsNullOrWhiteSpace(loopbackDeviceId) ? null : loopbackDeviceId;
+            _micDeviceId = string.IsNullOrWhiteSpace(micDeviceId) ? null : micDeviceId;
             _chunkDurationMs = chunkDurationMs <= 0 ? 200 : chunkDurationMs;
+            _loopbackCurrentVolume = enableLoopback ? 1f : 0f;
+            _micCurrentVolume = enableMic ? 1f : 0f;
+            _loopbackTargetVolume = _loopbackCurrentVolume;
+            _micTargetVolume = _micCurrentVolume;
         }
 
         public Task StartAsync(CancellationToken cancellationToken = default)
@@ -44,41 +71,102 @@ namespace TranslationToolUI.Services.Audio
                 throw new PlatformNotSupportedException("NAudio WASAPI is only supported on Windows.");
             }
 
-            var deviceType = _mode == AudioSourceMode.Loopback ? AudioDeviceType.Render : AudioDeviceType.Capture;
             using var enumerator = new MMDeviceEnumerator();
-            var device = _deviceId != null
-                ? enumerator.GetDevice(_deviceId)
-                : enumerator.GetDefaultAudioEndpoint(deviceType == AudioDeviceType.Render ? DataFlow.Render : DataFlow.Capture, Role.Multimedia);
+            var loopbackDevice = GetDevice(enumerator, _loopbackDeviceId, DataFlow.Render);
+            var micDevice = GetDevice(enumerator, _micDeviceId, DataFlow.Capture);
 
-            if (device == null)
+            var wantsLoopback = _loopbackCurrentVolume > 0.0001f;
+            var wantsMic = _micCurrentVolume > 0.0001f;
+
+            if ((wantsLoopback || wantsMic) && loopbackDevice == null && micDevice == null)
             {
                 throw new InvalidOperationException("Unable to resolve audio device.");
             }
 
-            _capture = _mode == AudioSourceMode.Loopback
-                ? new WasapiLoopbackCapture(device)
-                : new WasapiCapture(device);
-
-            _buffered = new BufferedWaveProvider(_capture.WaveFormat)
+            if (loopbackDevice != null && _loopbackCurrentVolume > 0.0001f)
             {
-                DiscardOnBufferOverflow = true,
-                BufferDuration = TimeSpan.FromSeconds(5),
-                ReadFully = false
-            };
+                _loopbackCapture = new WasapiLoopbackCapture(loopbackDevice);
+                _loopbackBuffer = new BufferedWaveProvider(_loopbackCapture.WaveFormat)
+                {
+                    DiscardOnBufferOverflow = true,
+                    BufferDuration = TimeSpan.FromSeconds(5),
+                    ReadFully = true
+                };
 
-            var sampleProvider = _buffered.ToSampleProvider();
-            var monoProvider = ToMono(sampleProvider);
-            var resampled = new WdlResamplingSampleProvider(monoProvider, OutputWaveFormat.SampleRate);
-            _pcm16Provider = new SampleToWaveProvider16(resampled);
+                _loopbackCapture.DataAvailable += OnLoopbackDataAvailable;
+                _loopbackCapture.RecordingStopped += OnRecordingStopped;
+            }
 
-            _capture.DataAvailable += OnDataAvailable;
-            _capture.RecordingStopped += OnRecordingStopped;
+            if (micDevice != null && _micCurrentVolume > 0.0001f)
+            {
+                _micCapture = new WasapiCapture(micDevice);
+                _micBuffer = new BufferedWaveProvider(_micCapture.WaveFormat)
+                {
+                    DiscardOnBufferOverflow = true,
+                    BufferDuration = TimeSpan.FromSeconds(5),
+                    ReadFully = true
+                };
+
+                _micCapture.DataAvailable += OnMicDataAvailable;
+                _micCapture.RecordingStopped += OnRecordingStopped;
+            }
+
+            var providers = new System.Collections.Generic.List<ISampleProvider>(2);
+            if (_loopbackBuffer != null)
+            {
+                var loopbackProvider = ConvertToOutputFormat(_loopbackBuffer.ToSampleProvider());
+                _loopbackVolume = new VolumeSampleProvider(loopbackProvider)
+                {
+                    Volume = _loopbackCurrentVolume
+                };
+                providers.Add(_loopbackVolume);
+            }
+
+            if (_micBuffer != null)
+            {
+                var micProvider = ConvertToOutputFormat(_micBuffer.ToSampleProvider());
+                _micVolume = new VolumeSampleProvider(micProvider)
+                {
+                    Volume = _micCurrentVolume
+                };
+                providers.Add(_micVolume);
+            }
+
+            if (providers.Count == 0)
+            {
+                _silenceOnlyMode = true;
+                _silenceChunkTemplate = new byte[GetChunkByteCount(_chunkDurationMs)];
+                _pcm16Provider = null;
+            }
+            else
+            {
+                _silenceOnlyMode = false;
+                _silenceChunkTemplate = null;
+
+                var mixer = new MixingSampleProvider(providers)
+                {
+                    ReadFully = true
+                };
+                _pcm16Provider = new SampleToWaveProvider16(mixer);
+            }
 
             _cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             _readerTask = Task.Run(() => ReaderLoop(_cts.Token), CancellationToken.None);
 
-            _capture.StartRecording();
+            _loopbackCapture?.StartRecording();
+            _micCapture?.StartRecording();
             return Task.CompletedTask;
+        }
+
+        public void UpdateRouting(bool enableLoopback, bool enableMic, int fadeMilliseconds = 30)
+        {
+            lock (_mixLock)
+            {
+                _loopbackTargetVolume = enableLoopback ? 1f : 0f;
+                _micTargetVolume = enableMic ? 1f : 0f;
+            }
+
+            StartFadeTask(Math.Clamp(fadeMilliseconds, 10, 50));
         }
 
         public async Task StopAsync()
@@ -91,12 +179,25 @@ namespace TranslationToolUI.Services.Audio
 
             cts.Cancel();
             _dataAvailableEvent.Set();
+            _fadeCts?.Cancel();
 
-            if (_capture != null)
+            if (_loopbackCapture != null)
             {
                 try
                 {
-                    _capture.StopRecording();
+                    _loopbackCapture.StopRecording();
+                }
+                catch
+                {
+                    // ignore
+                }
+            }
+
+            if (_micCapture != null)
+            {
+                try
+                {
+                    _micCapture.StopRecording();
                 }
                 catch
                 {
@@ -116,6 +217,18 @@ namespace TranslationToolUI.Services.Audio
                 }
             }
 
+            if (_fadeTask != null)
+            {
+                try
+                {
+                    await _fadeTask.ConfigureAwait(false);
+                }
+                catch
+                {
+                    // ignore
+                }
+            }
+
             Cleanup();
         }
 
@@ -125,14 +238,25 @@ namespace TranslationToolUI.Services.Audio
             _dataAvailableEvent.Dispose();
         }
 
-        private void OnDataAvailable(object? sender, WaveInEventArgs e)
+        private void OnLoopbackDataAvailable(object? sender, WaveInEventArgs e)
         {
-            if (_buffered == null)
+            if (_loopbackBuffer == null)
             {
                 return;
             }
 
-            _buffered.AddSamples(e.Buffer, 0, e.BytesRecorded);
+            _loopbackBuffer.AddSamples(e.Buffer, 0, e.BytesRecorded);
+            _dataAvailableEvent.Set();
+        }
+
+        private void OnMicDataAvailable(object? sender, WaveInEventArgs e)
+        {
+            if (_micBuffer == null)
+            {
+                return;
+            }
+
+            _micBuffer.AddSamples(e.Buffer, 0, e.BytesRecorded);
             _dataAvailableEvent.Set();
         }
 
@@ -143,6 +267,38 @@ namespace TranslationToolUI.Services.Audio
 
         private async Task ReaderLoop(CancellationToken token)
         {
+            if (_silenceOnlyMode)
+            {
+                var template = _silenceChunkTemplate ?? new byte[GetChunkByteCount(_chunkDurationMs)];
+                var stopwatchSilence = System.Diagnostics.Stopwatch.StartNew();
+                var nextDueSilence = TimeSpan.FromMilliseconds(_chunkDurationMs);
+
+                while (!token.IsCancellationRequested)
+                {
+                    var chunk = new byte[template.Length];
+                    Buffer.BlockCopy(template, 0, chunk, 0, template.Length);
+                    Pcm16ChunkReady?.Invoke(chunk);
+
+                    var delaySilence = nextDueSilence - stopwatchSilence.Elapsed;
+                    if (delaySilence > TimeSpan.Zero)
+                    {
+                        try
+                        {
+                            await Task.Delay(delaySilence, token).ConfigureAwait(false);
+                        }
+                        catch (OperationCanceledException)
+                        {
+                            break;
+                        }
+                    }
+
+                    nextDueSilence += TimeSpan.FromMilliseconds(_chunkDurationMs);
+                    await Task.Yield();
+                }
+
+                return;
+            }
+
             if (_pcm16Provider == null)
             {
                 return;
@@ -150,31 +306,80 @@ namespace TranslationToolUI.Services.Audio
 
             var chunkBytes = GetChunkByteCount(_chunkDurationMs);
             var buffer = new byte[chunkBytes];
+            var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+            var nextDue = TimeSpan.FromMilliseconds(_chunkDurationMs);
 
             while (!token.IsCancellationRequested)
             {
                 var filled = 0;
+                var frameDeadline = stopwatch.Elapsed + TimeSpan.FromMilliseconds(_chunkDurationMs);
                 while (filled < buffer.Length && !token.IsCancellationRequested)
                 {
+                    if (!HasBufferedData())
+                    {
+                        var remaining = frameDeadline - stopwatch.Elapsed;
+                        if (remaining <= TimeSpan.Zero)
+                        {
+                            break;
+                        }
+
+                        _dataAvailableEvent.WaitOne(remaining > TimeSpan.FromMilliseconds(50)
+                            ? TimeSpan.FromMilliseconds(50)
+                            : remaining);
+                        continue;
+                    }
+
                     var read = _pcm16Provider.Read(buffer, filled, buffer.Length - filled);
                     if (read <= 0)
                     {
-                        _dataAvailableEvent.WaitOne(50);
+                        var remaining = frameDeadline - stopwatch.Elapsed;
+                        if (remaining <= TimeSpan.Zero)
+                        {
+                            break;
+                        }
+
+                        _dataAvailableEvent.WaitOne(remaining > TimeSpan.FromMilliseconds(20)
+                            ? TimeSpan.FromMilliseconds(20)
+                            : remaining);
                         continue;
                     }
 
                     filled += read;
                 }
 
-                if (filled == buffer.Length)
+                if (filled < buffer.Length)
                 {
-                    var chunk = new byte[buffer.Length];
-                    Buffer.BlockCopy(buffer, 0, chunk, 0, buffer.Length);
-                    Pcm16ChunkReady?.Invoke(chunk);
+                    Array.Clear(buffer, filled, buffer.Length - filled);
                 }
+
+                var chunk = new byte[buffer.Length];
+                Buffer.BlockCopy(buffer, 0, chunk, 0, buffer.Length);
+                Pcm16ChunkReady?.Invoke(chunk);
+
+                var delay = nextDue - stopwatch.Elapsed;
+                if (delay > TimeSpan.Zero)
+                {
+                    try
+                    {
+                        await Task.Delay(delay, token).ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        break;
+                    }
+                }
+
+                nextDue += TimeSpan.FromMilliseconds(_chunkDurationMs);
 
                 await Task.Yield();
             }
+        }
+
+        private bool HasBufferedData()
+        {
+            var loopbackBuffered = _loopbackBuffer?.BufferedBytes ?? 0;
+            var micBuffered = _micBuffer?.BufferedBytes ?? 0;
+            return loopbackBuffered > 0 || micBuffered > 0;
         }
 
         private int GetChunkByteCount(int chunkDurationMs)
@@ -188,6 +393,17 @@ namespace TranslationToolUI.Services.Audio
             }
 
             return Math.Max(align, bytes - (bytes % align));
+        }
+
+        private ISampleProvider ConvertToOutputFormat(ISampleProvider provider)
+        {
+            var mono = ToMono(provider);
+            if (mono.WaveFormat.SampleRate == OutputWaveFormat.SampleRate)
+            {
+                return mono;
+            }
+
+            return new WdlResamplingSampleProvider(mono, OutputWaveFormat.SampleRate);
         }
 
         private static ISampleProvider ToMono(ISampleProvider provider)
@@ -211,22 +427,126 @@ namespace TranslationToolUI.Services.Audio
             return mux;
         }
 
+        private static MMDevice? GetDevice(MMDeviceEnumerator enumerator, string? deviceId, DataFlow flow)
+        {
+            try
+            {
+                if (!string.IsNullOrWhiteSpace(deviceId))
+                {
+                    try
+                    {
+                        return enumerator.GetDevice(deviceId);
+                    }
+                    catch
+                    {
+                        // fallback to default endpoint when persisted device id is stale/missing
+                    }
+                }
+
+                return enumerator.GetDefaultAudioEndpoint(flow, Role.Multimedia);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private void StartFadeTask(int fadeMilliseconds)
+        {
+            _fadeCts?.Cancel();
+            _fadeCts?.Dispose();
+            _fadeCts = new CancellationTokenSource();
+            var token = _fadeCts.Token;
+
+            _fadeTask = Task.Run(async () =>
+            {
+                var steps = Math.Max(1, fadeMilliseconds / 10);
+                for (var i = 0; i < steps && !token.IsCancellationRequested; i++)
+                {
+                    lock (_mixLock)
+                    {
+                        _loopbackCurrentVolume = StepVolume(_loopbackCurrentVolume, _loopbackTargetVolume, steps - i);
+                        _micCurrentVolume = StepVolume(_micCurrentVolume, _micTargetVolume, steps - i);
+                        if (_loopbackVolume != null)
+                        {
+                            _loopbackVolume.Volume = _loopbackCurrentVolume;
+                        }
+
+                        if (_micVolume != null)
+                        {
+                            _micVolume.Volume = _micCurrentVolume;
+                        }
+                    }
+
+                    try
+                    {
+                        await Task.Delay(10, token).ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        break;
+                    }
+                }
+
+                lock (_mixLock)
+                {
+                    _loopbackCurrentVolume = _loopbackTargetVolume;
+                    _micCurrentVolume = _micTargetVolume;
+                    if (_loopbackVolume != null)
+                    {
+                        _loopbackVolume.Volume = _loopbackCurrentVolume;
+                    }
+
+                    if (_micVolume != null)
+                    {
+                        _micVolume.Volume = _micCurrentVolume;
+                    }
+                }
+            }, token);
+        }
+
+        private static float StepVolume(float current, float target, int remainSteps)
+        {
+            if (remainSteps <= 1)
+            {
+                return target;
+            }
+
+            return current + ((target - current) / remainSteps);
+        }
+
         private void Cleanup()
         {
             _cts?.Dispose();
             _cts = null;
+            _fadeCts?.Dispose();
+            _fadeCts = null;
 
-            if (_capture != null)
+            if (_loopbackCapture != null)
             {
-                _capture.DataAvailable -= OnDataAvailable;
-                _capture.RecordingStopped -= OnRecordingStopped;
-                _capture.Dispose();
-                _capture = null;
+                _loopbackCapture.DataAvailable -= OnLoopbackDataAvailable;
+                _loopbackCapture.RecordingStopped -= OnRecordingStopped;
+                _loopbackCapture.Dispose();
+                _loopbackCapture = null;
+            }
+
+            if (_micCapture != null)
+            {
+                _micCapture.DataAvailable -= OnMicDataAvailable;
+                _micCapture.RecordingStopped -= OnRecordingStopped;
+                _micCapture.Dispose();
+                _micCapture = null;
             }
 
             _readerTask = null;
-            _buffered = null;
+            _fadeTask = null;
+            _loopbackBuffer = null;
+            _micBuffer = null;
+            _loopbackVolume = null;
+            _micVolume = null;
             _pcm16Provider = null;
+            _silenceOnlyMode = false;
+            _silenceChunkTemplate = null;
         }
     }
 }

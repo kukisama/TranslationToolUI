@@ -234,25 +234,16 @@ namespace TranslationToolUI.Views
             }
         }
 
-        private void PreviewLargeImage_Click(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
-        {
-            if (sender is Button btn && btn.CommandParameter is string filePath)
-            {
-                if (btn.Tag is ChatMessageViewModel message)
-                {
-                    OpenImagePreview(message.MediaPaths, filePath);
-                }
-                else
-                {
-                    OpenImagePreview(new[] { filePath }, filePath);
-                }
-            }
-        }
-
         private void OpenImagePreview(System.Collections.Generic.IReadOnlyList<string> mediaPaths, string? filePath)
         {
             if (string.IsNullOrEmpty(filePath) || !File.Exists(filePath))
                 return;
+
+            if (VideoFrameExtractorService.TryResolveVideoPathFromFirstFrame(filePath, out var videoPath))
+            {
+                OpenExternalFile(videoPath);
+                return;
+            }
 
             var imagePaths = mediaPaths
                 .Where(IsImageFile)
