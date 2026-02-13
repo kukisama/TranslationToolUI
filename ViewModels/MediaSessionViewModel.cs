@@ -26,6 +26,7 @@ namespace TranslationToolUI.ViewModels
         private readonly Action<MediaSessionViewModel>? _onRequestSave;
         private CancellationTokenSource _cts = new();
         private readonly SemaphoreSlim _videoFrameBackfillLock = new(1, 1);
+        private const int MaxReferenceImageCount = 8;
 
         public string SessionId { get; }
 
@@ -55,6 +56,20 @@ namespace TranslationToolUI.ViewModels
 
         public bool HasBadge => RunningTasks.Count > 0;
 
+        public ObservableCollection<string> ReferenceImagePaths { get; } = new();
+
+        public string? ReferenceImagePath => ReferenceImagePaths.FirstOrDefault();
+
+        public int ReferenceImageCount => ReferenceImagePaths.Count;
+
+        public bool HasReferenceImage => ReferenceImagePaths.Count > 0;
+
+        public bool CanAddMoreReferenceImages => ReferenceImagePaths.Count < MaxReferenceImageCount;
+
+        public bool IsVideoReferenceLimitExceeded => IsVideoMode && ReferenceImagePaths.Count > 1;
+
+        public string VideoReferenceLimitHint => $"Sora 当前仅支持 1 张参考图，已选择 {ReferenceImagePaths.Count} 张";
+
         // --- 输入区 ---
         private string _promptText = "";
         public string PromptText
@@ -77,6 +92,9 @@ namespace TranslationToolUI.ViewModels
                 {
                     OnPropertyChanged(nameof(IsImageMode));
                     OnPropertyChanged(nameof(IsVideoMode));
+                    OnPropertyChanged(nameof(IsVideoReferenceLimitExceeded));
+                    OnPropertyChanged(nameof(VideoReferenceLimitHint));
+                    ((RelayCommand)GenerateCommand).RaiseCanExecuteChanged();
                 }
             }
         }
@@ -178,6 +196,7 @@ namespace TranslationToolUI.ViewModels
         public ICommand CancelCommand { get; }
         public ICommand OpenFileCommand { get; }
         public ICommand DeleteMessageCommand { get; }
+        public ICommand RemoveReferenceImageCommand { get; }
 
         // --- 参数选项 ---
         public List<string> ImageSizeOptions { get; } = new()
@@ -243,7 +262,7 @@ namespace TranslationToolUI.ViewModels
 
             GenerateCommand = new RelayCommand(
                 _ => Generate(),
-                _ => !IsGenerating && !string.IsNullOrWhiteSpace(PromptText));
+                _ => CanGenerateNow());
 
             CancelCommand = new RelayCommand(
                 _ => CancelAll(),
@@ -255,6 +274,10 @@ namespace TranslationToolUI.ViewModels
             DeleteMessageCommand = new RelayCommand(
                 param => DeleteMessage(param as ChatMessageViewModel),
                 param => param is ChatMessageViewModel m && !m.IsLoading);
+
+            RemoveReferenceImageCommand = new RelayCommand(
+                p => RemoveReferenceImage(p as string),
+                _ => HasReferenceImage);
 
             OverrideImageSize = "1024x1024";
             OverrideImageQuality = "medium";
@@ -275,6 +298,29 @@ namespace TranslationToolUI.ViewModels
                 OnPropertyChanged(nameof(HasBadge));
                 _onTaskCountChanged?.Invoke();
             };
+
+            ReferenceImagePaths.CollectionChanged += (_, _) =>
+            {
+                OnPropertyChanged(nameof(ReferenceImagePath));
+                OnPropertyChanged(nameof(ReferenceImageCount));
+                OnPropertyChanged(nameof(HasReferenceImage));
+                OnPropertyChanged(nameof(CanAddMoreReferenceImages));
+                OnPropertyChanged(nameof(IsVideoReferenceLimitExceeded));
+                OnPropertyChanged(nameof(VideoReferenceLimitHint));
+                (RemoveReferenceImageCommand as RelayCommand)?.RaiseCanExecuteChanged();
+                ((RelayCommand)GenerateCommand).RaiseCanExecuteChanged();
+            };
+        }
+
+        private bool CanGenerateNow()
+        {
+            if (IsGenerating || string.IsNullOrWhiteSpace(PromptText))
+                return false;
+
+            if (IsVideoMode && ReferenceImagePaths.Count > 1)
+                return false;
+
+            return true;
         }
 
         /// <summary>
@@ -416,6 +462,7 @@ namespace TranslationToolUI.ViewModels
                 {
                     var result = await _imageService.GenerateAndSaveImagesAsync(
                         imageConfig, prompt, effectiveConfig, SessionDirectory, ct,
+                        ReferenceImagePaths.ToList(),
                         p => Dispatcher.UIThread.Post(() =>
                         {
                             task.Progress = p;
@@ -451,6 +498,9 @@ namespace TranslationToolUI.ViewModels
                         {
                             loadingMessage.MediaPaths.Add(path);
                         }
+
+                        // 图片生成完成后清空参考图（避免下一次误用）
+                        ClearReferenceImage(silent: true);
 
                         RunningTasks.Remove(task);
                         UpdateGeneratingState();
@@ -577,6 +627,7 @@ namespace TranslationToolUI.ViewModels
                 {
                     var (_, generateSec, downloadSec, downloadUrl) = await _videoService.GenerateVideoAsync(
                         videoConfig, prompt, effectiveConfig, outputPath, ct,
+                        ReferenceImagePath,
                         p => Dispatcher.UIThread.Post(() =>
                         {
                             task.Progress = p;
@@ -976,6 +1027,139 @@ namespace TranslationToolUI.ViewModels
             RunningTasks.Clear();
             IsGenerating = false;
             StatusText = "已取消所有任务";
+        }
+
+        public async System.Threading.Tasks.Task<bool> SetReferenceImageFromFileAsync(string sourcePath, CancellationToken ct = default)
+        {
+            if (string.IsNullOrWhiteSpace(sourcePath) || !File.Exists(sourcePath))
+            {
+                return false;
+            }
+
+            if (!CanAddMoreReferenceImages)
+            {
+                StatusText = $"最多仅支持 {MaxReferenceImageCount} 张参考图";
+                return false;
+            }
+
+            var ext = Path.GetExtension(sourcePath);
+            if (string.IsNullOrWhiteSpace(ext))
+            {
+                ext = ".png";
+            }
+
+            var refsDir = Path.Combine(SessionDirectory, "refs");
+            Directory.CreateDirectory(refsDir);
+
+            var targetPath = Path.Combine(refsDir, $"reference_{Guid.NewGuid():N}{ext}");
+            await using (var source = File.OpenRead(sourcePath))
+            await using (var target = File.Create(targetPath))
+            {
+                await source.CopyToAsync(target, ct);
+            }
+
+            AddReferenceImagePath(targetPath);
+            StatusText = $"已添加参考图（{ReferenceImagePaths.Count}/{MaxReferenceImageCount}）";
+            _onRequestSave?.Invoke(this);
+            return true;
+        }
+
+        public async System.Threading.Tasks.Task<bool> SetReferenceImageFromBytesAsync(byte[] bytes, string extension = ".png", CancellationToken ct = default)
+        {
+            if (bytes == null || bytes.Length == 0)
+            {
+                return false;
+            }
+
+            if (!CanAddMoreReferenceImages)
+            {
+                StatusText = $"最多仅支持 {MaxReferenceImageCount} 张参考图";
+                return false;
+            }
+
+            if (string.IsNullOrWhiteSpace(extension))
+            {
+                extension = ".png";
+            }
+
+            if (!extension.StartsWith('.'))
+            {
+                extension = "." + extension;
+            }
+
+            var refsDir = Path.Combine(SessionDirectory, "refs");
+            Directory.CreateDirectory(refsDir);
+
+            var targetPath = Path.Combine(refsDir, $"reference_{Guid.NewGuid():N}{extension}");
+            await File.WriteAllBytesAsync(targetPath, bytes, ct);
+
+            AddReferenceImagePath(targetPath);
+            StatusText = $"已添加参考图（{ReferenceImagePaths.Count}/{MaxReferenceImageCount}）";
+            _onRequestSave?.Invoke(this);
+            return true;
+        }
+
+        public void ClearReferenceImage(bool silent = false)
+        {
+            DeleteReferenceImageFiles();
+            ReferenceImagePaths.Clear();
+            if (!silent)
+            {
+                StatusText = "已移除参考图";
+            }
+            _onRequestSave?.Invoke(this);
+            (RemoveReferenceImageCommand as RelayCommand)?.RaiseCanExecuteChanged();
+        }
+
+        private void RemoveReferenceImage(string? path)
+        {
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                ClearReferenceImage();
+                return;
+            }
+
+            var existing = ReferenceImagePaths.FirstOrDefault(p => string.Equals(p, path, StringComparison.OrdinalIgnoreCase));
+            if (existing == null)
+                return;
+
+            DeleteReferenceImageFile(existing);
+            ReferenceImagePaths.Remove(existing);
+            StatusText = "已移除参考图";
+            _onRequestSave?.Invoke(this);
+            (RemoveReferenceImageCommand as RelayCommand)?.RaiseCanExecuteChanged();
+        }
+
+        private void AddReferenceImagePath(string path)
+        {
+            if (ReferenceImagePaths.Any(p => string.Equals(p, path, StringComparison.OrdinalIgnoreCase)))
+                return;
+
+            ReferenceImagePaths.Add(path);
+            (RemoveReferenceImageCommand as RelayCommand)?.RaiseCanExecuteChanged();
+        }
+
+        private void DeleteReferenceImageFiles()
+        {
+            foreach (var path in ReferenceImagePaths.ToList())
+            {
+                DeleteReferenceImageFile(path);
+            }
+        }
+
+        private static void DeleteReferenceImageFile(string? path)
+        {
+            try
+            {
+                if (!string.IsNullOrWhiteSpace(path) && File.Exists(path))
+                {
+                    File.Delete(path);
+                }
+            }
+            catch
+            {
+                // ignore cleanup errors
+            }
         }
 
         /// <summary>

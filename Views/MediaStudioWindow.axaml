@@ -53,6 +53,28 @@
             <Setter Property="Foreground" Value="#FF666666"/>
             <Setter Property="Margin" Value="0,0,4,0"/>
         </Style>
+
+        <Style Selector="Grid.ref-anchor Button.ref-remove">
+            <Setter Property="IsVisible" Value="False"/>
+        </Style>
+        <Style Selector="Grid.ref-anchor:pointerover Button.ref-remove">
+            <Setter Property="IsVisible" Value="True"/>
+        </Style>
+        <Style Selector="Button.ref-add">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderBrush" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+        </Style>
+        <Style Selector="Button.ref-add:pointerover">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderBrush" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+        </Style>
+        <Style Selector="Button.ref-add:pressed">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderBrush" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+        </Style>
     </Window.Styles>
 
     <Grid RowDefinitions="Auto,*,Auto">
@@ -116,6 +138,7 @@
 
             <!-- 右侧内容区 -->
             <Grid Grid.Column="2" RowDefinitions="*,Auto"
+                x:Name="SessionContentRoot"
                   DataContext="{Binding CurrentSession}"
                   IsVisible="{Binding $parent[Window].DataContext.HasCurrentSession}">
 
@@ -233,7 +256,7 @@
 
                 <!-- ===== 底部输入区 ===== -->
                 <Border Grid.Row="1" BorderBrush="#FFE0E0E0" BorderThickness="0,1,0,0" Padding="10,8">
-                    <Grid RowDefinitions="Auto,Auto">
+                    <Grid RowDefinitions="Auto,Auto,Auto">
                         <!-- 参数行 -->
                         <StackPanel Grid.Row="0" Orientation="Horizontal" Spacing="10" Margin="0,0,0,6">
                             <!-- 模式切换 -->
@@ -295,15 +318,99 @@
 
                         <!-- 输入行 -->
                         <Grid Grid.Row="1" ColumnDefinitions="*,Auto">
-                            <TextBox Grid.Column="0"
-                                     Text="{Binding PromptText}"
-                                     Watermark="请输入提示词... (Ctrl+Enter 发送)"
-                                     AcceptsReturn="True"
-                                     TextWrapping="Wrap"
-                                     MaxHeight="80"
-                                     MinHeight="38"
-                                     Padding="8,6"
-                                     KeyDown="PromptTextBox_KeyDown"/>
+                            <Grid Grid.Column="0" RowDefinitions="Auto,Auto">
+                                <Border Grid.Row="0"
+                                        BorderBrush="#FFE6E6E6"
+                                        BorderThickness="1"
+                                        CornerRadius="6"
+                                        Padding="6"
+                                        Margin="0,0,0,6"
+                                        IsVisible="{Binding HasReferenceImage}">
+                                    <ScrollViewer HorizontalScrollBarVisibility="Auto"
+                                                  VerticalScrollBarVisibility="Disabled">
+                                        <StackPanel Orientation="Horizontal" Spacing="6">
+                                            <ItemsControl ItemsSource="{Binding ReferenceImagePaths}">
+                                                <ItemsControl.ItemsPanel>
+                                                    <ItemsPanelTemplate>
+                                                        <StackPanel Orientation="Horizontal" Spacing="6"/>
+                                                    </ItemsPanelTemplate>
+                                                </ItemsControl.ItemsPanel>
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <Grid Classes="ref-anchor" Width="52" Height="52">
+                                                            <Border Background="Transparent"
+                                                                    BorderBrush="#FFCCCCCC"
+                                                                    BorderThickness="1"
+                                                                    CornerRadius="4">
+                                                                <Image Stretch="UniformToFill"
+                                                                       Source="{Binding ., Converter={StaticResource FilePathToBitmapConverter}}"/>
+                                                            </Border>
+                                                                <Button Classes="ref-remove"
+                                                                    Width="14"
+                                                                    Height="14"
+                                                                    HorizontalAlignment="Right"
+                                                                    VerticalAlignment="Top"
+                                                                    Margin="0,-5,-5,0"
+                                                                    Padding="0"
+                                                                    FontSize="9"
+                                                                    FontWeight="Bold"
+                                                                    Content="×"
+                                                                    HorizontalContentAlignment="Center"
+                                                                    VerticalContentAlignment="Center"
+                                                                    Background="#CC000000"
+                                                                    Foreground="White"
+                                                                    BorderThickness="0"
+                                                                    CornerRadius="7"
+                                                                    Command="{Binding DataContext.RemoveReferenceImageCommand, ElementName=SessionContentRoot}"
+                                                                    CommandParameter="{Binding .}"
+                                                                    ToolTip.Tip="移除此参考图"/>
+                                                        </Grid>
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+
+                                            <Button Classes="ref-add"
+                                                    IsVisible="{Binding CanAddMoreReferenceImages}"
+                                                    Width="52"
+                                                    Height="52"
+                                                    Padding="0"
+                                                    FontSize="18"
+                                                    Content="＋"
+                                                    Click="AttachReferenceImage_Click"
+                                                    ToolTip.Tip="添加参考图（最多8张，支持 Ctrl+V）"/>
+
+                                            <TextBlock VerticalAlignment="Center"
+                                                       Margin="4,0,0,0"
+                                                       FontSize="11"
+                                                       Foreground="#FF666666"
+                                                       Text="{Binding ReferenceImageCount, StringFormat=参考图: {0}/8}"/>
+                                        </StackPanel>
+                                    </ScrollViewer>
+                                </Border>
+
+                                <Grid Grid.Row="1" ColumnDefinitions="Auto,*" ColumnSpacing="6">
+                                    <Button Grid.Column="0"
+                                            Classes="ref-add"
+                                            IsVisible="{Binding CanAddMoreReferenceImages}"
+                                            Width="36"
+                                            Height="38"
+                                            Padding="0"
+                                            FontSize="16"
+                                            Content="🖼"
+                                            Click="AttachReferenceImage_Click"
+                                            ToolTip.Tip="添加参考图（最多8张，支持 Ctrl+V）"/>
+
+                                    <TextBox x:Name="PromptTextBox"
+                                             Grid.Column="1"
+                                             Text="{Binding PromptText}"
+                                             Watermark="请输入提示词... (Ctrl+Enter 发送，Ctrl+V 可粘贴参考图，最多8张)"
+                                             AcceptsReturn="True"
+                                             TextWrapping="Wrap"
+                                             MaxHeight="80"
+                                             MinHeight="38"
+                                             Padding="8,6"/>
+                                </Grid>
+                            </Grid>
                             <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" Margin="8,0,0,0"
                                         VerticalAlignment="Bottom">
                                 <Button Content="生成" Command="{Binding GenerateCommand}"
@@ -314,6 +421,13 @@
                                         IsVisible="{Binding IsGenerating}"/>
                             </StackPanel>
                         </Grid>
+
+                        <TextBlock Grid.Row="2"
+                                   Margin="42,4,0,0"
+                                   FontSize="12"
+                                   Foreground="#FFE65100"
+                                   IsVisible="{Binding IsVideoReferenceLimitExceeded}"
+                                   Text="{Binding VideoReferenceLimitHint}"/>
                     </Grid>
                 </Border>
             </Grid>

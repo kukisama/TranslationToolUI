@@ -1,11 +1,15 @@
 using System;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
+using Avalonia.Input.Platform;
 using Avalonia.Media.Imaging;
+using Avalonia.Platform.Storage;
 using TranslationToolUI.Models;
 using TranslationToolUI.Services;
 using TranslationToolUI.ViewModels;
@@ -50,6 +54,13 @@ namespace TranslationToolUI.Views
                     _viewModel.CurrentSession.Messages.CollectionChanged += (_, _) => ScrollToBottom();
                 }
             };
+
+            // 在隧道阶段订阅 KeyDown，确保在 TextBox 内部处理 Ctrl+V / Ctrl+Enter 之前拦截
+            var promptTextBox = this.FindControl<TextBox>("PromptTextBox");
+            promptTextBox?.AddHandler(
+                InputElement.KeyDownEvent,
+                PromptTextBox_KeyDown,
+                Avalonia.Interactivity.RoutingStrategies.Tunnel);
         }
 
         private void ScrollToBottom()
@@ -58,8 +69,17 @@ namespace TranslationToolUI.Views
             scrollViewer?.ScrollToEnd();
         }
 
-        private void PromptTextBox_KeyDown(object? sender, KeyEventArgs e)
+        private async void PromptTextBox_KeyDown(object? sender, KeyEventArgs e)
         {
+            if (e.Key == Key.V && e.KeyModifiers.HasFlag(KeyModifiers.Control))
+            {
+                if (await TryAttachReferenceImageFromClipboardAsync())
+                {
+                    e.Handled = true;
+                    return;
+                }
+            }
+
             if (e.Key == Key.Enter && e.KeyModifiers.HasFlag(KeyModifiers.Control))
             {
                 if (_viewModel?.CurrentSession?.GenerateCommand.CanExecute(null) == true)
@@ -69,6 +89,248 @@ namespace TranslationToolUI.Views
                 }
             }
         }
+
+        private async void AttachReferenceImage_Click(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+        {
+            if (_viewModel?.CurrentSession == null)
+            {
+                return;
+            }
+
+            var provider = StorageProvider;
+            if (provider == null)
+            {
+                return;
+            }
+
+            var files = await provider.OpenFilePickerAsync(new FilePickerOpenOptions
+            {
+                Title = "选择参考图",
+                AllowMultiple = true,
+                FileTypeFilter = new[]
+                {
+                    new FilePickerFileType("图片")
+                    {
+                        Patterns = new[] { "*.png", "*.jpg", "*.jpeg", "*.webp", "*.bmp", "*.gif" }
+                    }
+                }
+            });
+
+            if (files == null || files.Count == 0)
+            {
+                return;
+            }
+
+            foreach (var file in files)
+            {
+                var localPath = file.TryGetLocalPath();
+                if (string.IsNullOrWhiteSpace(localPath))
+                {
+                    continue;
+                }
+
+                await _viewModel.CurrentSession.SetReferenceImageFromFileAsync(localPath);
+            }
+        }
+
+        private async Task<bool> TryAttachReferenceImageFromClipboardAsync()
+        {
+            if (_viewModel?.CurrentSession == null)
+            {
+                return false;
+            }
+
+            var clipboard = TopLevel.GetTopLevel(this)?.Clipboard;
+            if (clipboard == null)
+            {
+                return false;
+            }
+
+            // 最佳实践：优先尝试直接读取位图
+            using (var bitmap = await clipboard.TryGetBitmapAsync())
+            {
+                if (bitmap != null)
+                {
+                    var tempPngPath = Path.Combine(Path.GetTempPath(), $"refclip_{Guid.NewGuid():N}.png");
+                    try
+                    {
+                        bitmap.Save(tempPngPath, 100);
+                        return await _viewModel.CurrentSession.SetReferenceImageFromFileAsync(tempPngPath);
+                    }
+                    finally
+                    {
+                        try
+                        {
+                            if (File.Exists(tempPngPath))
+                            {
+                                File.Delete(tempPngPath);
+                            }
+                        }
+                        catch
+                        {
+                            // ignore temp cleanup errors
+                        }
+                    }
+                }
+            }
+
+            // 其次尝试文本（常见为文件路径）
+            var text = await clipboard.TryGetTextAsync();
+            if (!string.IsNullOrWhiteSpace(text))
+            {
+                var candidates = text
+                    .Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
+                    .Select(s => s.Trim().Trim('"'))
+                    .Where(s => !string.IsNullOrWhiteSpace(s))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+
+                var attachedAny = false;
+                foreach (var candidate in candidates)
+                {
+                    if (!File.Exists(candidate) || !IsImageFile(candidate))
+                    {
+                        continue;
+                    }
+
+                    attachedAny |= await _viewModel.CurrentSession.SetReferenceImageFromFileAsync(candidate);
+                }
+
+                if (attachedAny)
+                    return true;
+            }
+
+            if (OperatingSystem.IsWindows())
+            {
+                return await TryAttachReferenceImageFromWindowsClipboardBitmapAsync();
+            }
+
+            return false;
+        }
+
+        private async Task<bool> TryAttachReferenceImageFromWindowsClipboardBitmapAsync()
+        {
+            if (_viewModel?.CurrentSession == null)
+            {
+                return false;
+            }
+
+            IntPtr gdipToken = IntPtr.Zero;
+            IntPtr gdipBitmap = IntPtr.Zero;
+            string? tempPngPath = null;
+
+            try
+            {
+                if (!OpenClipboard(IntPtr.Zero))
+                {
+                    return false;
+                }
+
+                try
+                {
+                    var hBitmap = GetClipboardData(CF_BITMAP);
+                    if (hBitmap == IntPtr.Zero)
+                    {
+                        return false;
+                    }
+
+                    var startupInput = new GdiplusStartupInput { GdiplusVersion = 1 };
+                    if (GdiplusStartup(out gdipToken, ref startupInput, IntPtr.Zero) != 0)
+                    {
+                        return false;
+                    }
+
+                    if (GdipCreateBitmapFromHBITMAP(hBitmap, IntPtr.Zero, out gdipBitmap) != 0)
+                    {
+                        return false;
+                    }
+
+                    tempPngPath = Path.Combine(Path.GetTempPath(), $"refclip_{Guid.NewGuid():N}.png");
+                    var pngEncoderClsid = new Guid("557cf406-1a04-11d3-9a73-0000f81ef32e");
+                    if (GdipSaveImageToFile(gdipBitmap, tempPngPath, ref pngEncoderClsid, IntPtr.Zero) != 0)
+                    {
+                        return false;
+                    }
+                }
+                finally
+                {
+                    CloseClipboard();
+                }
+
+                if (string.IsNullOrWhiteSpace(tempPngPath) || !File.Exists(tempPngPath))
+                {
+                    return false;
+                }
+
+                return await _viewModel.CurrentSession.SetReferenceImageFromFileAsync(tempPngPath);
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"从 Windows 剪贴板读取图片失败: {ex.Message}");
+                return false;
+            }
+            finally
+            {
+                if (gdipBitmap != IntPtr.Zero)
+                {
+                    GdipDisposeImage(gdipBitmap);
+                }
+
+                if (gdipToken != IntPtr.Zero)
+                {
+                    GdiplusShutdown(gdipToken);
+                }
+
+                if (!string.IsNullOrWhiteSpace(tempPngPath))
+                {
+                    try
+                    {
+                        File.Delete(tempPngPath);
+                    }
+                    catch
+                    {
+                        // ignore temp cleanup errors
+                    }
+                }
+            }
+        }
+
+        [DllImport("user32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool OpenClipboard(IntPtr hWndNewOwner);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool CloseClipboard();
+
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern IntPtr GetClipboardData(uint uFormat);
+
+        [DllImport("gdiplus.dll")]
+        private static extern int GdiplusStartup(out IntPtr token, ref GdiplusStartupInput input, IntPtr output);
+
+        [DllImport("gdiplus.dll")]
+        private static extern void GdiplusShutdown(IntPtr token);
+
+        [DllImport("gdiplus.dll")]
+        private static extern int GdipCreateBitmapFromHBITMAP(IntPtr hbm, IntPtr hpal, out IntPtr bitmap);
+
+        [DllImport("gdiplus.dll")]
+        private static extern int GdipDisposeImage(IntPtr image);
+
+        [DllImport("gdiplus.dll", CharSet = CharSet.Unicode)]
+        private static extern int GdipSaveImageToFile(IntPtr image, string filename, ref Guid clsidEncoder, IntPtr encoderParams);
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct GdiplusStartupInput
+        {
+            public uint GdiplusVersion;
+            public IntPtr DebugEventCallback;
+            public int SuppressBackgroundThread;
+            public int SuppressExternalCodecs;
+        }
+
+        private const uint CF_BITMAP = 2;
 
         protected override void OnClosing(WindowClosingEventArgs e)
         {

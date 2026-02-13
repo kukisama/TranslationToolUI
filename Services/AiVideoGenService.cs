@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Net.Http;
 using System.Text;
@@ -304,8 +305,158 @@ namespace TranslationToolUI.Services
 
         /// <summary>
         /// 创建视频生成任务，返回 video_id
+        ///
+        /// OpenAI 官方 sora-2 API（developers.openai.com/api/reference/resources/videos）：
+        ///   POST /v1/videos  (multipart/form-data)
+        ///   参数: prompt(必填), model, seconds, size, input_reference(可选 file)
+        ///
+        /// Azure OpenAI sora-2 也使用 /openai/v1/videos，但文档中 curl 用 JSON。
+        /// Azure sora-1 使用 /openai/v1/video/generations/jobs（JSON）。
         /// </summary>
         public async Task<string> CreateVideoAsync(
+            AiConfig config,
+            string prompt,
+            MediaGenConfig genConfig,
+            string? referenceImagePath,
+            CancellationToken ct)
+        {
+            var hasRefImage = !string.IsNullOrWhiteSpace(referenceImagePath) && File.Exists(referenceImagePath);
+
+            // ── sora-2 (Videos 模式)：使用 multipart/form-data（与 OpenAI 官方一致） ──
+            if (genConfig.VideoApiMode == VideoApiMode.Videos)
+            {
+                return await CreateVideoMultipartAsync(config, prompt, genConfig, referenceImagePath, hasRefImage, ct);
+            }
+
+            // ── sora-1 (SoraJobs 模式)：使用 JSON body ──
+            return await CreateVideoJsonAsync(config, prompt, genConfig, ct);
+        }
+
+        /// <summary>
+        /// sora-2: POST /v1/videos  multipart/form-data
+        /// 严格按照 OpenAI 官方 API 文档：
+        ///   curl https://api.openai.com/v1/videos \
+        ///     -F "model=sora-2" \
+        ///     -F "prompt=..." \
+        ///     -F "input_reference=@image.png"   (可选)
+        /// </summary>
+        private async Task<string> CreateVideoMultipartAsync(
+            AiConfig config,
+            string prompt,
+            MediaGenConfig genConfig,
+            string? referenceImagePath,
+            bool hasRefImage,
+            CancellationToken ct)
+        {
+            var url = BuildVideoCreateUrl(config, VideoApiMode.Videos);
+            var altUrl = (config.ProviderType == AiProviderType.AzureOpenAi)
+                ? RemovePreviewApiVersion(url)
+                : null;
+
+            using var formContent = new MultipartFormDataContent();
+            formContent.Add(new StringContent(genConfig.VideoModel), "model");
+            formContent.Add(new StringContent(prompt), "prompt");
+            formContent.Add(new StringContent($"{genConfig.VideoWidth}x{genConfig.VideoHeight}"), "size");
+            formContent.Add(new StringContent(genConfig.VideoSeconds.ToString()), "seconds");
+
+            // 参考图：官方字段名 input_reference，类型是 file
+            if (hasRefImage)
+            {
+                var imageBytes = await File.ReadAllBytesAsync(referenceImagePath!, ct);
+                var ext = Path.GetExtension(referenceImagePath!).ToLowerInvariant();
+                var mimeType = ext switch
+                {
+                    ".jpg" or ".jpeg" => "image/jpeg",
+                    ".webp" => "image/webp",
+                    ".gif" => "image/gif",
+                    ".bmp" => "image/bmp",
+                    _ => "image/png"
+                };
+                var fileName = Path.GetFileName(referenceImagePath!);
+
+                var imageContent = new ByteArrayContent(imageBytes);
+                imageContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(mimeType);
+                formContent.Add(imageContent, "input_reference", fileName);
+            }
+
+            // 发送 multipart 请求
+            using var request = new HttpRequestMessage(HttpMethod.Post, url);
+            request.Content = formContent;
+            await SetAuthHeadersAsync(request, config, ct);
+
+            var response = await _httpClient.SendAsync(request, ct);
+            var json = await response.Content.ReadAsStringAsync(ct);
+
+#if DEBUG
+            await AppendCreateDebugLogAsync("(create-multipart)", url, response, json, ct);
+#endif
+
+            // 如果 multipart 返回 404/415（Azure 某些版本可能不支持 multipart），回退到 JSON
+            if (!response.IsSuccessStatusCode && (int)response.StatusCode is 404 or 415)
+            {
+                response.Dispose();
+
+                // 回退：尝试不带 api-version 的 URL
+                if (!string.IsNullOrWhiteSpace(altUrl) && !string.Equals(url, altUrl, StringComparison.OrdinalIgnoreCase))
+                {
+                    using var formContent2 = new MultipartFormDataContent();
+                    formContent2.Add(new StringContent(genConfig.VideoModel), "model");
+                    formContent2.Add(new StringContent(prompt), "prompt");
+                    formContent2.Add(new StringContent($"{genConfig.VideoWidth}x{genConfig.VideoHeight}"), "size");
+                    formContent2.Add(new StringContent(genConfig.VideoSeconds.ToString()), "seconds");
+                    if (hasRefImage)
+                    {
+                        var imageBytes2 = await File.ReadAllBytesAsync(referenceImagePath!, ct);
+                        var ext2 = Path.GetExtension(referenceImagePath!).ToLowerInvariant();
+                        var mimeType2 = ext2 switch { ".jpg" or ".jpeg" => "image/jpeg", ".webp" => "image/webp", _ => "image/png" };
+                        var ic2 = new ByteArrayContent(imageBytes2);
+                        ic2.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(mimeType2);
+                        formContent2.Add(ic2, "input_reference", Path.GetFileName(referenceImagePath!));
+                    }
+
+                    using var req2 = new HttpRequestMessage(HttpMethod.Post, altUrl);
+                    req2.Content = formContent2;
+                    await SetAuthHeadersAsync(req2, config, ct);
+                    response = await _httpClient.SendAsync(req2, ct);
+                    json = await response.Content.ReadAsStringAsync(ct);
+
+#if DEBUG
+                    await AppendCreateDebugLogAsync("(create-multipart-alt)", altUrl, response, json, ct);
+#endif
+                }
+
+                // 如果 multipart 还是不行，回退到 JSON（Azure 文档中的 curl 用 JSON）
+                if (!response.IsSuccessStatusCode && (int)response.StatusCode is 404 or 415)
+                {
+                    response.Dispose();
+                    return await CreateVideoJsonAsync(config, prompt, genConfig, ct);
+                }
+            }
+
+            if (!response.IsSuccessStatusCode)
+            {
+                var sc = (int)response.StatusCode;
+                var rp = response.ReasonPhrase;
+                response.Dispose();
+                throw new HttpRequestException($"视频创建失败: {sc} {rp}. {json}");
+            }
+
+            using (response)
+            {
+                using var doc = JsonDocument.Parse(json);
+                if (doc.RootElement.TryGetProperty("id", out var idElem))
+                {
+                    return idElem.GetString() ?? throw new InvalidOperationException("视频 ID 为空");
+                }
+                throw new InvalidOperationException($"无法解析视频 ID，响应: {json}");
+            }
+        }
+
+        /// <summary>
+        /// sora-1 / Azure JSON 回退：POST /v1/video/generations/jobs  或  /v1/videos  (JSON body)
+        /// 此路径不支持参考图（sora-1 官方无参考图 API，Azure JSON 模式也无此字段）。
+        /// </summary>
+        private async Task<string> CreateVideoJsonAsync(
             AiConfig config,
             string prompt,
             MediaGenConfig genConfig,
@@ -316,105 +467,98 @@ namespace TranslationToolUI.Services
                 ? RemovePreviewApiVersion(url)
                 : null;
 
-            object bodyObj;
+            Dictionary<string, object> bodyObj;
             if (config.ProviderType == AiProviderType.AzureOpenAi)
             {
                 if (genConfig.VideoApiMode == VideoApiMode.Videos)
                 {
-                    // /openai/v1/videos 示例：size + seconds
                     var size = $"{genConfig.VideoWidth}x{genConfig.VideoHeight}";
-                    var dict = new System.Collections.Generic.Dictionary<string, object>
+                    var dict = new Dictionary<string, object>
                     {
                         ["model"] = genConfig.VideoModel,
                         ["prompt"] = prompt,
                         ["size"] = size,
                         ["seconds"] = genConfig.VideoSeconds.ToString()
                     };
-
-                    // 某些后端可能支持 n_variants；为兼容起见，仅在 >1 时发送
                     if (genConfig.VideoVariants > 1)
                         dict["n_variants"] = genConfig.VideoVariants;
-
                     bodyObj = dict;
                 }
                 else
                 {
-                    bodyObj = new
+                    bodyObj = new Dictionary<string, object>
                     {
-                        model = genConfig.VideoModel,
-                        prompt = prompt,
-                        height = genConfig.VideoHeight,
-                        width = genConfig.VideoWidth,
-                        n_seconds = genConfig.VideoSeconds,
-                        n_variants = genConfig.VideoVariants
+                        ["model"] = genConfig.VideoModel,
+                        ["prompt"] = prompt,
+                        ["height"] = genConfig.VideoHeight,
+                        ["width"] = genConfig.VideoWidth,
+                        ["n_seconds"] = genConfig.VideoSeconds,
+                        ["n_variants"] = genConfig.VideoVariants
                     };
                 }
             }
             else
             {
                 var size = $"{genConfig.VideoWidth}x{genConfig.VideoHeight}";
-                bodyObj = new
+                bodyObj = new Dictionary<string, object>
                 {
-                    model = genConfig.VideoModel,
-                    prompt = prompt,
-                    size = size,
-                    seconds = genConfig.VideoSeconds.ToString(),
-                    n_variants = genConfig.VideoVariants
+                    ["model"] = genConfig.VideoModel,
+                    ["prompt"] = prompt,
+                    ["size"] = size,
+                    ["seconds"] = genConfig.VideoSeconds.ToString(),
+                    ["n_variants"] = genConfig.VideoVariants
                 };
             }
 
-            var payload = JsonSerializer.Serialize(bodyObj);
+            var payloadJson = JsonSerializer.Serialize(bodyObj);
 
-            async Task<(HttpResponseMessage response, string body, string urlUsed)> SendCreateOnceAsync(string u)
+            using var request = new HttpRequestMessage(HttpMethod.Post, url)
             {
-                var req = new HttpRequestMessage(HttpMethod.Post, u);
-                req.Content = new StringContent(payload, Encoding.UTF8, "application/json");
-                await SetAuthHeadersAsync(req, config, ct);
-                var resp = await _httpClient.SendAsync(req, ct);
-                var body = await resp.Content.ReadAsStringAsync(ct);
-                return (resp, body, u);
+                Content = new StringContent(payloadJson, Encoding.UTF8, "application/json")
+            };
+            await SetAuthHeadersAsync(request, config, ct);
+
+            var response = await _httpClient.SendAsync(request, ct);
+            var json = await response.Content.ReadAsStringAsync(ct);
+
+            // 404 且有备用 URL → 重试
+            if (!response.IsSuccessStatusCode
+                && (int)response.StatusCode == 404
+                && !string.IsNullOrWhiteSpace(altUrl)
+                && !string.Equals(url, altUrl, StringComparison.OrdinalIgnoreCase))
+            {
+                response.Dispose();
+
+                using var req2 = new HttpRequestMessage(HttpMethod.Post, altUrl)
+                {
+                    Content = new StringContent(payloadJson, Encoding.UTF8, "application/json")
+                };
+                await SetAuthHeadersAsync(req2, config, ct);
+                response = await _httpClient.SendAsync(req2, ct);
+                json = await response.Content.ReadAsStringAsync(ct);
+                url = altUrl;
             }
 
-            HttpResponseMessage response;
-            string json;
-            string urlUsed;
-
-            (response, json, urlUsed) = await SendCreateOnceAsync(url);
-
-            try
-            {
-                if (!response.IsSuccessStatusCode
-                    && (int)response.StatusCode == 404
-                    && !string.IsNullOrWhiteSpace(altUrl)
-                    && !string.Equals(url, altUrl, StringComparison.OrdinalIgnoreCase))
-                {
-                    response.Dispose();
-                    (response, json, urlUsed) = await SendCreateOnceAsync(altUrl);
-                }
-
 #if DEBUG
-            await AppendCreateDebugLogAsync("(create)", urlUsed, response, json, ct);
+            await AppendCreateDebugLogAsync("(create-json)", url, response, json, ct);
 #endif
 
             if (!response.IsSuccessStatusCode)
             {
-                throw new HttpRequestException(
-                    $"视频创建失败: {(int)response.StatusCode} {response.ReasonPhrase}. {json}");
-            }
-
-            using var doc = JsonDocument.Parse(json);
-            var root = doc.RootElement;
-
-            if (root.TryGetProperty("id", out var idElem))
-            {
-                return idElem.GetString() ?? throw new InvalidOperationException("视频 ID 为空");
-            }
-
-            throw new InvalidOperationException($"无法解析视频 ID，响应: {json}");
-            }
-            finally
-            {
+                var sc = (int)response.StatusCode;
+                var rp = response.ReasonPhrase;
                 response.Dispose();
+                throw new HttpRequestException($"视频创建失败: {sc} {rp}. {json}");
+            }
+
+            using (response)
+            {
+                using var doc = JsonDocument.Parse(json);
+                if (doc.RootElement.TryGetProperty("id", out var idElem))
+                {
+                    return idElem.GetString() ?? throw new InvalidOperationException("视频 ID 为空");
+                }
+                throw new InvalidOperationException($"无法解析视频 ID，响应: {json}");
             }
         }
 
@@ -574,6 +718,7 @@ namespace TranslationToolUI.Services
             MediaGenConfig genConfig,
             string outputPath,
             CancellationToken ct,
+            string? referenceImagePath = null,
             Action<int>? onProgress = null,
             Action<string>? onVideoIdCreated = null,
             Action<string>? onStatusChanged = null,
@@ -582,7 +727,7 @@ namespace TranslationToolUI.Services
         {
             var totalSw = System.Diagnostics.Stopwatch.StartNew();
 
-            var videoId = await CreateVideoAsync(config, prompt, genConfig, ct);
+            var videoId = await CreateVideoAsync(config, prompt, genConfig, referenceImagePath, ct);
             onVideoIdCreated?.Invoke(videoId);
             onProgress?.Invoke(0);
 

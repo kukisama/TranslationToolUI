@@ -76,7 +76,7 @@ namespace TranslationToolUI.Services
         }
 
         /// <summary>
-        /// 构建 Images API URL
+        /// 构建 Images API URL（生成）
         /// </summary>
         protected static string BuildImageUrl(AiConfig config)
         {
@@ -92,6 +92,25 @@ namespace TranslationToolUI.Services
             if (baseUrl.EndsWith("/v1"))
                 return $"{baseUrl}/images/generations";
             return $"{baseUrl}/v1/images/generations";
+        }
+
+        /// <summary>
+        /// 构建 Images Edits API URL（编辑/参考图）
+        /// gpt-image-1.5 附加参考图时使用 /images/edits 终结点，且需要 multipart/form-data。
+        /// </summary>
+        protected static string BuildImageEditUrl(AiConfig config)
+        {
+            var baseUrl = config.ApiEndpoint.TrimEnd('/');
+
+            if (config.ProviderType == AiProviderType.AzureOpenAi)
+            {
+                return $"{baseUrl}/openai/deployments/{config.DeploymentName}/images/edits?api-version={config.ApiVersion}";
+            }
+
+            // OpenAI Compatible
+            if (baseUrl.EndsWith("/v1"))
+                return $"{baseUrl}/images/edits";
+            return $"{baseUrl}/v1/images/edits";
         }
 
         /// <summary>
