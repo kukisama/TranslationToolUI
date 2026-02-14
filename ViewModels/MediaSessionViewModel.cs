@@ -70,6 +70,47 @@ namespace TranslationToolUI.ViewModels
 
         public string VideoReferenceLimitHint => $"Sora 当前仅支持 1 张参考图，已选择 {ReferenceImagePaths.Count} 张";
 
+        private bool _isReferenceImageSizeValid = true;
+        public bool IsReferenceImageSizeValid
+        {
+            get => _isReferenceImageSizeValid;
+            private set
+            {
+                if (SetProperty(ref _isReferenceImageSizeValid, value))
+                {
+                    OnPropertyChanged(nameof(IsReferenceImageSizeMismatch));
+                    OnPropertyChanged(nameof(IsReferenceImageSizeMatched));
+                }
+            }
+        }
+
+        private string _referenceImageValidationHint = string.Empty;
+        public string ReferenceImageValidationHint
+        {
+            get => _referenceImageValidationHint;
+            private set => SetProperty(ref _referenceImageValidationHint, value);
+        }
+
+        private int _targetVideoWidth;
+        public int TargetVideoWidth
+        {
+            get => _targetVideoWidth;
+            private set => SetProperty(ref _targetVideoWidth, value);
+        }
+
+        private int _targetVideoHeight;
+        public int TargetVideoHeight
+        {
+            get => _targetVideoHeight;
+            private set => SetProperty(ref _targetVideoHeight, value);
+        }
+
+        public bool IsReferenceImageSizeMismatch =>
+            IsVideoMode && HasReferenceImage && !IsReferenceImageSizeValid;
+
+        public bool IsReferenceImageSizeMatched =>
+            IsVideoMode && HasReferenceImage && IsReferenceImageSizeValid;
+
         // --- 输入区 ---
         private string _promptText = "";
         public string PromptText
@@ -94,6 +135,9 @@ namespace TranslationToolUI.ViewModels
                     OnPropertyChanged(nameof(IsVideoMode));
                     OnPropertyChanged(nameof(IsVideoReferenceLimitExceeded));
                     OnPropertyChanged(nameof(VideoReferenceLimitHint));
+                    OnPropertyChanged(nameof(IsReferenceImageSizeMismatch));
+                    OnPropertyChanged(nameof(IsReferenceImageSizeMatched));
+                    ReevaluateReferenceImageValidation();
                     ((RelayCommand)GenerateCommand).RaiseCanExecuteChanged();
                 }
             }
@@ -145,14 +189,26 @@ namespace TranslationToolUI.ViewModels
         public string SelectedVideoAspectRatio
         {
             get => _selectedVideoAspectRatio;
-            set => SetProperty(ref _selectedVideoAspectRatio, value);
+            set
+            {
+                if (SetProperty(ref _selectedVideoAspectRatio, value))
+                {
+                    ReevaluateReferenceImageValidation();
+                }
+            }
         }
 
         private string _selectedVideoResolution = "480p";
         public string SelectedVideoResolution
         {
             get => _selectedVideoResolution;
-            set => SetProperty(ref _selectedVideoResolution, value);
+            set
+            {
+                if (SetProperty(ref _selectedVideoResolution, value))
+                {
+                    ReevaluateReferenceImageValidation();
+                }
+            }
         }
 
         private int? _overrideVideoSeconds;
@@ -307,9 +363,14 @@ namespace TranslationToolUI.ViewModels
                 OnPropertyChanged(nameof(CanAddMoreReferenceImages));
                 OnPropertyChanged(nameof(IsVideoReferenceLimitExceeded));
                 OnPropertyChanged(nameof(VideoReferenceLimitHint));
+                OnPropertyChanged(nameof(IsReferenceImageSizeMismatch));
+                OnPropertyChanged(nameof(IsReferenceImageSizeMatched));
+                ReevaluateReferenceImageValidation();
                 (RemoveReferenceImageCommand as RelayCommand)?.RaiseCanExecuteChanged();
                 ((RelayCommand)GenerateCommand).RaiseCanExecuteChanged();
             };
+
+            ReevaluateReferenceImageValidation();
         }
 
         private bool CanGenerateNow()
@@ -318,6 +379,9 @@ namespace TranslationToolUI.ViewModels
                 return false;
 
             if (IsVideoMode && ReferenceImagePaths.Count > 1)
+                return false;
+
+            if (IsVideoMode && HasReferenceImage && !IsReferenceImageSizeValid)
                 return false;
 
             return true;
@@ -347,22 +411,12 @@ namespace TranslationToolUI.ViewModels
         /// </summary>
         public void RefreshVideoParameterOptions()
         {
-            var isSora2 = _genConfig.VideoApiMode == VideoApiMode.Videos;
+            var profile = VideoCapabilityResolver.ResolveProfile(_genConfig.VideoApiMode, _genConfig.VideoModel);
 
-            if (isSora2)
-            {
-                VideoAspectRatioOptions = new List<string> { "16:9", "9:16" };
-                VideoResolutionOptions = new List<string> { "720p" };
-                VideoDurationOptions = new List<int> { 4, 8, 12 };
-                VideoCountOptions = new List<int> { 1 };
-            }
-            else
-            {
-                VideoAspectRatioOptions = new List<string> { "1:1", "16:9", "9:16" };
-                VideoResolutionOptions = new List<string> { "480p", "720p", "1080p" };
-                VideoDurationOptions = new List<int> { 5, 10, 15, 20 };
-                VideoCountOptions = new List<int> { 1, 2 };
-            }
+            VideoAspectRatioOptions = profile.AspectRatioOptions.ToList();
+            VideoResolutionOptions = profile.ResolutionOptions.ToList();
+            VideoDurationOptions = profile.DurationOptions.ToList();
+            VideoCountOptions = profile.CountOptions.ToList();
 
             OnPropertyChanged(nameof(VideoAspectRatioOptions));
             OnPropertyChanged(nameof(VideoResolutionOptions));
@@ -378,6 +432,8 @@ namespace TranslationToolUI.ViewModels
                 OverrideVideoSeconds = VideoDurationOptions[0];
             if (OverrideVideoVariants.HasValue && !VideoCountOptions.Contains(OverrideVideoVariants.Value))
                 OverrideVideoVariants = VideoCountOptions[0];
+
+            ReevaluateReferenceImageValidation();
         }
 
         public void Generate()
@@ -545,6 +601,14 @@ namespace TranslationToolUI.ViewModels
 
         private void GenerateVideo(string prompt)
         {
+            if (HasReferenceImage && !IsReferenceImageSizeValid)
+            {
+                StatusText = string.IsNullOrWhiteSpace(ReferenceImageValidationHint)
+                    ? "参考图尺寸不符合当前视频参数，请先裁切"
+                    : ReferenceImageValidationHint;
+                return;
+            }
+
             var task = new MediaGenTask
             {
                 Type = MediaGenType.Video,
@@ -596,9 +660,15 @@ namespace TranslationToolUI.ViewModels
                 });
             }, null, 1000, 1000);
 
-            var (videoWidth, videoHeight) = GetVideoDimensions(
-                SelectedVideoAspectRatio,
-                SelectedVideoResolution);
+            if (!TryGetCurrentVideoTargetSize(out var videoWidth, out var videoHeight))
+            {
+                task.Status = MediaGenStatus.Failed;
+                task.ErrorMessage = "当前视频参数组合无可用尺寸映射";
+                RunningTasks.Remove(task);
+                UpdateGeneratingState();
+                StatusText = "视频参数无效，请调整比例/分辨率";
+                return;
+            }
 
             var effectiveConfig = new MediaGenConfig
             {
@@ -1139,6 +1209,100 @@ namespace TranslationToolUI.ViewModels
             (RemoveReferenceImageCommand as RelayCommand)?.RaiseCanExecuteChanged();
         }
 
+        public bool TryGetCurrentVideoTargetSize(out int width, out int height)
+        {
+            return VideoCapabilityResolver.TryResolveSize(
+                _genConfig.VideoApiMode,
+                _genConfig.VideoModel,
+                SelectedVideoAspectRatio,
+                SelectedVideoResolution,
+                out width,
+                out height);
+        }
+
+        public void NotifyReferenceImageUpdated(string path)
+        {
+            var index = -1;
+            for (var i = 0; i < ReferenceImagePaths.Count; i++)
+            {
+                if (string.Equals(ReferenceImagePaths[i], path, StringComparison.OrdinalIgnoreCase))
+                {
+                    index = i;
+                    break;
+                }
+            }
+
+            if (index >= 0)
+            {
+                var existing = ReferenceImagePaths[index];
+                ReferenceImagePaths.RemoveAt(index);
+                ReferenceImagePaths.Insert(index, existing);
+            }
+
+            ReevaluateReferenceImageValidation();
+            _onRequestSave?.Invoke(this);
+            ((RelayCommand)GenerateCommand).RaiseCanExecuteChanged();
+        }
+
+        private void ReevaluateReferenceImageValidation()
+        {
+            if (!TryGetCurrentVideoTargetSize(out var targetW, out var targetH))
+            {
+                TargetVideoWidth = 0;
+                TargetVideoHeight = 0;
+
+                if (IsVideoMode)
+                {
+                    IsReferenceImageSizeValid = false;
+                    ReferenceImageValidationHint = "当前视频参数组合无可用尺寸映射";
+                }
+                else
+                {
+                    IsReferenceImageSizeValid = true;
+                    ReferenceImageValidationHint = string.Empty;
+                }
+
+                ((RelayCommand)GenerateCommand).RaiseCanExecuteChanged();
+                return;
+            }
+
+            TargetVideoWidth = targetW;
+            TargetVideoHeight = targetH;
+
+            if (!IsVideoMode || !HasReferenceImage)
+            {
+                IsReferenceImageSizeValid = true;
+                ReferenceImageValidationHint = string.Empty;
+                ((RelayCommand)GenerateCommand).RaiseCanExecuteChanged();
+                return;
+            }
+
+            var primaryPath = ReferenceImagePath;
+            if (string.IsNullOrWhiteSpace(primaryPath) || !File.Exists(primaryPath))
+            {
+                IsReferenceImageSizeValid = false;
+                ReferenceImageValidationHint = "参考图不存在，请重新添加";
+                ((RelayCommand)GenerateCommand).RaiseCanExecuteChanged();
+                return;
+            }
+
+            if (!ImageCropService.TryGetImageSize(primaryPath, out var imageW, out var imageH))
+            {
+                IsReferenceImageSizeValid = false;
+                ReferenceImageValidationHint = "无法读取参考图尺寸，请更换图片";
+                ((RelayCommand)GenerateCommand).RaiseCanExecuteChanged();
+                return;
+            }
+
+            var isMatch = imageW == targetW && imageH == targetH;
+            IsReferenceImageSizeValid = isMatch;
+            ReferenceImageValidationHint = isMatch
+                ? $"参考图尺寸已匹配：{targetW}×{targetH}"
+                : $"当前参考图 {imageW}×{imageH}，目标 {targetW}×{targetH}，点击缩略图进行裁切";
+
+            ((RelayCommand)GenerateCommand).RaiseCanExecuteChanged();
+        }
+
         private void DeleteReferenceImageFiles()
         {
             foreach (var path in ReferenceImagePaths.ToList())
@@ -1374,22 +1538,6 @@ namespace TranslationToolUI.ViewModels
             return config;
         }
 
-        private static (int Width, int Height) GetVideoDimensions(string aspectRatio, string resolution)
-        {
-            var baseSize = resolution switch
-            {
-                "1080p" => 1080,
-                "720p" => 720,
-                _ => 480
-            };
-
-            return aspectRatio switch
-            {
-                "1:1" => (baseSize, baseSize),
-                "9:16" => (baseSize, (int)Math.Ceiling(baseSize * 16.0 / 9.0)),
-                _ => ((int)Math.Ceiling(baseSize * 16.0 / 9.0), baseSize)
-            };
-        }
     }
 
     /// <summary>

@@ -496,6 +496,37 @@ namespace TranslationToolUI.Views
             }
         }
 
+        private async void ReferenceImageThumbnail_PointerPressed(object? sender, PointerPressedEventArgs e)
+        {
+            if (_viewModel?.CurrentSession == null)
+                return;
+
+            var session = _viewModel.CurrentSession;
+            if (!session.IsVideoMode)
+                return;
+
+            if (sender is not Border border)
+                return;
+
+            if (border.DataContext is not string filePath || string.IsNullOrWhiteSpace(filePath) || !File.Exists(filePath))
+                return;
+
+            if (!session.TryGetCurrentVideoTargetSize(out var targetWidth, out var targetHeight))
+            {
+                session.StatusText = "当前视频参数组合无可用尺寸映射";
+                return;
+            }
+
+            var cropWindow = new ReferenceImageCropWindow(filePath, targetWidth, targetHeight);
+            var result = await cropWindow.ShowDialog<bool>(this);
+            if (!result)
+                return;
+
+            session.NotifyReferenceImageUpdated(filePath);
+            session.StatusText = $"已将参考图裁切为 {targetWidth}×{targetHeight}";
+            e.Handled = true;
+        }
+
         private void OpenImagePreview(System.Collections.Generic.IReadOnlyList<string> mediaPaths, string? filePath)
         {
             if (string.IsNullOrEmpty(filePath) || !File.Exists(filePath))
@@ -524,7 +555,7 @@ namespace TranslationToolUI.Views
             }
 
             var previewWindow = new ImagePreviewWindow(imagePaths, index);
-            previewWindow.Show();
+            previewWindow.Show(this);
         }
 
         private static bool IsImageFile(string? filePath)

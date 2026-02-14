@@ -481,7 +481,14 @@ namespace TranslationToolUI.ViewModels
                     var mediaGenConfig = _config.MediaGenConfig;
                     _mediaStudioWindow = new MediaStudioWindow(aiConfig, mediaGenConfig);
                     _mediaStudioWindow.Closed += (_, _) => _mediaStudioWindow = null;
-                    _mediaStudioWindow.Show();
+                    if (_mainWindow != null)
+                    {
+                        _mediaStudioWindow.Show(_mainWindow);
+                    }
+                    else
+                    {
+                        _mediaStudioWindow.Show();
+                    }
                     StatusMessage = "Media Studio 已打开";
                 }
                 else

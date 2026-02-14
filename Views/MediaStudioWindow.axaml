@@ -341,7 +341,10 @@
                                                             <Border Background="Transparent"
                                                                     BorderBrush="#FFCCCCCC"
                                                                     BorderThickness="1"
-                                                                    CornerRadius="4">
+                                                                    CornerRadius="4"
+                                                                    Cursor="Hand"
+                                                                    PointerPressed="ReferenceImageThumbnail_PointerPressed"
+                                                                    ToolTip.Tip="点击裁切为当前视频目标尺寸">
                                                                 <Image Stretch="UniformToFill"
                                                                        Source="{Binding ., Converter={StaticResource FilePathToBitmapConverter}}"/>
                                                             </Border>
@@ -422,12 +425,20 @@
                             </StackPanel>
                         </Grid>
 
-                        <TextBlock Grid.Row="2"
-                                   Margin="42,4,0,0"
-                                   FontSize="12"
-                                   Foreground="#FFE65100"
-                                   IsVisible="{Binding IsVideoReferenceLimitExceeded}"
-                                   Text="{Binding VideoReferenceLimitHint}"/>
+                        <StackPanel Grid.Row="2" Margin="42,4,0,0" Spacing="2">
+                            <TextBlock FontSize="12"
+                                       Foreground="#FFE65100"
+                                       IsVisible="{Binding IsVideoReferenceLimitExceeded}"
+                                       Text="{Binding VideoReferenceLimitHint}"/>
+                            <TextBlock FontSize="12"
+                                       Foreground="#FFE65100"
+                                       IsVisible="{Binding IsReferenceImageSizeMismatch}"
+                                       Text="{Binding ReferenceImageValidationHint}"/>
+                            <TextBlock FontSize="12"
+                                       Foreground="#FF2E7D32"
+                                       IsVisible="{Binding IsReferenceImageSizeMatched}"
+                                       Text="{Binding ReferenceImageValidationHint}"/>
+                        </StackPanel>
                     </Grid>
                 </Border>
             </Grid>

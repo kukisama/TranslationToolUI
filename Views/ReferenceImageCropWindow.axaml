@@ -1,0 +1,103 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="TranslationToolUI.Views.ReferenceImageCropWindow"
+        Title="裁切参考图"
+        Width="980"
+        Height="760"
+        MinWidth="880"
+        MinHeight="660"
+        WindowStartupLocation="CenterOwner">
+
+    <Grid RowDefinitions="Auto,*,Auto" Margin="12" RowSpacing="10">
+        <Border Grid.Row="0" Background="#FFF7F7F7" BorderBrush="#FFE0E0E0" BorderThickness="1" CornerRadius="8" Padding="10">
+            <StackPanel Spacing="4">
+                <TextBlock Text="请在右侧原图中拖拽裁切框，使用缩放滑轨调整取景范围" FontWeight="SemiBold"/>
+                <TextBlock Text="{Binding TargetSizeText, StringFormat=目标尺寸：{0}}" Foreground="#FF444444"/>
+                <TextBlock Text="{Binding TargetRatioText}" Foreground="#FF666666" FontSize="12"/>
+            </StackPanel>
+        </Border>
+
+        <Grid Grid.Row="1" ColumnDefinitions="*,14,*" ColumnSpacing="10">
+            <Border Grid.Column="0" BorderBrush="#FFE0E0E0" BorderThickness="1" CornerRadius="6" Padding="8">
+                <Grid RowDefinitions="Auto,*">
+                    <TextBlock Text="导出预览" FontWeight="SemiBold" Margin="0,0,0,6"/>
+                    <Border Grid.Row="1" Background="#FFF4F4F4" CornerRadius="4" Padding="4">
+                        <Image x:Name="PreviewImage" Stretch="Uniform"/>
+                    </Border>
+                </Grid>
+            </Border>
+
+            <Border Grid.Column="2" BorderBrush="#FFE0E0E0" BorderThickness="1" CornerRadius="6" Padding="8">
+                <Grid RowDefinitions="Auto,*,Auto,Auto" RowSpacing="8">
+                    <TextBlock Text="原图选区（拖拽黄色框）" FontWeight="SemiBold"/>
+                    <Border Grid.Row="1"
+                            x:Name="SelectorHost"
+                            Background="#FFF4F4F4"
+                            CornerRadius="4"
+                            ClipToBounds="True"
+                            SizeChanged="SelectorHost_SizeChanged"
+                            PointerPressed="SelectorHost_PointerPressed"
+                            PointerMoved="SelectorHost_PointerMoved"
+                            PointerReleased="SelectorHost_PointerReleased"
+                            PointerCaptureLost="SelectorHost_PointerCaptureLost"
+                            PointerWheelChanged="SelectorHost_PointerWheelChanged">
+                        <Canvas x:Name="SelectorCanvas">
+                            <Image x:Name="OriginalImage" Stretch="Fill"/>
+                            <Border x:Name="CropFrame"
+                                    BorderBrush="#FF00B8FF"
+                                    BorderThickness="2"
+                                    Background="#3300B8FF"
+                                    CornerRadius="2"
+                                    IsHitTestVisible="False">
+                                <Grid IsHitTestVisible="False"
+                                      ColumnDefinitions="*,*,*"
+                                      RowDefinitions="*,*,*">
+                                    <!-- 竖线（1/3, 2/3） -->
+                                    <Border x:Name="GuideV1"
+                                        Grid.Column="1"
+                                            Grid.RowSpan="3"
+                                        BorderBrush="#CC00B8FF"
+                                        BorderThickness="1,0,0,0"/>
+                                    <Border x:Name="GuideV2"
+                                        Grid.Column="2"
+                                            Grid.RowSpan="3"
+                                        BorderBrush="#CC00B8FF"
+                                        BorderThickness="1,0,0,0"/>
+
+                                    <!-- 横线（1/3, 2/3） -->
+                                    <Border x:Name="GuideH1"
+                                        Grid.Row="1"
+                                            Grid.ColumnSpan="3"
+                                        BorderBrush="#CC00B8FF"
+                                        BorderThickness="0,1,0,0"/>
+                                    <Border x:Name="GuideH2"
+                                        Grid.Row="2"
+                                            Grid.ColumnSpan="3"
+                                        BorderBrush="#CC00B8FF"
+                                        BorderThickness="0,1,0,0"/>
+                                </Grid>
+                                </Border>
+                        </Canvas>
+                    </Border>
+
+                    <Grid Grid.Row="2" ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8">
+                        <TextBlock Text="缩放" VerticalAlignment="Center"/>
+                        <Slider Grid.Column="1" x:Name="ZoomSlider" Minimum="1" Maximum="6" Value="{Binding Zoom}"/>
+                        <TextBlock Grid.Column="2" Text="{Binding Zoom, StringFormat={}{0:F2}x}" VerticalAlignment="Center"/>
+                    </Grid>
+
+                    <TextBlock Grid.Row="3"
+                               Text="提示：按住右侧图片拖动可移动选区；滚轮也可缩放"
+                               FontSize="12"
+                               Foreground="#FF666666"/>
+                </Grid>
+            </Border>
+        </Grid>
+
+        <Grid Grid.Row="2" ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8">
+            <TextBlock Grid.Column="0" x:Name="StatusText" Foreground="#FFB00020" VerticalAlignment="Center"/>
+            <Button Grid.Column="1" Content="取消" Padding="16,7" Click="Cancel_Click"/>
+            <Button Grid.Column="2" Content="裁切" Padding="16,7" Background="#FF1976D2" Foreground="White" Click="Crop_Click"/>
+        </Grid>
+    </Grid>
+</Window>
