@@ -118,6 +118,7 @@ namespace TranslationToolUI.ViewModels
         private CancellationTokenSource? _speechSubtitleCts;
 
         private int _uiModeIndex;
+        private bool _isReviewModeViewCreated;
 
         private readonly ObservableCollection<ReviewSheetState> _reviewSheets = new();
         private ReviewSheetState? _selectedReviewSheet;
@@ -125,7 +126,14 @@ namespace TranslationToolUI.ViewModels
         private static readonly HttpClient SpeechBatchHttpClient = new();
 
         private readonly string[] _sourceLanguages = { "auto", "en", "zh-CN", "ja-JP", "ko-KR", "fr-FR", "de-DE", "es-ES" };
-        private readonly string[] _targetLanguages = { "en", "zh-CN", "ja-JP", "ko-KR", "fr-FR", "de-DE", "es-ES" };        public MainWindowViewModel()
+        private readonly string[] _targetLanguages = { "en", "zh-CN", "ja-JP", "ko-KR", "fr-FR", "de-DE", "es-ES" };
+
+        private readonly List<(string Name, Func<Task> Action)> _postShowInitActions = new();
+        private int _postShowInitStarted;
+        private volatile bool _isMainWindowShown;
+        private volatile bool _isConfigLoaded;
+
+        public MainWindowViewModel()
         {
             _configService = new ConfigurationService();
             _aiInsightService = new AiInsightService(_azureTokenProvider);
@@ -185,6 +193,19 @@ namespace TranslationToolUI.ViewModels
                 }
             });
             _subscriptionLampTimer.Start();
+
+            RegisterPostShowInitializationAction(
+                "SubscriptionValidation",
+                async () => await Dispatcher.UIThread.InvokeAsync(() => TriggerSubscriptionValidation()));
+            RegisterPostShowInitializationAction(
+                "AudioDevicesRefresh",
+                async () => await Dispatcher.UIThread.InvokeAsync(() => RefreshAudioDevices(persistSelection: false)));
+            RegisterPostShowInitializationAction(
+                "AudioLibraryRefresh",
+                async () => await Dispatcher.UIThread.InvokeAsync(() => RefreshAudioLibrary()));
+            RegisterPostShowInitializationAction(
+                "AiSilentLogin",
+                async () => await TrySilentLoginForAiAsync());
 
             _ = LoadConfigAsync();
 

@@ -204,6 +204,12 @@ namespace TranslationToolUI.ViewModels
             {
                 if (SetProperty(ref _uiModeIndex, value))
                 {
+                    if (value == 1 && !_isReviewModeViewCreated)
+                    {
+                        _isReviewModeViewCreated = true;
+                        OnPropertyChanged(nameof(ReviewModeViewContent));
+                    }
+
                     OnPropertyChanged(nameof(IsLiveMode));
                     OnPropertyChanged(nameof(IsReviewMode));
                     OnPropertyChanged(nameof(IsLiveModeSelected));
@@ -211,6 +217,8 @@ namespace TranslationToolUI.ViewModels
                 }
             }
         }
+
+        public object? ReviewModeViewContent => _isReviewModeViewCreated ? this : null;
 
         public bool IsLiveMode => UiModeIndex == 0;
 

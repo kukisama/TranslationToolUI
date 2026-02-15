@@ -421,8 +421,11 @@
                 </Border>
             </Grid>
 
-            <!-- 复盘/批处理模式 -->
-            <Grid IsVisible="{Binding IsReviewMode}" ColumnDefinitions="280,*,6,320" ColumnSpacing="8">
+            <!-- 复盘/批处理模式（按需实例化） -->
+            <ContentControl IsVisible="{Binding IsReviewMode}" Content="{Binding ReviewModeViewContent}">
+                <ContentControl.ContentTemplate>
+                    <DataTemplate>
+                        <Grid ColumnDefinitions="280,*,6,320" ColumnSpacing="8">
                 <!-- 左侧文件与批处理 -->
                 <Border Grid.Column="0" BorderBrush="#FFE5E7EB" BorderThickness="1" CornerRadius="4" Padding="8">
                     <TabControl>
@@ -634,7 +637,10 @@
                         </StackPanel>
                     </Grid>
                 </Border>
-            </Grid>
+                        </Grid>
+                    </DataTemplate>
+                </ContentControl.ContentTemplate>
+            </ContentControl>
         </Grid>
 
         <!-- 底部状态栏 -->

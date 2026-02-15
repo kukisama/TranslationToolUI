@@ -56,6 +56,12 @@ public partial class MainWindow : Window
         base.OnClosed(e);
     }
 
+    protected override void OnOpened(EventArgs e)
+    {
+        base.OnOpened(e);
+        _viewModel?.NotifyMainWindowShown();
+    }
+
     private void HelpButton_Click(object? sender, RoutedEventArgs e)
     {
         if (sender is Button button && button.ContextMenu != null)

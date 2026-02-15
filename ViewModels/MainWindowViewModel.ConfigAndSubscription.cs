@@ -275,9 +275,6 @@ namespace TranslationToolUI.ViewModels
 
                     ForceUpdateComboBoxSelection();
 
-                    RefreshAudioDevices(persistSelection: false);
-                    RefreshAudioLibrary();
-
                     ((RelayCommand)StartTranslationCommand).RaiseCanExecuteChanged();
                     ((RelayCommand)ToggleTranslationCommand).RaiseCanExecuteChanged();
 
@@ -306,12 +303,9 @@ namespace TranslationToolUI.ViewModels
                     }
 
                     StatusMessage = $"配置已加载，文件位置: {_configService.GetConfigFilePath()}";
-
-                    TriggerSubscriptionValidation();
                 });
 
-                // AAD 模式下尝试静默登录（不弹窗）
-                _ = TrySilentLoginForAiAsync();
+                MarkConfigLoaded();
             }
             catch (Exception ex)
             {
@@ -319,6 +313,8 @@ namespace TranslationToolUI.ViewModels
                 {
                     StatusMessage = $"加载配置失败: {ex.Message}";
                 });
+
+                MarkConfigLoaded();
             }
         }
 
