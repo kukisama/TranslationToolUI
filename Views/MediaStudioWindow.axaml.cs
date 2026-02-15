@@ -1,8 +1,13 @@
 using System;
+using System.Collections.Generic;
+using System.Collections.Specialized;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
+using System.Text;
+using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
 using Avalonia;
 using Avalonia.Controls;
@@ -10,6 +15,8 @@ using Avalonia.Input;
 using Avalonia.Input.Platform;
 using Avalonia.Media.Imaging;
 using Avalonia.Platform.Storage;
+using Avalonia.Threading;
+using Avalonia.VisualTree;
 using TranslationToolUI.Models;
 using TranslationToolUI.Services;
 using TranslationToolUI.ViewModels;
@@ -19,6 +26,27 @@ namespace TranslationToolUI.Views
     public partial class MediaStudioWindow : Window
     {
         private readonly MediaStudioViewModel _viewModel;
+        private MediaSessionViewModel? _attachedSession;
+        private ScrollViewer? _chatScrollViewer;
+        private readonly Dictionary<string, ScrollViewer> _sessionScrollViewers = new(StringComparer.OrdinalIgnoreCase);
+        private ListBox? _sessionListBox;
+        private Control? _sessionViewsHost;
+        private bool _isRestoringScroll;
+        private bool _isUserNearBottom = true;
+        private int _restoreGeneration;
+        private int _interactionLockGeneration;
+        private bool _interactionsLocked;
+        private int _switchTraceSequence;
+        private DateTime _suppressScrollSaveUntilUtc = DateTime.MinValue;
+        private const double AutoScrollThreshold = 80;
+        private const double QuickNavVisibilityThreshold = 200;
+        private const int ContentReadyRetryDelayMs = 60;
+        private const int SaveSuppressAfterRestoreMs = 350;
+        private const int ViewerResolveRetryCount = 30;
+
+        private static readonly SemaphoreSlim _switchAuditLogLock = new(1, 1);
+        private static bool _switchAuditEnabledCache;
+        private static DateTime _switchAuditLastReadUtc = DateTime.MinValue;
 
         public MediaStudioWindow()
         {
@@ -41,32 +69,711 @@ namespace TranslationToolUI.Views
             _viewModel = new MediaStudioViewModel(aiConfig, genConfig);
             DataContext = _viewModel;
 
-            // 监听消息列表变化，自动滚动到底部
-            if (_viewModel.CurrentSession != null)
-            {
-                _viewModel.CurrentSession.Messages.CollectionChanged += (_, _) => ScrollToBottom();
-            }
+            _sessionListBox = this.FindControl<ListBox>("SessionListBox");
+            _sessionViewsHost = this.FindControl<Control>("SessionViewsHost");
+
+            AttachSession(_viewModel.CurrentSession);
 
             _viewModel.PropertyChanged += (_, e) =>
             {
-                if (e.PropertyName == nameof(MediaStudioViewModel.CurrentSession) && _viewModel.CurrentSession != null)
+                if (e.PropertyName == nameof(MediaStudioViewModel.CurrentSession))
                 {
-                    _viewModel.CurrentSession.Messages.CollectionChanged += (_, _) => ScrollToBottom();
+                    AttachSession(_viewModel.CurrentSession);
                 }
             };
 
             // 在隧道阶段订阅 KeyDown，确保在 TextBox 内部处理 Ctrl+V / Ctrl+Enter 之前拦截
-            var promptTextBox = this.FindControl<TextBox>("PromptTextBox");
-            promptTextBox?.AddHandler(
+            this.AddHandler(
                 InputElement.KeyDownEvent,
                 PromptTextBox_KeyDown,
                 Avalonia.Interactivity.RoutingStrategies.Tunnel);
         }
 
+        private ScrollViewer? GetScrollViewerForSession(MediaSessionViewModel? session)
+        {
+            if (session == null)
+            {
+                return null;
+            }
+
+            return _sessionScrollViewers.TryGetValue(session.SessionId, out var viewer)
+                ? viewer
+                : null;
+        }
+
         private void ScrollToBottom()
         {
-            var scrollViewer = this.FindControl<ScrollViewer>("ChatScrollViewer");
-            scrollViewer?.ScrollToEnd();
+            GetScrollViewerForSession(_attachedSession)?.ScrollToEnd();
+        }
+
+        private void ScrollToTop()
+        {
+            var currentViewer = GetScrollViewerForSession(_attachedSession);
+            if (currentViewer == null)
+                return;
+
+            currentViewer.Offset = new Vector(currentViewer.Offset.X, 0);
+        }
+
+        private void AttachSession(MediaSessionViewModel? session)
+        {
+            if (ReferenceEquals(_attachedSession, session))
+                return;
+
+            var previous = _attachedSession;
+            var traceId = Interlocked.Increment(ref _switchTraceSequence);
+            LogSwitchAudit(traceId, "Switch.Begin",
+                $"from={DescribeSession(previous)} to={DescribeSession(session)}");
+
+            _restoreGeneration++;
+            var shouldLockInteractions = previous != null;
+            if (shouldLockInteractions)
+            {
+                LockSessionInteractions(_restoreGeneration);
+            }
+            else
+            {
+                UnlockSessionInteractions(_restoreGeneration);
+            }
+
+            _chatScrollViewer = GetScrollViewerForSession(_attachedSession);
+            SaveCurrentSessionScrollState();
+
+            if (_attachedSession != null)
+            {
+                _attachedSession.Messages.CollectionChanged -= CurrentSessionMessages_CollectionChanged;
+            }
+
+            _attachedSession = session;
+
+            if (_attachedSession != null)
+            {
+                _attachedSession.Messages.CollectionChanged += CurrentSessionMessages_CollectionChanged;
+                _chatScrollViewer = GetScrollViewerForSession(_attachedSession);
+                RestoreScrollForSession(_attachedSession, _restoreGeneration, traceId);
+            }
+            else
+            {
+                _isUserNearBottom = true;
+                UpdateQuickNavButtonsVisibility();
+                UnlockSessionInteractions(_restoreGeneration);
+            }
+
+            LogSwitchAudit(traceId, "Switch.End",
+                $"attached={DescribeSession(_attachedSession)} generation={_restoreGeneration}");
+        }
+
+        private void CurrentSessionMessages_CollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
+        {
+            var currentViewer = GetScrollViewerForSession(_attachedSession);
+            if (currentViewer == null || _isRestoringScroll)
+                return;
+
+            // 仅在新增消息且用户原本接近底部时自动跟随到底部；删除时不自动跳转
+            if ((e.Action == NotifyCollectionChangedAction.Add || e.Action == NotifyCollectionChangedAction.Reset)
+                && _isUserNearBottom)
+            {
+                ScrollToBottom();
+            }
+        }
+
+        private void ChatScrollViewer_ScrollChanged(object? sender, ScrollChangedEventArgs e)
+        {
+            if (sender is not ScrollViewer viewer)
+                return;
+
+            if (viewer.DataContext is not MediaSessionViewModel session)
+                return;
+
+            _sessionScrollViewers[session.SessionId] = viewer;
+
+            if (!ReferenceEquals(session, _attachedSession))
+            {
+                return;
+            }
+
+            _chatScrollViewer = viewer;
+
+            _isUserNearBottom = IsNearBottom(viewer);
+
+            // 程序化恢复滚动期间，不更新锚点，避免中间态把锚点覆盖掉。
+            if (_isRestoringScroll)
+            {
+                UpdateQuickNavButtonsVisibility();
+                return;
+            }
+
+            if (DateTime.UtcNow < _suppressScrollSaveUntilUtc)
+            {
+                UpdateQuickNavButtonsVisibility();
+                return;
+            }
+
+            // 仅记录“非底部”位置；底部视为默认态，不记录
+            if (_attachedSession != null)
+            {
+                var offsetY = Math.Max(0, viewer.Offset.Y);
+                var maxY = Math.Max(0, viewer.Extent.Height - viewer.Viewport.Height);
+                var ratio = maxY > 0 ? Math.Clamp(offsetY / maxY, 0, 1) : 0;
+                _attachedSession.LastNonBottomScrollOffsetY = offsetY;
+                _attachedSession.LastScrollAnchorRatio = ratio;
+                _attachedSession.LastScrollSavedMaxY = maxY;
+
+                if (TryCaptureVisibleAnchor(_attachedSession, viewer, out var anchorIndex, out var anchorOffsetY))
+                {
+                    _attachedSession.LastScrollAnchorMessageIndex = anchorIndex;
+                    _attachedSession.LastScrollAnchorViewportOffsetY = anchorOffsetY;
+                }
+            }
+
+            UpdateQuickNavButtonsVisibility();
+        }
+
+        private bool IsNearBottom(ScrollViewer scrollViewer)
+        {
+            var remaining = scrollViewer.Extent.Height - (scrollViewer.Offset.Y + scrollViewer.Viewport.Height);
+            return remaining <= AutoScrollThreshold;
+        }
+
+        private void RestoreScrollForSession(MediaSessionViewModel session, int generation, int traceId)
+            => RestoreScrollForSession(session, generation, traceId, ViewerResolveRetryCount);
+
+        private void RestoreScrollForSession(MediaSessionViewModel session, int generation, int traceId, int viewerRetries)
+        {
+            if (!TryResolveSessionViewer(session, generation, traceId, viewerRetries))
+            {
+                return;
+            }
+
+            if (generation != _restoreGeneration || !ReferenceEquals(_attachedSession, session))
+            {
+                LogSwitchAudit(traceId, "Restore.Skip.Stale",
+                    $"session={DescribeSession(session)} generation={generation} currentGeneration={_restoreGeneration}");
+                UnlockSessionInteractions(generation);
+                return;
+            }
+
+            // Cherry 风格：直接恢复 session 的 scrollTop；无记录则到底部。
+            _isRestoringScroll = true;
+            LogSwitchAudit(traceId, "Restore.Begin",
+                $"session={DescribeSession(session)} hasOffset={session.LastNonBottomScrollOffsetY.HasValue} loaded={session.IsContentLoaded}");
+
+            if (!session.LastNonBottomScrollOffsetY.HasValue)
+            {
+                _chatScrollViewer?.ScrollToEnd();
+                _isUserNearBottom = true;
+                UpdateQuickNavButtonsVisibility();
+                _suppressScrollSaveUntilUtc = DateTime.UtcNow.AddMilliseconds(SaveSuppressAfterRestoreMs);
+                RestoreScrollForSession(session, generation, traceId, 8, 2);
+                return;
+            }
+
+            RestoreScrollForSession(session, generation, traceId, 16, 0);
+        }
+
+        private bool TryResolveSessionViewer(MediaSessionViewModel session, int generation, int traceId, int retries)
+        {
+            var viewer = GetScrollViewerForSession(session);
+            if (viewer != null)
+            {
+                _chatScrollViewer = viewer;
+                return true;
+            }
+
+            if (generation != _restoreGeneration || !ReferenceEquals(_attachedSession, session))
+            {
+                return false;
+            }
+
+            if (retries > 0)
+            {
+                LogSwitchAudit(traceId, "Restore.Wait.Viewer",
+                    $"session={DescribeSession(session)} retries={retries}");
+                _ = Task.Delay(ContentReadyRetryDelayMs).ContinueWith(_ =>
+                {
+                    RestoreScrollForSession(session, generation, traceId, retries - 1);
+                });
+                return false;
+            }
+
+            _isRestoringScroll = false;
+            UnlockSessionInteractions(generation);
+            LogSwitchAudit(traceId, "Restore.Fail.ViewerTimeout",
+                $"session={DescribeSession(session)}");
+            return false;
+        }
+
+        private static bool HasMemoryAnchor(MediaSessionViewModel session)
+            => session.LastNonBottomScrollOffsetY.HasValue;
+
+        private void RestoreScrollForSession(
+            MediaSessionViewModel session,
+            int generation,
+            int traceId,
+            int retries,
+            int passIndex)
+        {
+            Dispatcher.UIThread.Post(() =>
+            {
+                if (_chatScrollViewer == null)
+                {
+                    _isRestoringScroll = false;
+                    UnlockSessionInteractions(generation);
+                    LogSwitchAudit(traceId, "Restore.Abort.NoScrollViewer",
+                        $"session={DescribeSession(session)}");
+                    return;
+                }
+
+                if (generation != _restoreGeneration || !ReferenceEquals(_attachedSession, session))
+                {
+                    _isRestoringScroll = false;
+                    UnlockSessionInteractions(generation);
+                    LogSwitchAudit(traceId, "Restore.Abort.Stale",
+                        $"session={DescribeSession(session)} generation={generation} currentGeneration={_restoreGeneration}");
+                    return;
+                }
+
+                // 先等待数据加载标记完成，再恢复滚动像素位。
+                if (!session.IsContentLoaded)
+                {
+                    if (retries > 0)
+                    {
+                        LogSwitchAudit(traceId, "Restore.Wait.Content",
+                            $"session={DescribeSession(session)} retries={retries}");
+                        _ = Task.Delay(ContentReadyRetryDelayMs).ContinueWith(_ =>
+                        {
+                            RestoreScrollForSession(session, generation, traceId, retries - 1, passIndex);
+                        });
+                    }
+                    else
+                    {
+                        _isUserNearBottom = true;
+                        UpdateQuickNavButtonsVisibility();
+                        _isRestoringScroll = false;
+                        UnlockSessionInteractions(generation);
+                        LogSwitchAudit(traceId, "Restore.Fail.ContentTimeout",
+                            $"session={DescribeSession(session)}");
+                    }
+                    return;
+                }
+
+                // DataTemplate 初次切换时，Extent/Viewport 可能尚未稳定；重试几次可显著提升定位准确性
+                var maxY = Math.Max(0, _chatScrollViewer.Extent.Height - _chatScrollViewer.Viewport.Height);
+                var layoutNotReady = _chatScrollViewer.Extent.Height <= 0 || _chatScrollViewer.Viewport.Height <= 0;
+                // 注意：maxY==0 代表“内容不超过一屏”，是合法稳定态，不应继续重试。
+                if (layoutNotReady && retries > 0)
+                {
+                    LogSwitchAudit(traceId, "Restore.Wait.Layout",
+                        $"session={DescribeSession(session)} retries={retries} extent={_chatScrollViewer.Extent.Height:F1} viewport={_chatScrollViewer.Viewport.Height:F1}");
+                    _ = Task.Delay(ContentReadyRetryDelayMs).ContinueWith(_ =>
+                    {
+                        RestoreScrollForSession(session, generation, traceId, retries - 1, passIndex);
+                    });
+                    return;
+                }
+
+                var passName = passIndex switch
+                {
+                    0 => "First",
+                    1 => "Second",
+                    _ => "Final"
+                };
+
+                if (session.LastNonBottomScrollOffsetY.HasValue)
+                {
+                    var targetY = Math.Clamp(session.LastNonBottomScrollOffsetY.Value, 0, maxY);
+                    _chatScrollViewer.Offset = new Vector(_chatScrollViewer.Offset.X, targetY);
+                    LogSwitchAudit(traceId, $"Restore.Step.Offset.{passName}",
+                        $"session={DescribeSession(session)} targetY={targetY:F1} maxY={maxY:F1}");
+                }
+                else
+                {
+                    _chatScrollViewer.ScrollToEnd();
+                    LogSwitchAudit(traceId, $"Restore.Step.Bottom.{passName}",
+                        $"session={DescribeSession(session)} maxY={maxY:F1}");
+                }
+
+                if (passIndex >= 1)
+                {
+                    if (TryAlignToAnchorMessage(session, out var appliedDelta))
+                    {
+                        LogSwitchAudit(traceId, $"Restore.Step.Anchor.{passName}",
+                            $"session={DescribeSession(session)} deltaY={appliedDelta:F1} offsetY={_chatScrollViewer.Offset.Y:F1}");
+                    }
+                    else
+                    {
+                        LogSwitchAudit(traceId, $"Restore.Step.Anchor.Miss.{passName}",
+                            $"session={DescribeSession(session)}");
+                    }
+                }
+
+                if (passIndex == 0)
+                {
+                    _suppressScrollSaveUntilUtc = DateTime.UtcNow.AddMilliseconds(SaveSuppressAfterRestoreMs);
+                    UnlockSessionInteractions(generation);
+                    LogSwitchAudit(traceId, "Restore.Unlock.Early",
+                        $"session={DescribeSession(session)} after=First");
+                    _ = Task.Delay(0).ContinueWith(_ =>
+                    {
+                        RestoreScrollForSession(session, generation, traceId, 8, 2);
+                    });
+                    return;
+                }
+
+                _isUserNearBottom = IsNearBottom(_chatScrollViewer);
+
+                if (TryCaptureVisibleAnchor(session, _chatScrollViewer, out var restoredAnchorIndex, out var restoredAnchorOffsetY))
+                {
+                    session.LastScrollAnchorMessageIndex = restoredAnchorIndex;
+                    session.LastScrollAnchorViewportOffsetY = restoredAnchorOffsetY;
+                }
+
+                UpdateQuickNavButtonsVisibility();
+                _isRestoringScroll = false;
+                UnlockSessionInteractions(generation);
+                LogSwitchAudit(traceId, "Restore.Done",
+                    $"session={DescribeSession(session)} offsetY={_chatScrollViewer.Offset.Y:F1} nearBottom={_isUserNearBottom}");
+            }, DispatcherPriority.Background);
+        }
+
+        private void LockSessionInteractions(int generation)
+        {
+            _interactionLockGeneration = generation;
+            _interactionsLocked = true;
+            if (_sessionListBox != null)
+            {
+                _sessionListBox.IsHitTestVisible = false;
+            }
+
+            if (_sessionViewsHost != null)
+            {
+                _sessionViewsHost.IsHitTestVisible = false;
+            }
+        }
+
+        private void UnlockSessionInteractions(int generation)
+        {
+            if (generation != _interactionLockGeneration)
+            {
+                return;
+            }
+
+            if (!_interactionsLocked)
+            {
+                return;
+            }
+
+            _interactionsLocked = false;
+
+            if (_sessionListBox != null)
+            {
+                _sessionListBox.IsHitTestVisible = true;
+            }
+
+            if (_sessionViewsHost != null)
+            {
+                _sessionViewsHost.IsHitTestVisible = true;
+            }
+        }
+
+        private void SaveCurrentSessionScrollState()
+        {
+            var viewer = GetScrollViewerForSession(_attachedSession);
+            if (_attachedSession == null || viewer == null)
+                return;
+
+            var offsetY = Math.Max(0, viewer.Offset.Y);
+            var maxY = Math.Max(0, viewer.Extent.Height - viewer.Viewport.Height);
+            var ratio = maxY > 0 ? Math.Clamp(offsetY / maxY, 0, 1) : 0;
+
+            _attachedSession.LastNonBottomScrollOffsetY = offsetY;
+            _attachedSession.LastScrollAnchorRatio = ratio;
+            _attachedSession.LastScrollSavedMaxY = maxY;
+
+            var hasAnchor = TryCaptureVisibleAnchor(_attachedSession, viewer, out var anchorIndex, out var anchorOffsetY);
+            if (hasAnchor)
+            {
+                _attachedSession.LastScrollAnchorMessageIndex = anchorIndex;
+                _attachedSession.LastScrollAnchorViewportOffsetY = anchorOffsetY;
+            }
+
+            LogSwitchAudit(_switchTraceSequence, IsNearBottom(viewer) ? "Offset.Save.Bottom" : "Offset.Save",
+                $"session={DescribeSession(_attachedSession)} offsetY={offsetY:F1} maxY={maxY:F1} ratio={ratio:F4} hasAnchor={hasAnchor} anchorIdx={(hasAnchor ? anchorIndex.ToString() : "null")} anchorOffY={(hasAnchor ? anchorOffsetY.ToString("F1") : "null")}");
+        }
+
+        private static string DescribeSession(MediaSessionViewModel? session)
+            => session == null
+                ? "<null>"
+                : $"{session.SessionId}/{session.SessionName}(loaded={session.IsContentLoaded},msg={session.Messages.Count},task={session.TaskHistory.Count},anchorIdx={session.LastScrollAnchorMessageIndex?.ToString() ?? "null"})";
+
+        private static bool IsSwitchAuditEnabled()
+        {
+            var now = DateTime.UtcNow;
+            if ((now - _switchAuditLastReadUtc).TotalSeconds < 2)
+            {
+                return _switchAuditEnabledCache;
+            }
+
+            _switchAuditLastReadUtc = now;
+            try
+            {
+                var configPath = PathManager.Instance.ConfigFilePath;
+                if (!File.Exists(configPath))
+                {
+                    _switchAuditEnabledCache = false;
+                    return false;
+                }
+
+                var json = File.ReadAllText(configPath);
+                using var doc = JsonDocument.Parse(json);
+                _switchAuditEnabledCache = doc.RootElement.TryGetProperty("EnableAuditLog", out var enabled)
+                    && enabled.ValueKind == JsonValueKind.True;
+                return _switchAuditEnabledCache;
+            }
+            catch
+            {
+                _switchAuditEnabledCache = false;
+                return false;
+            }
+        }
+
+        private static string GetSwitchAuditPath()
+        {
+            var logsPath = PathManager.Instance.LogsPath;
+            Directory.CreateDirectory(logsPath);
+            return Path.Combine(logsPath, "Audit.log");
+        }
+
+        private static void LogSwitchAudit(int traceId, string eventName, string message)
+        {
+            if (!IsSwitchAuditEnabled())
+            {
+                return;
+            }
+
+            _ = AppendSwitchAuditAsync(traceId, eventName, message);
+        }
+
+        private static async Task AppendSwitchAuditAsync(int traceId, string eventName, string message)
+        {
+            try
+            {
+                var line = $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] [MediaSwitch] [trace={traceId}] {eventName} | {message}";
+                await _switchAuditLogLock.WaitAsync();
+                try
+                {
+                    await File.AppendAllTextAsync(GetSwitchAuditPath(), line + Environment.NewLine, new UTF8Encoding(false));
+                }
+                finally
+                {
+                    _switchAuditLogLock.Release();
+                }
+            }
+            catch
+            {
+                // 审计日志失败不影响主流程
+            }
+        }
+
+        private bool TryCaptureVisibleAnchor(MediaSessionViewModel session, ScrollViewer scrollViewer, out int messageIndex, out double viewportOffsetY)
+        {
+            messageIndex = -1;
+            viewportOffsetY = 0;
+
+            var viewportCenterY = scrollViewer.Viewport.Height / 2;
+            Border? bestCenterAnchor = null;
+            double bestDistance = double.MaxValue;
+
+            foreach (var border in scrollViewer.GetVisualDescendants().OfType<Border>())
+            {
+                if (border.DataContext is not ChatMessageViewModel)
+                {
+                    continue;
+                }
+
+                if (!border.Classes.Contains("user-msg") && !border.Classes.Contains("ai-msg"))
+                {
+                    continue;
+                }
+
+                var point = border.TranslatePoint(new Point(0, 0), scrollViewer);
+                if (!point.HasValue)
+                {
+                    continue;
+                }
+
+                var y = point.Value.Y;
+                var h = border.Bounds.Height;
+                if (h <= 0)
+                {
+                    continue;
+                }
+
+                var bottom = y + h;
+                if (bottom <= 0 || y >= scrollViewer.Viewport.Height)
+                {
+                    continue;
+                }
+
+                var centerY = y + h / 2;
+                var distance = Math.Abs(centerY - viewportCenterY);
+                if (distance < bestDistance)
+                {
+                    bestDistance = distance;
+                    bestCenterAnchor = border;
+                }
+            }
+
+            var anchorBorder = bestCenterAnchor;
+            if (anchorBorder?.DataContext is not ChatMessageViewModel anchorMessage)
+            {
+                return false;
+            }
+
+            messageIndex = session.Messages.IndexOf(anchorMessage);
+            if (messageIndex < 0)
+            {
+                return false;
+            }
+
+            var anchorPoint = anchorBorder.TranslatePoint(new Point(0, 0), scrollViewer);
+            if (!anchorPoint.HasValue)
+            {
+                return false;
+            }
+
+            var anchorCenterY = anchorPoint.Value.Y + anchorBorder.Bounds.Height / 2;
+            viewportOffsetY = anchorCenterY - viewportCenterY;
+            return true;
+        }
+
+        private bool TryAlignToAnchorMessage(MediaSessionViewModel session, out double appliedDelta)
+        {
+            appliedDelta = 0;
+            var viewer = GetScrollViewerForSession(session) ?? _chatScrollViewer;
+            if (viewer == null
+                || !session.LastScrollAnchorMessageIndex.HasValue
+                || !session.LastScrollAnchorViewportOffsetY.HasValue)
+            {
+                return false;
+            }
+
+            var index = session.LastScrollAnchorMessageIndex.Value;
+            if (index < 0 || index >= session.Messages.Count)
+            {
+                return false;
+            }
+
+            var anchorMessage = session.Messages[index];
+            Border? anchorBorder = null;
+            foreach (var border in viewer.GetVisualDescendants().OfType<Border>())
+            {
+                if (!ReferenceEquals(border.DataContext, anchorMessage))
+                {
+                    continue;
+                }
+
+                if (!border.Classes.Contains("user-msg") && !border.Classes.Contains("ai-msg"))
+                {
+                    continue;
+                }
+
+                anchorBorder = border;
+                break;
+            }
+
+            if (anchorBorder == null)
+            {
+                return false;
+            }
+
+            var point = anchorBorder.TranslatePoint(new Point(0, 0), viewer);
+            if (!point.HasValue)
+            {
+                return false;
+            }
+
+            var viewportCenterY = viewer.Viewport.Height / 2;
+            var currentCenterY = point.Value.Y + anchorBorder.Bounds.Height / 2;
+            var desiredCenterY = viewportCenterY + session.LastScrollAnchorViewportOffsetY.Value;
+            appliedDelta = currentCenterY - desiredCenterY;
+            if (Math.Abs(appliedDelta) < 1)
+            {
+                return true;
+            }
+
+            var maxY = Math.Max(0, viewer.Extent.Height - viewer.Viewport.Height);
+            var targetOffset = Math.Clamp(viewer.Offset.Y + appliedDelta, 0, maxY);
+            viewer.Offset = new Vector(viewer.Offset.X, targetOffset);
+            return true;
+        }
+
+        private void UpdateQuickNavButtonsVisibility()
+        {
+            var viewer = GetScrollViewerForSession(_attachedSession);
+            if (viewer == null)
+                return;
+
+            var topVisible = viewer.Offset.Y > QuickNavVisibilityThreshold;
+            var distanceToBottom = viewer.Extent.Height - (viewer.Offset.Y + viewer.Viewport.Height);
+            var bottomVisible = distanceToBottom > QuickNavVisibilityThreshold;
+
+            var topButton = viewer.GetVisualDescendants().OfType<Button>().FirstOrDefault(b => b.Name == "ScrollToTopButton");
+            var bottomButton = viewer.GetVisualDescendants().OfType<Button>().FirstOrDefault(b => b.Name == "ScrollToBottomButton");
+
+            if (topButton != null)
+            {
+                topButton.IsVisible = topVisible;
+            }
+
+            if (bottomButton != null)
+            {
+                bottomButton.IsVisible = bottomVisible;
+            }
+        }
+
+        private void SessionScrollViewer_AttachedToVisualTree(object? sender, VisualTreeAttachmentEventArgs e)
+        {
+            if (sender is not ScrollViewer viewer || viewer.DataContext is not MediaSessionViewModel session)
+            {
+                return;
+            }
+
+            _sessionScrollViewers[session.SessionId] = viewer;
+            if (ReferenceEquals(session, _attachedSession))
+            {
+                _chatScrollViewer = viewer;
+                UpdateQuickNavButtonsVisibility();
+            }
+        }
+
+        private void SessionScrollViewer_DetachedFromVisualTree(object? sender, VisualTreeAttachmentEventArgs e)
+        {
+            if (sender is not ScrollViewer viewer || viewer.DataContext is not MediaSessionViewModel session)
+            {
+                return;
+            }
+
+            if (_sessionScrollViewers.TryGetValue(session.SessionId, out var mapped) && ReferenceEquals(mapped, viewer))
+            {
+                _sessionScrollViewers.Remove(session.SessionId);
+                if (ReferenceEquals(_attachedSession, session))
+                {
+                    _chatScrollViewer = null;
+                }
+            }
+        }
+
+        private void ScrollToTop_Click(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+        {
+            ScrollToTop();
+            e.Handled = true;
+        }
+
+        private void ScrollToBottom_Click(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+        {
+            ScrollToBottom();
+            e.Handled = true;
         }
 
         private async void PromptTextBox_KeyDown(object? sender, KeyEventArgs e)
@@ -334,6 +1041,15 @@ namespace TranslationToolUI.Views
 
         protected override void OnClosing(WindowClosingEventArgs e)
         {
+            SaveCurrentSessionScrollState();
+
+            _sessionScrollViewers.Clear();
+
+            if (_attachedSession != null)
+            {
+                _attachedSession.Messages.CollectionChanged -= CurrentSessionMessages_CollectionChanged;
+            }
+
             _viewModel?.Dispose();
             base.OnClosing(e);
         }
@@ -344,6 +1060,21 @@ namespace TranslationToolUI.Views
             {
                 _ = StartRenameSessionAsync();
                 e.Handled = true;
+            }
+        }
+
+        private void SessionItem_PointerPressed(object? sender, PointerPressedEventArgs e)
+        {
+            if (sender is not Control control)
+                return;
+
+            if (control.DataContext is not MediaSessionViewModel session)
+                return;
+
+            var point = e.GetCurrentPoint(control);
+            if (point.Properties.IsLeftButtonPressed || point.Properties.IsRightButtonPressed)
+            {
+                _viewModel.CurrentSession = session;
             }
         }
 
@@ -372,6 +1103,28 @@ namespace TranslationToolUI.Views
             foreach (var task in cancelledTasks)
             {
                 session.ResumeVideoTask(task);
+            }
+        }
+
+        private void DeleteSession_Click(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+        {
+            if (_viewModel == null)
+            {
+                return;
+            }
+
+            var sessionListBox = this.FindControl<ListBox>("SessionListBox");
+            var target = sessionListBox?.SelectedItem as MediaSessionViewModel
+                ?? _viewModel.CurrentSession;
+            if (target == null)
+            {
+                return;
+            }
+
+            if (_viewModel.DeleteSessionCommand.CanExecute(target))
+            {
+                _viewModel.DeleteSessionCommand.Execute(target);
+                e.Handled = true;
             }
         }
 

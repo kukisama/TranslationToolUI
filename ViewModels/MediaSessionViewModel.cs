@@ -39,6 +39,54 @@ namespace TranslationToolUI.ViewModels
 
         public string SessionDirectory { get; }
 
+        /// <summary>
+        /// 记录该会话上次“非底部”滚动位置；为空表示采用默认到底部行为。
+        /// </summary>
+        public double? LastNonBottomScrollOffsetY { get; set; }
+
+        /// <summary>
+        /// 记录上次视口锚点对应的消息索引（仅内存）。
+        /// </summary>
+        public int? LastScrollAnchorMessageIndex { get; set; }
+
+        /// <summary>
+        /// 记录上次滚动比例（0~1，仅内存）。
+        /// </summary>
+        public double? LastScrollAnchorRatio { get; set; }
+
+        /// <summary>
+        /// 记录保存滚动位置时的可滚动最大值（Extent-Viewport，仅内存）。
+        /// 用于恢复时判断是否需要从“绝对像素”切换为“比例恢复”。
+        /// </summary>
+        public double? LastScrollSavedMaxY { get; set; }
+
+        /// <summary>
+        /// 记录锚点消息在视口中的 Y 偏移（像素，仅内存）。
+        /// </summary>
+        public double? LastScrollAnchorViewportOffsetY { get; set; }
+
+        /// <summary>
+        /// 是否已从 session.json 加载完整消息与任务内容。
+        /// </summary>
+        public bool IsContentLoaded { get; set; }
+
+        /// <summary>
+        /// 是否已执行过“历史视频补帧”初始化（仅需一次）。
+        /// </summary>
+        public bool HasBackfilledVideoFrames { get; set; }
+
+        /// <summary>
+        /// 是否已执行过“中断视频任务恢复”扫描（仅需一次）。
+        /// </summary>
+        public bool HasResumedInterruptedVideoTasks { get; set; }
+
+        private bool _isActiveSession;
+        public bool IsActiveSession
+        {
+            get => _isActiveSession;
+            set => SetProperty(ref _isActiveSession, value);
+        }
+
         // --- 聊天记录 ---
         public ObservableCollection<ChatMessageViewModel> Messages { get; } = new();
 

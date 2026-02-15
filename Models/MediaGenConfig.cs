@@ -41,6 +41,9 @@ namespace TranslationToolUI.Models
         public int VideoVariants { get; set; } = 1;
         public int VideoPollIntervalMs { get; set; } = 5000;
 
+        // --- 性能与缓存 ---
+        public int MaxLoadedSessionsInMemory { get; set; } = 8;
+
         // --- 输出 ---
         public string OutputDirectory { get; set; } = "";
     }

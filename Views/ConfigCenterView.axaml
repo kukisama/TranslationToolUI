@@ -730,6 +730,21 @@
 
                         <Separator Margin="0,8,0,8"/>
 
+                        <TextBlock Text="性能与缓存" FontSize="14" FontWeight="SemiBold"/>
+                        <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                            <TextBlock Text="内存中最多保留已加载会话数" VerticalAlignment="Center"/>
+                            <NumericUpDown x:Name="MediaMaxLoadedSessionsNumeric"
+                                           Value="8"
+                                           Minimum="1"
+                                           Maximum="64"
+                                           Width="120"
+                                           FormatString="F0"/>
+                        </StackPanel>
+                        <TextBlock FontSize="10" Foreground="Gray"
+                                   Text="默认 8。超过上限后，会按最近最少使用策略卸载旧会话内容（保留会话条目）。" TextWrapping="Wrap"/>
+
+                        <Separator Margin="0,8,0,8"/>
+
                         <TextBlock Text="输出目录" FontSize="14" FontWeight="SemiBold"/>
                         <StackPanel Orientation="Horizontal" Spacing="8">
                             <TextBox x:Name="MediaOutputDirTextBox" MinWidth="400"

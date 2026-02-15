@@ -284,6 +284,9 @@ namespace TranslationToolUI.Views
             MediaVideoAzureTenantIdTextBox.Text = mc.VideoAzureTenantId ?? "";
             MediaVideoAzureClientIdTextBox.Text = mc.VideoAzureClientId ?? "";
             MediaOutputDirTextBox.Text = mc.OutputDirectory;
+            MediaMaxLoadedSessionsNumeric.Value = mc.MaxLoadedSessionsInMemory <= 0
+                ? 8
+                : mc.MaxLoadedSessionsInMemory;
 
             UpdateMediaImageProviderFieldsVisibility();
             UpdateMediaImageAadFieldsVisibility();
@@ -1589,6 +1592,10 @@ namespace TranslationToolUI.Views
                 : AzureAuthMode.ApiKey;
             mc.VideoAzureTenantId = MediaVideoAzureTenantIdTextBox.Text?.Trim() ?? "";
             mc.VideoAzureClientId = MediaVideoAzureClientIdTextBox.Text?.Trim() ?? "";
+            mc.MaxLoadedSessionsInMemory = (int)Math.Clamp(
+                Math.Round(MediaMaxLoadedSessionsNumeric.Value ?? 8m),
+                1,
+                64);
             mc.OutputDirectory = MediaOutputDirTextBox.Text?.Trim() ?? "";
         }
 

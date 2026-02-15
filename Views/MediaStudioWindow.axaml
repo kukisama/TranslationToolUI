@@ -114,12 +114,12 @@
                                 <MenuItem Header="重命名 (F2)" Click="RenameSession_Click"/>
                                 <MenuItem Header="恢复已取消的视频作业" Click="ResumeVideoTasks_Click"/>
                                 <Separator/>
-                                <MenuItem Header="删除会话" Command="{Binding DeleteSessionCommand}"/>
+                                <MenuItem Header="删除会话" Click="DeleteSession_Click"/>
                             </ContextMenu>
                         </ListBox.ContextMenu>
                         <ListBox.ItemTemplate>
                             <DataTemplate>
-                                <Grid ColumnDefinitions="*,Auto" Margin="4,3">
+                                <Grid ColumnDefinitions="*,Auto" Margin="4,3" PointerPressed="SessionItem_PointerPressed">
                                     <TextBlock Grid.Column="0" Text="{Binding SessionName}"
                                                VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
                                     <Ellipse Grid.Column="1" Width="8" Height="8"
@@ -138,121 +138,158 @@
 
             <!-- 右侧内容区 -->
             <Grid Grid.Column="2" RowDefinitions="*,Auto"
-                x:Name="SessionContentRoot"
-                  DataContext="{Binding CurrentSession}"
-                  IsVisible="{Binding $parent[Window].DataContext.HasCurrentSession}">
+                            x:Name="SessionViewsHost">
+                            <ItemsControl ItemsSource="{Binding Sessions}"
+                                          IsVisible="{Binding HasCurrentSession}">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate>
+                                        <Grid/>
+                                    </ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Grid RowDefinitions="*,Auto"
+                                              x:Name="SessionContentRoot"
+                                              IsVisible="{Binding IsActiveSession}">
 
                 <!-- 聊天消息区 -->
                 <Border Grid.Row="0" Margin="0">
-                    <ScrollViewer x:Name="ChatScrollViewer"
-                                  VerticalScrollBarVisibility="Auto"
-                                  HorizontalScrollBarVisibility="Disabled"
-                                  Padding="8">
-                        <ItemsControl ItemsSource="{Binding Messages}">
-                            <ItemsControl.ItemTemplate>
-                                <DataTemplate>
-                                    <Panel>
-                                        <!-- 用户消息 -->
-                                        <Border Classes="user-msg" IsVisible="{Binding IsUser}">
-                                            <Border.ContextMenu>
-                                                <ContextMenu>
-                                                    <MenuItem Header="删除此条记录" Click="DeleteChatMessage_Click" Tag="{Binding}"/>
-                                                </ContextMenu>
-                                            </Border.ContextMenu>
-                                            <StackPanel Spacing="4">
-                                                <SelectableTextBlock Text="{Binding Text}"
-                                                         TextWrapping="Wrap"
-                                                         MaxWidth="500"/>
-                                                <TextBlock Text="{Binding TimestampText}" FontSize="10"
-                                                           Foreground="#FF999999" HorizontalAlignment="Right"/>
-                                            </StackPanel>
-                                        </Border>
+                    <Grid>
+                        <ScrollViewer x:Name="SessionScrollViewer"
+                                      VerticalScrollBarVisibility="Auto"
+                                      HorizontalScrollBarVisibility="Disabled"
+                                      Padding="8"
+                                      ScrollChanged="ChatScrollViewer_ScrollChanged"
+                                      AttachedToVisualTree="SessionScrollViewer_AttachedToVisualTree"
+                                      DetachedFromVisualTree="SessionScrollViewer_DetachedFromVisualTree">
+                            <ItemsControl ItemsSource="{Binding Messages}">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate>
+                                        <VirtualizingStackPanel/>
+                                    </ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Panel>
+                                            <!-- 用户消息 -->
+                                            <Border Classes="user-msg" IsVisible="{Binding IsUser}">
+                                                <Border.ContextMenu>
+                                                    <ContextMenu>
+                                                        <MenuItem Header="删除此条记录" Click="DeleteChatMessage_Click" Tag="{Binding}"/>
+                                                    </ContextMenu>
+                                                </Border.ContextMenu>
+                                                <StackPanel Spacing="4">
+                                                    <SelectableTextBlock Text="{Binding Text}"
+                                                             TextWrapping="Wrap"
+                                                             MaxWidth="500"/>
+                                                    <TextBlock Text="{Binding TimestampText}" FontSize="10"
+                                                               Foreground="#FF999999" HorizontalAlignment="Right"/>
+                                                </StackPanel>
+                                            </Border>
 
-                                        <!-- AI 消息 -->
-                                        <Border Classes="ai-msg" IsVisible="{Binding IsAssistant}">
-                                            <Border.ContextMenu>
-                                                <ContextMenu>
-                                                    <MenuItem Header="删除此条记录" Click="DeleteChatMessage_Click" Tag="{Binding}"/>
-                                                </ContextMenu>
-                                            </Border.ContextMenu>
-                                            <StackPanel Spacing="6">
-                                                <SelectableTextBlock Text="{Binding Text}"
-                                                         TextWrapping="Wrap"
-                                                         MaxWidth="500"/>
+                                            <!-- AI 消息 -->
+                                            <Border Classes="ai-msg" IsVisible="{Binding IsAssistant}">
+                                                <Border.ContextMenu>
+                                                    <ContextMenu>
+                                                        <MenuItem Header="删除此条记录" Click="DeleteChatMessage_Click" Tag="{Binding}"/>
+                                                    </ContextMenu>
+                                                </Border.ContextMenu>
+                                                <StackPanel Spacing="6">
+                                                    <SelectableTextBlock Text="{Binding Text}"
+                                                             TextWrapping="Wrap"
+                                                             MaxWidth="500"/>
 
-                                                <ProgressBar IsIndeterminate="True" Height="4"
-                                                             IsVisible="{Binding IsLoading}"/>
+                                                    <ProgressBar IsIndeterminate="True" Height="4"
+                                                                 IsVisible="{Binding IsLoading}"/>
 
-                                                <!-- 媒体文件列表 -->
-                                                <ItemsControl ItemsSource="{Binding MediaPaths}"
-                                                              IsVisible="{Binding HasMedia}">
-                                                    <ItemsControl.ItemsPanel>
-                                                        <ItemsPanelTemplate>
-                                                            <WrapPanel Orientation="Horizontal"/>
-                                                        </ItemsPanelTemplate>
-                                                    </ItemsControl.ItemsPanel>
-                                                    <ItemsControl.ItemTemplate>
-                                                        <DataTemplate>
-                                                            <Border Margin="2" CornerRadius="4"
-                                                                    Background="#FFEEEEEE" Padding="4"
-                                                                    Cursor="Hand"
-                                                                    PointerPressed="MediaThumbnail_PointerPressed"
-                                                                    Tag="{Binding $parent[ItemsControl].DataContext}">
-                                                                <Grid>
-                                                                    <!-- 图片预览（点击即可大图/播放） -->
-                                                                    <Image x:Name="PreviewImage"
-                                                                           MaxWidth="200" MaxHeight="200"
-                                                                           Stretch="Uniform"
-                                                                           Source="{Binding Converter={StaticResource FilePathToBitmapConverter}}"/>
+                                                    <!-- 媒体文件列表 -->
+                                                    <ItemsControl ItemsSource="{Binding MediaPaths}"
+                                                                  IsVisible="{Binding HasMedia}">
+                                                        <ItemsControl.ItemsPanel>
+                                                            <ItemsPanelTemplate>
+                                                                <WrapPanel Orientation="Horizontal"/>
+                                                            </ItemsPanelTemplate>
+                                                        </ItemsControl.ItemsPanel>
+                                                        <ItemsControl.ItemTemplate>
+                                                            <DataTemplate>
+                                                                <Border Margin="2" CornerRadius="4"
+                                                                        Background="#FFEEEEEE" Padding="4"
+                                                                        Cursor="Hand"
+                                                                        PointerPressed="MediaThumbnail_PointerPressed"
+                                                                        Tag="{Binding $parent[ItemsControl].DataContext}">
+                                                                    <Grid>
+                                                                        <!-- 图片预览（点击即可大图/播放） -->
+                                                                        <Image x:Name="PreviewImage"
+                                                                               MaxWidth="200" MaxHeight="200"
+                                                                               Stretch="Uniform"
+                                                                               Source="{Binding Converter={StaticResource FilePathToBitmapConverter}}"/>
 
-                                                                    <!-- 首帧专属播放提示 -->
-                                                                    <Border HorizontalAlignment="Left"
-                                                                            VerticalAlignment="Top"
-                                                                            Margin="6"
-                                                                            CornerRadius="10"
-                                                                            Padding="10,4"
-                                                                            Background="#CC000000"
-                                                                            IsVisible="{Binding Converter={StaticResource FirstFrameBadgeVisibilityConverter}}">
-                                                                        <TextBlock Text="▶ 播放视频"
-                                                                                   FontSize="13"
-                                                                                   FontWeight="SemiBold"
-                                                                                   Foreground="White"/>
-                                                                    </Border>
+                                                                        <!-- 首帧专属播放提示 -->
+                                                                        <Border HorizontalAlignment="Left"
+                                                                                VerticalAlignment="Top"
+                                                                                Margin="6"
+                                                                                CornerRadius="10"
+                                                                                Padding="10,4"
+                                                                                Background="#CC000000"
+                                                                                IsVisible="{Binding Converter={StaticResource FirstFrameBadgeVisibilityConverter}}">
+                                                                            <TextBlock Text="▶ 播放视频"
+                                                                                       FontSize="13"
+                                                                                       FontWeight="SemiBold"
+                                                                                       Foreground="White"/>
+                                                                        </Border>
 
-                                                                    <!-- 首帧中心播放图示（更大更直观） -->
-                                                                    <Border HorizontalAlignment="Center"
-                                                                            VerticalAlignment="Center"
-                                                                            Width="56"
-                                                                            Height="56"
-                                                                            CornerRadius="28"
-                                                                            Background="#B3000000"
-                                                                            BorderBrush="#E6FFFFFF"
-                                                                            BorderThickness="2"
-                                                                            IsVisible="{Binding Converter={StaticResource FirstFrameBadgeVisibilityConverter}}">
-                                                                        <TextBlock Text="▶"
-                                                                                   FontSize="28"
-                                                                                   FontWeight="Bold"
-                                                                                   Foreground="White"
-                                                                                   HorizontalAlignment="Center"
-                                                                                   VerticalAlignment="Center"
-                                                                                   Margin="2,0,0,0"/>
-                                                                    </Border>
-                                                                </Grid>
-                                                            </Border>
-                                                        </DataTemplate>
-                                                    </ItemsControl.ItemTemplate>
-                                                </ItemsControl>
+                                                                        <!-- 首帧中心播放图示（更大更直观） -->
+                                                                        <Border HorizontalAlignment="Center"
+                                                                                VerticalAlignment="Center"
+                                                                                Width="56"
+                                                                                Height="56"
+                                                                                CornerRadius="28"
+                                                                                Background="#B3000000"
+                                                                                BorderBrush="#E6FFFFFF"
+                                                                                BorderThickness="2"
+                                                                                IsVisible="{Binding Converter={StaticResource FirstFrameBadgeVisibilityConverter}}">
+                                                                            <TextBlock Text="▶"
+                                                                                       FontSize="28"
+                                                                                       FontWeight="Bold"
+                                                                                       Foreground="White"
+                                                                                       HorizontalAlignment="Center"
+                                                                                       VerticalAlignment="Center"
+                                                                                       Margin="2,0,0,0"/>
+                                                                        </Border>
+                                                                    </Grid>
+                                                                </Border>
+                                                            </DataTemplate>
+                                                        </ItemsControl.ItemTemplate>
+                                                    </ItemsControl>
 
-                                                <TextBlock Text="{Binding TimestampText}" FontSize="10"
-                                                           Foreground="#FF999999"/>
-                                            </StackPanel>
-                                        </Border>
-                                    </Panel>
-                                </DataTemplate>
-                            </ItemsControl.ItemTemplate>
-                        </ItemsControl>
-                    </ScrollViewer>
-                </Border>
+                                                    <TextBlock Text="{Binding TimestampText}" FontSize="10"
+                                                               Foreground="#FF999999"/>
+                                                </StackPanel>
+                                            </Border>
+                                        </Panel>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </ScrollViewer>
+
+                                        <StackPanel HorizontalAlignment="Right"
+                                                    VerticalAlignment="Bottom"
+                                                    Margin="0,0,12,12"
+                                                    Spacing="6"
+                                                    IsHitTestVisible="True">
+                                            <Button x:Name="ScrollToTopButton"
+                                                    Content="⇧ 顶部"
+                                                    IsVisible="False"
+                                                    Padding="10,4"
+                                                    Click="ScrollToTop_Click"/>
+                                            <Button x:Name="ScrollToBottomButton"
+                                                    Content="⇩ 底部"
+                                                    IsVisible="False"
+                                                    Padding="10,4"
+                                                    Click="ScrollToBottom_Click"/>
+                                        </StackPanel>
+                                    </Grid>
+                                </Border>
 
                 <!-- ===== 底部输入区 ===== -->
                 <Border Grid.Row="1" BorderBrush="#FFE0E0E0" BorderThickness="0,1,0,0" Padding="10,8">
@@ -441,6 +478,10 @@
                         </StackPanel>
                     </Grid>
                 </Border>
+                                        </Grid>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
             </Grid>
 
             <!-- 无会话提示 -->

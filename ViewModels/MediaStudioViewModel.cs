@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.IO;
@@ -25,6 +26,16 @@ namespace TranslationToolUI.ViewModels
         private readonly AzureTokenProvider _imageTokenProvider = new("media-image");
         private readonly AzureTokenProvider _videoTokenProvider = new("media-video");
         private readonly string _studioDirectory;
+        private readonly string _indexFilePath;
+        private MediaStudioIndex _sessionIndex = new();
+        private readonly LinkedList<string> _loadedSessionLru = new();
+        private readonly Dictionary<string, LinkedListNode<string>> _loadedSessionLruNodes = new(StringComparer.OrdinalIgnoreCase);
+
+        private static readonly JsonSerializerOptions JsonOptions = new()
+        {
+            WriteIndented = true,
+            Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+        };
 
         // --- 会话管理 ---
         public ObservableCollection<MediaSessionViewModel> Sessions { get; } = new();
@@ -38,9 +49,36 @@ namespace TranslationToolUI.ViewModels
                 if (SetProperty(ref _currentSession, value))
                 {
                     OnPropertyChanged(nameof(HasCurrentSession));
+
+                    foreach (var session in Sessions)
+                    {
+                        session.IsActiveSession = ReferenceEquals(session, value);
+                    }
+
+                    (DeleteSessionCommand as RelayCommand)?.RaiseCanExecuteChanged();
+                    (RenameSessionCommand as RelayCommand)?.RaiseCanExecuteChanged();
+
                     if (value != null)
                     {
-                        _ = value.BackfillVideoFramesForExistingMessagesAsync();
+                        var switchSw = Stopwatch.StartNew();
+                        var wasLoaded = value.IsContentLoaded;
+                        EnsureSessionLoaded(value);
+                        TouchLoadedSession(value);
+                        EnforceLoadedSessionCacheLimit(currentSessionId: value.SessionId);
+                        switchSw.Stop();
+                        Debug.WriteLine($"切换会话 {value.SessionId}: loadedBefore={wasLoaded}, loadedNow={value.IsContentLoaded}, messages={value.Messages.Count}, tasks={value.TaskHistory.Count}, ensureMs={switchSw.ElapsedMilliseconds}");
+
+                        if (!value.HasBackfilledVideoFrames)
+                        {
+                            value.HasBackfilledVideoFrames = true;
+                            _ = value.BackfillVideoFramesForExistingMessagesAsync();
+                        }
+
+                        if (!value.HasResumedInterruptedVideoTasks)
+                        {
+                            value.HasResumedInterruptedVideoTasks = true;
+                            ResumeInterruptedVideoTasksForSession(value);
+                        }
                     }
                 }
             }
@@ -85,12 +123,13 @@ namespace TranslationToolUI.ViewModels
 
             var sessionsPath = PathManager.Instance.SessionsPath;
             _studioDirectory = Path.Combine(sessionsPath, "media-studio");
+            _indexFilePath = Path.Combine(_studioDirectory, "media-studio.index.json");
             Directory.CreateDirectory(_studioDirectory);
 
             NewSessionCommand = new RelayCommand(_ => CreateNewSession());
             DeleteSessionCommand = new RelayCommand(
-                _ => DeleteCurrentSession(),
-                _ => CurrentSession != null);
+                p => DeleteCurrentSession(p as MediaSessionViewModel),
+                p => (p as MediaSessionViewModel ?? CurrentSession) != null);
             RenameSessionCommand = new RelayCommand(
                 _ => { },  // 由 View 处理弹窗逻辑
                 _ => CurrentSession != null);
@@ -105,29 +144,23 @@ namespace TranslationToolUI.ViewModels
             }
 
             _ = TrySilentLoginForMediaAsync();
-
-            // 恢复中断的视频任务
-            ResumeInterruptedVideoTasks();
         }
 
         /// <summary>
-        /// 遍历所有会话，恢复 Running 状态且有 RemoteVideoId 的视频任务
+        /// 恢复单会话中 Running 状态且有 RemoteVideoId 的视频任务
         /// </summary>
-        private void ResumeInterruptedVideoTasks()
+        private static void ResumeInterruptedVideoTasksForSession(MediaSessionViewModel session)
         {
-            foreach (var session in Sessions)
-            {
-                var tasksToResume = session.TaskHistory
-                    .Where(t => t.Type == MediaGenType.Video
-                        && t.Status == MediaGenStatus.Running
-                        && !string.IsNullOrEmpty(t.RemoteVideoId))
-                    .ToList();
+            var tasksToResume = session.TaskHistory
+                .Where(t => t.Type == MediaGenType.Video
+                    && t.Status == MediaGenStatus.Running
+                    && !string.IsNullOrEmpty(t.RemoteVideoId))
+                .ToList();
 
-                foreach (var task in tasksToResume)
-                {
-                    Debug.WriteLine($"恢复视频任务: {task.Id}, VideoId: {task.RemoteVideoId}");
-                    session.ResumeVideoTask(task);
-                }
+            foreach (var task in tasksToResume)
+            {
+                Debug.WriteLine($"恢复视频任务: {task.Id}, VideoId: {task.RemoteVideoId}");
+                session.ResumeVideoTask(task);
             }
         }
 
@@ -157,13 +190,16 @@ namespace TranslationToolUI.ViewModels
             var sessionId = Guid.NewGuid().ToString("N")[..8];
             var sessionDir = Path.Combine(_studioDirectory, $"session_{sessionId}");
             Directory.CreateDirectory(sessionDir);
+            var defaultName = AllocateNextDefaultSessionName();
 
             var session = new MediaSessionViewModel(
-                sessionId, $"会话 {Sessions.Count + 1}",
+                sessionId, defaultName,
                 sessionDir, _aiConfig, _genConfig,
                 _imageService, _videoService,
                 OnSessionTaskCountChanged,
                 s => SaveSessionMeta(s));
+
+            session.IsContentLoaded = true;
 
             Sessions.Add(session);
             CurrentSession = session;
@@ -171,15 +207,20 @@ namespace TranslationToolUI.ViewModels
             SaveSessionMeta(session);
         }
 
-        public void DeleteCurrentSession()
+        public void DeleteCurrentSession(MediaSessionViewModel? targetSession = null)
         {
-            if (CurrentSession == null) return;
+            var session = targetSession ?? CurrentSession;
+            if (session == null)
+            {
+                return;
+            }
 
-            var session = CurrentSession;
+            EnsureSessionLoaded(session);
             session.CancelAll();
 
-            // 标记 session.json 为已删除，下次不再加载
+            // 标记 session.json 为已删除，下次不再加载（保留目录与历史文件）
             MarkSessionDeleted(session);
+            MarkSessionDeletedInIndex(session.SessionId);
 
             var idx = Sessions.IndexOf(session);
             Sessions.Remove(session);
@@ -194,6 +235,159 @@ namespace TranslationToolUI.ViewModels
             }
 
             UpdateActiveTaskCount();
+            RemoveFromLoadedSessionLru(session.SessionId);
+        }
+
+        private int GetMaxLoadedSessionsInMemory()
+        {
+            var configured = _genConfig.MaxLoadedSessionsInMemory;
+            if (configured <= 0)
+            {
+                return 8;
+            }
+
+            return Math.Clamp(configured, 1, 64);
+        }
+
+        private void TouchLoadedSession(MediaSessionViewModel session)
+        {
+            if (!session.IsContentLoaded)
+            {
+                return;
+            }
+
+            if (_loadedSessionLruNodes.TryGetValue(session.SessionId, out var existingNode))
+            {
+                _loadedSessionLru.Remove(existingNode);
+            }
+
+            var node = _loadedSessionLru.AddLast(session.SessionId);
+            _loadedSessionLruNodes[session.SessionId] = node;
+        }
+
+        private void RemoveFromLoadedSessionLru(string sessionId)
+        {
+            if (!_loadedSessionLruNodes.TryGetValue(sessionId, out var node))
+            {
+                return;
+            }
+
+            _loadedSessionLru.Remove(node);
+            _loadedSessionLruNodes.Remove(sessionId);
+        }
+
+        private void EnforceLoadedSessionCacheLimit(string? currentSessionId)
+        {
+            var maxLoaded = GetMaxLoadedSessionsInMemory();
+            var loadedCount = Sessions.Count(s => s.IsContentLoaded);
+
+            if (loadedCount <= maxLoaded)
+            {
+                return;
+            }
+
+            var guard = _loadedSessionLru.Count + 8;
+            while (loadedCount > maxLoaded && _loadedSessionLru.Count > 0 && guard-- > 0)
+            {
+                var node = _loadedSessionLru.First;
+                if (node == null)
+                {
+                    break;
+                }
+
+                _loadedSessionLru.RemoveFirst();
+                _loadedSessionLruNodes.Remove(node.Value);
+
+                var session = Sessions.FirstOrDefault(s => s.SessionId.Equals(node.Value, StringComparison.OrdinalIgnoreCase));
+                if (session == null)
+                {
+                    continue;
+                }
+
+                if (!session.IsContentLoaded)
+                {
+                    continue;
+                }
+
+                if (!string.IsNullOrWhiteSpace(currentSessionId)
+                    && session.SessionId.Equals(currentSessionId, StringComparison.OrdinalIgnoreCase))
+                {
+                    TouchLoadedSession(session);
+                    continue;
+                }
+
+                if (session.RunningTaskCount > 0)
+                {
+                    TouchLoadedSession(session);
+                    continue;
+                }
+
+                session.Messages.Clear();
+                session.TaskHistory.Clear();
+                session.LastNonBottomScrollOffsetY = null;
+                session.LastScrollAnchorRatio = null;
+                session.LastScrollAnchorMessageIndex = null;
+                session.LastScrollAnchorViewportOffsetY = null;
+                session.IsContentLoaded = false;
+                loadedCount--;
+                Debug.WriteLine($"会话缓存淘汰: {session.SessionId}");
+            }
+        }
+
+        private string AllocateNextDefaultSessionName()
+        {
+            EnsureNextSessionNumberInitialized();
+
+            var usedNames = _sessionIndex.Sessions
+                .Select(s => s.Name)
+                .Where(n => !string.IsNullOrWhiteSpace(n))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            var number = Math.Max(1, _sessionIndex.NextSessionNumber);
+            string candidate;
+            do
+            {
+                candidate = $"会话 {number}";
+                number++;
+            }
+            while (usedNames.Contains(candidate));
+
+            _sessionIndex.NextSessionNumber = number;
+            return candidate;
+        }
+
+        private void EnsureNextSessionNumberInitialized()
+        {
+            var maxUsed = _sessionIndex.Sessions
+                .Select(s => TryParseDefaultSessionNumber(s.Name))
+                .Where(n => n.HasValue)
+                .Select(n => n!.Value)
+                .DefaultIfEmpty(0)
+                .Max();
+
+            if (_sessionIndex.NextSessionNumber <= maxUsed)
+            {
+                _sessionIndex.NextSessionNumber = maxUsed + 1;
+            }
+
+            if (_sessionIndex.NextSessionNumber < 1)
+            {
+                _sessionIndex.NextSessionNumber = 1;
+            }
+        }
+
+        private static int? TryParseDefaultSessionNumber(string? name)
+        {
+            const string prefix = "会话 ";
+            if (string.IsNullOrWhiteSpace(name) || !name.StartsWith(prefix, StringComparison.Ordinal))
+            {
+                return null;
+            }
+
+            var numberPart = name[prefix.Length..].Trim();
+            return int.TryParse(numberPart, out var number) && number > 0
+                ? number
+                : null;
         }
 
         private void MarkSessionDeleted(MediaSessionViewModel session)
@@ -208,19 +402,37 @@ namespace TranslationToolUI.ViewModels
                     if (sessionData != null)
                     {
                         sessionData.IsDeleted = true;
-                        var options = new JsonSerializerOptions
-                        {
-                            WriteIndented = true,
-                            Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
-                        };
-                        File.WriteAllText(metaPath, JsonSerializer.Serialize(sessionData, options));
+                        File.WriteAllText(metaPath, JsonSerializer.Serialize(sessionData, JsonOptions));
+                        return;
                     }
                 }
+
+                // 不存在或无法反序列化时，兜底写入最小删除标记
+                var fallback = new MediaGenSession
+                {
+                    Id = session.SessionId,
+                    Name = session.SessionName,
+                    IsDeleted = true
+                };
+                File.WriteAllText(metaPath, JsonSerializer.Serialize(fallback, JsonOptions));
             }
             catch (Exception ex)
             {
                 Debug.WriteLine($"标记会话删除失败: {ex.Message}");
             }
+        }
+
+        private void MarkSessionDeletedInIndex(string sessionId)
+        {
+            var entry = _sessionIndex.Sessions.FirstOrDefault(s => s.Id == sessionId);
+            if (entry == null)
+            {
+                return;
+            }
+
+            entry.IsDeleted = true;
+            entry.UpdatedAt = DateTime.Now;
+            SaveSessionIndex();
         }
 
         public void RenameCurrentSession(string newName)
@@ -259,49 +471,37 @@ namespace TranslationToolUI.ViewModels
             {
                 if (!Directory.Exists(_studioDirectory)) return;
 
-                foreach (var dir in Directory.GetDirectories(_studioDirectory, "session_*"))
+                LoadOrRebuildSessionIndex();
+
+                foreach (var entry in _sessionIndex.Sessions.Where(s => !s.IsDeleted))
                 {
+                    var dir = ResolveSessionDirectory(entry);
                     var metaPath = Path.Combine(dir, "session.json");
-                    if (!File.Exists(metaPath)) continue;
-
-                    try
+                    if (!File.Exists(metaPath))
                     {
-                        var json = File.ReadAllText(metaPath);
-                        var sessionData = JsonSerializer.Deserialize<MediaGenSession>(json);
-                        if (sessionData == null) continue;
-
-                        // 跳过已删除的会话
-                        if (sessionData.IsDeleted) continue;
-
-                        var session = new MediaSessionViewModel(
-                            sessionData.Id, sessionData.Name,
-                            dir, _aiConfig, _genConfig,
-                            _imageService, _videoService,
-                            OnSessionTaskCountChanged,
-                            s => SaveSessionMeta(s));
-
-                        // 恢复聊天记录
-                        foreach (var msg in sessionData.Messages)
-                        {
-                            session.Messages.Add(new ChatMessageViewModel(msg));
-                        }
-
-                        // 恢复任务历史
-                        if (sessionData.Tasks != null)
-                        {
-                            foreach (var task in sessionData.Tasks)
-                            {
-                                session.TaskHistory.Add(task);
-                            }
-                        }
-
-                        Sessions.Add(session);
+                        // 索引与真实文件不一致：标记删除并略过
+                        entry.IsDeleted = true;
+                        entry.UpdatedAt = DateTime.Now;
+                        continue;
                     }
-                    catch (Exception ex)
-                    {
-                        Debug.WriteLine($"加载会话失败 {dir}: {ex.Message}");
-                    }
+
+                    var session = new MediaSessionViewModel(
+                        entry.Id,
+                        entry.Name,
+                        dir,
+                        _aiConfig,
+                        _genConfig,
+                        _imageService,
+                        _videoService,
+                        OnSessionTaskCountChanged,
+                        s => SaveSessionMeta(s));
+
+                    session.IsContentLoaded = false;
+
+                    Sessions.Add(session);
                 }
+
+                SaveSessionIndex();
 
                 if (Sessions.Count > 0)
                 {
@@ -314,54 +514,264 @@ namespace TranslationToolUI.ViewModels
             }
         }
 
+        private void LoadOrRebuildSessionIndex()
+        {
+            if (!File.Exists(_indexFilePath))
+            {
+                RebuildSessionIndexFromDisk();
+                SaveSessionIndex();
+                return;
+            }
+
+            try
+            {
+                var json = File.ReadAllText(_indexFilePath);
+                _sessionIndex = JsonSerializer.Deserialize<MediaStudioIndex>(json) ?? new MediaStudioIndex();
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"读取会话索引失败，改为重建: {ex.Message}");
+                RebuildSessionIndexFromDisk();
+                SaveSessionIndex();
+                return;
+            }
+
+            if (NeedRebuildIndexFromDisk())
+            {
+                RebuildSessionIndexFromDisk();
+                SaveSessionIndex();
+            }
+
+            EnsureNextSessionNumberInitialized();
+        }
+
+        private bool NeedRebuildIndexFromDisk()
+        {
+            try
+            {
+                var diskDirs = Directory.GetDirectories(_studioDirectory, "session_*")
+                    .Select(Path.GetFileName)
+                    .Where(s => !string.IsNullOrWhiteSpace(s))
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+                var indexedDirs = _sessionIndex.Sessions
+                    .Select(s => string.IsNullOrWhiteSpace(s.DirectoryName) ? $"session_{s.Id}" : s.DirectoryName)
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+                return !diskDirs.SetEquals(indexedDirs);
+            }
+            catch
+            {
+                return true;
+            }
+        }
+
+        private void RebuildSessionIndexFromDisk()
+        {
+            var rebuilt = new List<MediaSessionIndexItem>();
+
+            foreach (var dir in Directory.GetDirectories(_studioDirectory, "session_*"))
+            {
+                var metaPath = Path.Combine(dir, "session.json");
+                if (!File.Exists(metaPath))
+                {
+                    continue;
+                }
+
+                try
+                {
+                    var json = File.ReadAllText(metaPath);
+                    var sessionData = JsonSerializer.Deserialize<MediaGenSession>(json);
+                    if (sessionData == null)
+                    {
+                        continue;
+                    }
+
+                    rebuilt.Add(new MediaSessionIndexItem
+                    {
+                        Id = sessionData.Id,
+                        Name = string.IsNullOrWhiteSpace(sessionData.Name) ? "新会话" : sessionData.Name,
+                        DirectoryName = Path.GetFileName(dir) ?? $"session_{sessionData.Id}",
+                        IsDeleted = sessionData.IsDeleted,
+                        LastNonBottomScrollOffsetY = null,
+                        MessageCount = sessionData.Messages?.Count ?? 0,
+                        TaskCount = sessionData.Tasks?.Count ?? 0,
+                        UpdatedAt = File.GetLastWriteTime(metaPath)
+                    });
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"重建索引时读取会话失败 {dir}: {ex.Message}");
+                }
+            }
+
+            _sessionIndex = new MediaStudioIndex
+            {
+                Version = 1,
+                Sessions = rebuilt
+                    .OrderByDescending(s => s.UpdatedAt)
+                    .ToList()
+            };
+        }
+
+        private void EnsureSessionLoaded(MediaSessionViewModel session)
+        {
+            if (session.IsContentLoaded)
+            {
+                return;
+            }
+
+            var sw = Stopwatch.StartNew();
+
+            var metaPath = Path.Combine(session.SessionDirectory, "session.json");
+            if (!File.Exists(metaPath))
+            {
+                session.IsContentLoaded = true;
+                sw.Stop();
+                Debug.WriteLine($"加载会话 {session.SessionId}: session.json 不存在，mark loaded，{sw.ElapsedMilliseconds}ms");
+                return;
+            }
+
+            try
+            {
+                var json = File.ReadAllText(metaPath);
+                var sessionData = JsonSerializer.Deserialize<MediaGenSession>(json);
+                if (sessionData == null)
+                {
+                    session.IsContentLoaded = true;
+                    return;
+                }
+
+                session.Messages.Clear();
+                if (sessionData.Messages != null)
+                {
+                    foreach (var msg in sessionData.Messages)
+                    {
+                        session.Messages.Add(new ChatMessageViewModel(msg));
+                    }
+                }
+
+                session.TaskHistory.Clear();
+                if (sessionData.Tasks != null)
+                {
+                    foreach (var task in sessionData.Tasks)
+                    {
+                        session.TaskHistory.Add(task);
+                    }
+                }
+
+                session.IsContentLoaded = true;
+                UpdateSessionIndexFromSession(session, saveIndex: true);
+                TouchLoadedSession(session);
+                sw.Stop();
+                Debug.WriteLine($"加载会话 {session.SessionId}: messages={session.Messages.Count}, tasks={session.TaskHistory.Count}, {sw.ElapsedMilliseconds}ms");
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"按需加载会话失败 {session.SessionId}: {ex.Message}");
+                session.IsContentLoaded = true;
+                sw.Stop();
+                Debug.WriteLine($"加载会话 {session.SessionId}: 失败后标记为已加载，{sw.ElapsedMilliseconds}ms");
+            }
+        }
+
+        private string ResolveSessionDirectory(MediaSessionIndexItem entry)
+            => Path.Combine(
+                _studioDirectory,
+                string.IsNullOrWhiteSpace(entry.DirectoryName) ? $"session_{entry.Id}" : entry.DirectoryName);
+
         public void SaveSessionMeta(MediaSessionViewModel session)
         {
             try
             {
-                var metaPath = Path.Combine(session.SessionDirectory, "session.json");
-                var data = new MediaGenSession
+                if (session.IsContentLoaded)
                 {
-                    Id = session.SessionId,
-                    Name = session.SessionName,
-                    Messages = session.Messages.Select(m => new MediaChatMessage
-                    {
-                        Role = m.Role,
-                        Text = m.Text,
-                        MediaPaths = m.MediaPaths.ToList(),
-                        Timestamp = m.Timestamp,
-                        GenerateSeconds = m.GenerateSeconds,
-                        DownloadSeconds = m.DownloadSeconds
-                    }).ToList(),
-                    Tasks = session.TaskHistory.Select(t => new MediaGenTask
-                    {
-                        Id = t.Id,
-                        Type = t.Type,
-                        Status = t.Status,
-                        Prompt = t.Prompt,
-                        Progress = t.Progress,
-                        ResultFilePath = t.ResultFilePath,
-                        ErrorMessage = t.ErrorMessage,
-                        CreatedAt = t.CreatedAt,
-                        RemoteVideoId = t.RemoteVideoId,
-                        RemoteVideoApiMode = t.RemoteVideoApiMode,
-                        RemoteGenerationId = t.RemoteGenerationId,
-                        GenerateSeconds = t.GenerateSeconds,
-                        DownloadSeconds = t.DownloadSeconds,
-                        RemoteDownloadUrl = t.RemoteDownloadUrl
-                    }).ToList()
-                };
+                    var metaPath = Path.Combine(session.SessionDirectory, "session.json");
+                    Directory.CreateDirectory(session.SessionDirectory);
 
-                var options = new JsonSerializerOptions
-                {
-                    WriteIndented = true,
-                    Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
-                };
+                    var data = new MediaGenSession
+                    {
+                        Id = session.SessionId,
+                        Name = session.SessionName,
+                        Messages = session.Messages.Select(m => new MediaChatMessage
+                        {
+                            Role = m.Role,
+                            Text = m.Text,
+                            MediaPaths = m.MediaPaths.ToList(),
+                            Timestamp = m.Timestamp,
+                            GenerateSeconds = m.GenerateSeconds,
+                            DownloadSeconds = m.DownloadSeconds
+                        }).ToList(),
+                        Tasks = session.TaskHistory.Select(t => new MediaGenTask
+                        {
+                            Id = t.Id,
+                            Type = t.Type,
+                            Status = t.Status,
+                            Prompt = t.Prompt,
+                            Progress = t.Progress,
+                            ResultFilePath = t.ResultFilePath,
+                            ErrorMessage = t.ErrorMessage,
+                            CreatedAt = t.CreatedAt,
+                            RemoteVideoId = t.RemoteVideoId,
+                            RemoteVideoApiMode = t.RemoteVideoApiMode,
+                            RemoteGenerationId = t.RemoteGenerationId,
+                            GenerateSeconds = t.GenerateSeconds,
+                            DownloadSeconds = t.DownloadSeconds,
+                            RemoteDownloadUrl = t.RemoteDownloadUrl
+                        }).ToList()
+                    };
 
-                File.WriteAllText(metaPath, JsonSerializer.Serialize(data, options));
+                    File.WriteAllText(metaPath, JsonSerializer.Serialize(data, JsonOptions));
+                }
+
+                UpdateSessionIndexFromSession(session, saveIndex: true);
             }
             catch (Exception ex)
             {
                 Debug.WriteLine($"保存会话元数据失败: {ex.Message}");
+            }
+        }
+
+        private void UpdateSessionIndexFromSession(MediaSessionViewModel session, bool saveIndex)
+        {
+            var entry = _sessionIndex.Sessions.FirstOrDefault(s => s.Id == session.SessionId);
+            if (entry == null)
+            {
+                entry = new MediaSessionIndexItem
+                {
+                    Id = session.SessionId,
+                    DirectoryName = Path.GetFileName(session.SessionDirectory) ?? $"session_{session.SessionId}"
+                };
+                _sessionIndex.Sessions.Add(entry);
+            }
+
+            entry.Name = session.SessionName;
+            entry.IsDeleted = false;
+            entry.LastNonBottomScrollOffsetY = null;
+            entry.DirectoryName = Path.GetFileName(session.SessionDirectory) ?? entry.DirectoryName;
+            if (session.IsContentLoaded)
+            {
+                entry.MessageCount = session.Messages.Count;
+                entry.TaskCount = session.TaskHistory.Count;
+            }
+            entry.UpdatedAt = DateTime.Now;
+
+            if (saveIndex)
+            {
+                SaveSessionIndex();
+            }
+        }
+
+        private void SaveSessionIndex()
+        {
+            try
+            {
+                Directory.CreateDirectory(_studioDirectory);
+                File.WriteAllText(_indexFilePath, JsonSerializer.Serialize(_sessionIndex, JsonOptions));
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"保存会话索引失败: {ex.Message}");
             }
         }
 
@@ -371,6 +781,8 @@ namespace TranslationToolUI.ViewModels
             {
                 SaveSessionMeta(session);
             }
+
+            SaveSessionIndex();
         }
 
         public void Dispose()
