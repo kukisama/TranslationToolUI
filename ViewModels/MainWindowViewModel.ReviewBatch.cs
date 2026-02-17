@@ -569,8 +569,17 @@ namespace TranslationToolUI.ViewModels
                             break;
                         }
 
-                        var finished = await Task.WhenAny(running);
-                        running.Remove(finished);
+                        // 关键修复：运行中可能会有新任务入队（例如右键连续加入队列）。
+                        // 旧逻辑只等待“已有运行任务完成”才进入下一轮，导致新入队任务长时间停留在待处理。
+                        // 新逻辑：任务完成或短周期唤醒（300ms）任一发生即继续下一轮，及时按并发上限补位。
+                        var finishedOrWake = await Task.WhenAny(
+                            Task.WhenAny(running),
+                            Task.Delay(TimeSpan.FromMilliseconds(300), token));
+
+                        if (finishedOrWake != null && finishedOrWake.Status == TaskStatus.RanToCompletion)
+                        {
+                            running.RemoveAll(t => t.IsCompleted);
+                        }
                     }
                 }
                 catch (OperationCanceledException)
@@ -989,6 +998,27 @@ namespace TranslationToolUI.ViewModels
             {
                 AppendBatchLog("BatchStop", "-", "Failed", "批处理停止");
             }
+        }
+
+        private void RefreshBatchQueue()
+        {
+            var completedItems = _batchQueueItems
+                .Where(item => item.Status == BatchTaskStatus.Completed)
+                .ToList();
+
+            if (completedItems.Count == 0)
+            {
+                BatchStatusMessage = "队列中暂无可清理的已完成项";
+                return;
+            }
+
+            foreach (var item in completedItems)
+            {
+                _batchQueueItems.Remove(item);
+            }
+
+            UpdateBatchQueueStatusText();
+            BatchStatusMessage = $"已清理 {completedItems.Count} 条已完成队列项";
         }
 
         private async Task ProcessBatchQueueItem(

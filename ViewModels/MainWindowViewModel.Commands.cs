@@ -34,6 +34,7 @@ namespace TranslationToolUI.ViewModels
         public ICommand ClearBatchTasksCommand { get; }
         public ICommand StartBatchCommand { get; }
         public ICommand StopBatchCommand { get; }
+        public ICommand RefreshBatchQueueCommand { get; }
         public ICommand CancelBatchQueueItemCommand { get; }
         public ICommand EnqueueSubtitleReviewCommand { get; }
         public ICommand GenerateSpeechSubtitleCommand { get; } = null!;

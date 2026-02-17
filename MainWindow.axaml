@@ -518,6 +518,11 @@
                                 </Border>
                                 <TextBlock Text="{Binding BatchQueueStatusText}" Foreground="Gray" FontSize="10"/>
                                 <StackPanel Orientation="Horizontal" Spacing="6">
+                                    <Button Content="刷新队列" Padding="8,3"
+                                            Command="{Binding RefreshBatchQueueCommand}"
+                                            ToolTip.Tip="清理队列中已完成项"/>
+                                </StackPanel>
+                                <StackPanel Orientation="Horizontal" Spacing="6">
                                     <TextBlock Text="并发数" VerticalAlignment="Center"/>
                                     <TextBox Width="80" Text="{Binding BatchConcurrencyLimit, Mode=TwoWay}"/>
                                 </StackPanel>

@@ -364,6 +364,11 @@ namespace TranslationToolUI.ViewModels
                 canExecute: _ => IsBatchRunning
             );
 
+            RefreshBatchQueueCommand = new RelayCommand(
+                execute: _ => RefreshBatchQueue(),
+                canExecute: _ => true
+            );
+
             CancelBatchQueueItemCommand = new RelayCommand(
                 execute: param => CancelBatchQueueItem(param as BatchQueueItem)
             );
