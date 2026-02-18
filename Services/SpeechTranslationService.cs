@@ -538,14 +538,17 @@ namespace TranslationToolUI.Services
 
             return false;
         }
-        public void UpdateConfig(AzureSpeechConfig newConfig)
+        public async Task UpdateConfigAsync(AzureSpeechConfig newConfig)
         {
             bool wasTranslating = _isTranslating;
+
+            _auditLog?.Invoke($"[翻译流] 配置更新开始 翻译中={wasTranslating}");
 
             if (wasTranslating)
             {
                 OnStatusChanged?.Invoke(this, "配置已更改，正在重新连接...");
-                StopTranslationAsync().Wait();
+                await StopTranslationAsync();
+                _auditLog?.Invoke("[翻译流] 配置更新 停止翻译完成");
             }
 
             _config = newConfig;
@@ -553,12 +556,18 @@ namespace TranslationToolUI.Services
 
             if (wasTranslating && _config.IsValid())
             {
-                StartTranslationAsync().Wait();
+                await StartTranslationAsync();
+                _auditLog?.Invoke("[翻译流] 配置更新 重新启动翻译完成");
                 OnStatusChanged?.Invoke(this, "配置更新完成，翻译已重新开始");
             }
             else if (wasTranslating && !_config.IsValid())
             {
+                _auditLog?.Invoke("[翻译流] 配置更新 配置无效 翻译未重启");
                 OnStatusChanged?.Invoke(this, "配置无效，翻译已停止");
+            }
+            else
+            {
+                _auditLog?.Invoke("[翻译流] 配置更新完成 无需重启翻译");
             }
         }
 

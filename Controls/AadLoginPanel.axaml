@@ -1,0 +1,33 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="TranslationToolUI.Controls.AadLoginPanel">
+    <StackPanel Spacing="8">
+        <StackPanel Spacing="5">
+            <TextBlock Text="Tenant ID (可选)"/>
+            <TextBox x:Name="TenantIdTextBox" Watermark="Azure AD 租户 ID"/>
+        </StackPanel>
+        <StackPanel Spacing="5">
+            <TextBlock Text="Client ID (可选)"/>
+            <TextBox x:Name="ClientIdTextBox" Watermark="应用注册 Client ID"/>
+        </StackPanel>
+
+        <StackPanel Orientation="Horizontal" Spacing="8">
+            <Button x:Name="LoginButton" Content="登录" Width="80"/>
+            <Button x:Name="LogoutButton" Content="注销" Width="80"/>
+            <TextBlock x:Name="StatusTextBlock" FontSize="11" Foreground="Gray"
+                       VerticalAlignment="Center"/>
+        </StackPanel>
+
+        <Border x:Name="DeviceCodePanel" IsVisible="False"
+                BorderBrush="#FFE2E8F0" BorderThickness="1" CornerRadius="4"
+                Padding="10" Background="#FFF8F9FA">
+            <StackPanel Spacing="6">
+                <TextBlock x:Name="DeviceCodeMessage" TextWrapping="Wrap" FontSize="12"/>
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <Button x:Name="CopyCodeButton" Content="复制代码" Padding="8,3" FontSize="11"/>
+                    <Button x:Name="OpenLinkButton" Content="打开链接" Padding="8,3" FontSize="11"/>
+                </StackPanel>
+            </StackPanel>
+        </Border>
+    </StackPanel>
+</UserControl>

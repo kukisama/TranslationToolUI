@@ -63,7 +63,7 @@ namespace TranslationToolUI.ViewModels
 
                     if (_translationService != null)
                     {
-                        _translationService.UpdateConfig(_config);
+                        _ = _translationService.UpdateConfigAsync(_config);
                     }
 
                     _ = Task.Run(async () => await _configService.SaveConfigAsync(_config));
@@ -251,7 +251,7 @@ namespace TranslationToolUI.ViewModels
 
             if (_translationService != null && !IsTranslating)
             {
-                _translationService.UpdateConfig(_config);
+                _ = _translationService.UpdateConfigAsync(_config);
             }
             else if (_translationService != null && IsTranslating)
             {
@@ -319,7 +319,7 @@ namespace TranslationToolUI.ViewModels
                 }
                 else
                 {
-                    _translationService.UpdateConfig(_config);
+                    _ = _translationService.UpdateConfigAsync(_config);
                 }
             }
 

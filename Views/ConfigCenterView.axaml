@@ -3,6 +3,7 @@
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:models="using:TranslationToolUI.Models"
+        xmlns:controls="clr-namespace:TranslationToolUI.Controls"
         mc:Ignorable="d" d:DesignWidth="980" d:DesignHeight="720"
         x:Class="TranslationToolUI.Views.ConfigCenterView"
         Title="配置中心"
@@ -250,35 +251,7 @@
                             </StackPanel>
 
                             <StackPanel x:Name="AadFieldsPanel" Spacing="8" IsVisible="False">
-                                <StackPanel Spacing="5">
-                                    <TextBlock Text="Tenant ID (可选)"/>
-                                    <TextBox x:Name="AzureTenantIdTextBox"
-                                             Watermark="Azure AD 租户 ID"/>
-                                </StackPanel>
-                                <StackPanel Spacing="5">
-                                    <TextBlock Text="Client ID (可选)"/>
-                                    <TextBox x:Name="AzureClientIdTextBox"
-                                             Watermark="应用注册 Client ID"/>
-                                </StackPanel>
-
-                                <StackPanel Orientation="Horizontal" Spacing="8">
-                                    <Button x:Name="AadLoginButton" Content="登录" Width="80"/>
-                                    <Button x:Name="AadLogoutButton" Content="注销" Width="80"/>
-                                    <TextBlock x:Name="AadStatusTextBlock" FontSize="11" Foreground="Gray"
-                                               VerticalAlignment="Center"/>
-                                </StackPanel>
-
-                                <Border x:Name="AadDeviceCodePanel" IsVisible="False"
-                                        BorderBrush="#FFE2E8F0" BorderThickness="1" CornerRadius="4"
-                                        Padding="10" Background="#FFF8F9FA">
-                                    <StackPanel Spacing="6">
-                                        <TextBlock x:Name="AadDeviceCodeMessage" TextWrapping="Wrap" FontSize="12"/>
-                                        <StackPanel Orientation="Horizontal" Spacing="8">
-                                            <Button x:Name="AadCopyCodeButton" Content="复制代码" Padding="8,3" FontSize="11"/>
-                                            <Button x:Name="AadOpenLinkButton" Content="打开链接" Padding="8,3" FontSize="11"/>
-                                        </StackPanel>
-                                    </StackPanel>
-                                </Border>
+                                <controls:AadLoginPanel x:Name="AadLoginPanelControl" ProfileKey="ai"/>
                             </StackPanel>
                         </StackPanel>
 
@@ -469,33 +442,7 @@
             <TabItem Header="洞察">
                 <ScrollViewer>
                     <StackPanel Spacing="12">
-                        <Border BorderBrush="#FFE2E8F0" BorderThickness="0,1,0,0" Padding="0,12,0,0" Margin="0,0,0,0">
-                            <StackPanel Spacing="8">
-                                <TextBlock Text="洞察预设按钮配置" FontSize="14" FontWeight="SemiBold"/>
-                                <TextBlock Text="自定义按钮的名称和对应的提示词" FontSize="11" Foreground="Gray"/>
-                                <ItemsControl x:Name="PresetButtonsItemsControl">
-                                    <ItemsControl.ItemTemplate>
-                                        <DataTemplate x:CompileBindings="False">
-                                            <Grid ColumnDefinitions="Auto,120,Auto,*,Auto" Margin="0,4">
-                                                <TextBlock Grid.Column="0" Text="名称:" FontSize="11"
-                                                           VerticalAlignment="Center" Margin="0,0,6,0"/>
-                                                <TextBox Grid.Column="1" Text="{Binding Name, Mode=TwoWay}"
-                                                         Padding="4,3" VerticalAlignment="Center"/>
-                                                <TextBlock Grid.Column="2" Text="提示词:" FontSize="11"
-                                                           VerticalAlignment="Center" Margin="10,0,6,0"/>
-                                                <TextBox Grid.Column="3" Text="{Binding Prompt, Mode=TwoWay}"
-                                                         Padding="4,3" VerticalAlignment="Center"/>
-                                                <Button Grid.Column="4" Content="删除" Margin="6,0,0,0" Padding="6,2"
-                                                        FontSize="11" Click="RemovePresetButton_Click"
-                                                        Tag="{Binding}"/>
-                                            </Grid>
-                                        </DataTemplate>
-                                    </ItemsControl.ItemTemplate>
-                                </ItemsControl>
-                                <Button x:Name="AddPresetButton" Content="+ 添加按钮" Padding="8,4"
-                                        FontSize="11" HorizontalAlignment="Left"/>
-                            </StackPanel>
-                        </Border>
+                        <controls:PresetButtonsEditor x:Name="PresetButtonsEditorControl" Margin="0,0,0,0"/>
                     </StackPanel>
                 </ScrollViewer>
             </TabItem>
@@ -512,41 +459,7 @@
                                            Text="需先在“录音与存储”中验证批量转写的存储账号" TextWrapping="Wrap"/>
                             </StackPanel>
                         </Border>
-                        <Border BorderBrush="#FFE2E8F0" BorderThickness="0,1,0,0" Padding="0,12,0,0" Margin="0,0,0,0">
-                            <StackPanel Spacing="8">
-                                <TextBlock Text="复盘洞察模板配置" FontSize="14" FontWeight="SemiBold"/>
-                                <TextBlock Text="配置复盘 sheet 名称、文件标记和提示词" FontSize="11" Foreground="Gray"/>
-                                <ItemsControl x:Name="ReviewSheetsItemsControl">
-                                    <ItemsControl.ItemTemplate>
-                                        <DataTemplate x:CompileBindings="False">
-                                            <Grid ColumnDefinitions="Auto,120,Auto,90,Auto,70,Auto,*,Auto" Margin="0,4">
-                                                <TextBlock Grid.Column="0" Text="名称:" FontSize="11"
-                                                           VerticalAlignment="Center" Margin="0,0,6,0"/>
-                                                <TextBox Grid.Column="1" Text="{Binding Name, Mode=TwoWay}"
-                                                         Padding="4,3" VerticalAlignment="Center"/>
-                                                <TextBlock Grid.Column="2" Text="标记:" FontSize="11"
-                                                           VerticalAlignment="Center" Margin="10,0,6,0"/>
-                                                <TextBox Grid.Column="3" Text="{Binding FileTag, Mode=TwoWay}"
-                                                         Padding="4,3" VerticalAlignment="Center"/>
-                                                <TextBlock Grid.Column="4" Text="批处理:" FontSize="11"
-                                                           VerticalAlignment="Center" Margin="10,0,6,0"/>
-                                                <CheckBox Grid.Column="5" IsChecked="{Binding IncludeInBatch, Mode=TwoWay}"
-                                                          VerticalAlignment="Center"/>
-                                                <TextBlock Grid.Column="6" Text="提示词:" FontSize="11"
-                                                           VerticalAlignment="Center" Margin="10,0,6,0"/>
-                                                <TextBox Grid.Column="7" Text="{Binding Prompt, Mode=TwoWay}"
-                                                         Padding="4,3" VerticalAlignment="Center"/>
-                                                <Button Grid.Column="8" Content="删除" Margin="6,0,0,0" Padding="6,2"
-                                                        FontSize="11" Click="RemoveReviewSheet_Click"
-                                                        Tag="{Binding}"/>
-                                            </Grid>
-                                        </DataTemplate>
-                                    </ItemsControl.ItemTemplate>
-                                </ItemsControl>
-                                <Button x:Name="AddReviewSheetButton" Content="+ 添加复盘 sheet" Padding="8,4"
-                                        FontSize="11" HorizontalAlignment="Left"/>
-                            </StackPanel>
-                        </Border>
+                        <controls:ReviewSheetsEditor x:Name="ReviewSheetsEditorControl" Margin="0,0,0,0"/>
                     </StackPanel>
                 </ScrollViewer>
             </TabItem>
@@ -600,35 +513,7 @@
                                 </StackPanel>
 
                                 <StackPanel x:Name="MediaImageAadFieldsPanel" Spacing="8" IsVisible="False">
-                                    <StackPanel Spacing="5">
-                                        <TextBlock Text="Tenant ID (可选)"/>
-                                        <TextBox x:Name="MediaImageAzureTenantIdTextBox"
-                                                 Watermark="Azure AD 租户 ID"/>
-                                    </StackPanel>
-                                    <StackPanel Spacing="5">
-                                        <TextBlock Text="Client ID (可选)"/>
-                                        <TextBox x:Name="MediaImageAzureClientIdTextBox"
-                                                 Watermark="应用注册 Client ID"/>
-                                    </StackPanel>
-
-                                    <StackPanel Orientation="Horizontal" Spacing="8">
-                                        <Button x:Name="MediaImageAadLoginButton" Content="登录" Width="80"/>
-                                        <Button x:Name="MediaImageAadLogoutButton" Content="注销" Width="80"/>
-                                        <TextBlock x:Name="MediaImageAadStatusTextBlock" FontSize="11" Foreground="Gray"
-                                                   VerticalAlignment="Center"/>
-                                    </StackPanel>
-
-                                    <Border x:Name="MediaImageAadDeviceCodePanel" IsVisible="False"
-                                            BorderBrush="#FFE2E8F0" BorderThickness="1" CornerRadius="4"
-                                            Padding="10" Background="#FFF8F9FA">
-                                        <StackPanel Spacing="6">
-                                            <TextBlock x:Name="MediaImageAadDeviceCodeMessage" TextWrapping="Wrap" FontSize="12"/>
-                                            <StackPanel Orientation="Horizontal" Spacing="8">
-                                                <Button x:Name="MediaImageAadCopyCodeButton" Content="复制代码" Padding="8,3" FontSize="11"/>
-                                                <Button x:Name="MediaImageAadOpenLinkButton" Content="打开链接" Padding="8,3" FontSize="11"/>
-                                            </StackPanel>
-                                        </StackPanel>
-                                    </Border>
+                                    <controls:AadLoginPanel x:Name="MediaImageAadLoginPanelControl" ProfileKey="media-image"/>
                                 </StackPanel>
                             </StackPanel>
                         </StackPanel>
@@ -694,35 +579,7 @@
                                     </StackPanel>
 
                                     <StackPanel x:Name="MediaVideoAadFieldsPanel" Spacing="8" IsVisible="False">
-                                        <StackPanel Spacing="5">
-                                            <TextBlock Text="Tenant ID (可选)"/>
-                                            <TextBox x:Name="MediaVideoAzureTenantIdTextBox"
-                                                     Watermark="Azure AD 租户 ID"/>
-                                        </StackPanel>
-                                        <StackPanel Spacing="5">
-                                            <TextBlock Text="Client ID (可选)"/>
-                                            <TextBox x:Name="MediaVideoAzureClientIdTextBox"
-                                                     Watermark="应用注册 Client ID"/>
-                                        </StackPanel>
-
-                                        <StackPanel Orientation="Horizontal" Spacing="8">
-                                            <Button x:Name="MediaVideoAadLoginButton" Content="登录" Width="80"/>
-                                            <Button x:Name="MediaVideoAadLogoutButton" Content="注销" Width="80"/>
-                                            <TextBlock x:Name="MediaVideoAadStatusTextBlock" FontSize="11" Foreground="Gray"
-                                                       VerticalAlignment="Center"/>
-                                        </StackPanel>
-
-                                        <Border x:Name="MediaVideoAadDeviceCodePanel" IsVisible="False"
-                                                BorderBrush="#FFE2E8F0" BorderThickness="1" CornerRadius="4"
-                                                Padding="10" Background="#FFF8F9FA">
-                                            <StackPanel Spacing="6">
-                                                <TextBlock x:Name="MediaVideoAadDeviceCodeMessage" TextWrapping="Wrap" FontSize="12"/>
-                                                <StackPanel Orientation="Horizontal" Spacing="8">
-                                                    <Button x:Name="MediaVideoAadCopyCodeButton" Content="复制代码" Padding="8,3" FontSize="11"/>
-                                                    <Button x:Name="MediaVideoAadOpenLinkButton" Content="打开链接" Padding="8,3" FontSize="11"/>
-                                                </StackPanel>
-                                            </StackPanel>
-                                        </Border>
+                                        <controls:AadLoginPanel x:Name="MediaVideoAadLoginPanelControl" ProfileKey="media-video"/>
                                     </StackPanel>
                                 </StackPanel>
                             </StackPanel>

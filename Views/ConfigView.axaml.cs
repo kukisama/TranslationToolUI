@@ -1,5 +1,6 @@
 ﻿using Avalonia.Controls;
 using Avalonia.Interactivity;
+using TranslationToolUI.Helpers;
 using TranslationToolUI.Models;
 using TranslationToolUI.Services;
 using System;
@@ -174,17 +175,7 @@ namespace TranslationToolUI.Views
 
         private void ForceUpdateListBoxSelection(int targetIndex)
         {
-            if (targetIndex >= 0 && targetIndex < _subscriptions.Count)
-            {
-                SubscriptionListBox.Focus();
-                SubscriptionListBox.SelectedIndex = -1;
-                SubscriptionListBox.SelectedIndex = targetIndex;
-
-                if (SubscriptionListBox.SelectedItem != null)
-                {
-                    SubscriptionListBox.ScrollIntoView(SubscriptionListBox.SelectedItem);
-                }
-            }
+            ConfigViewHelper.ForceUpdateListBoxSelection(SubscriptionListBox, targetIndex, _subscriptions.Count);
         }
         private void EnsureSelectionWhenSingleItem()
         {
@@ -436,30 +427,7 @@ namespace TranslationToolUI.Views
 
         private void ShowMessage(string message)
         {
-            var messageBox = new Window
-            {
-                Title = "提示",
-                Width = 300,
-                Height = 150,
-                WindowStartupLocation = WindowStartupLocation.CenterOwner,
-                Content = new StackPanel
-                {
-                    Margin = new Avalonia.Thickness(20),
-                    Spacing = 20,
-                    Children =
-                    {
-                        new TextBlock { Text = message, TextWrapping = Avalonia.Media.TextWrapping.Wrap },
-                        new Button { Content = "确定", HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Center }
-                    }
-                }
-            };
-
-            if (messageBox.Content is StackPanel panel && panel.Children.LastOrDefault() is Button okButton)
-            {
-                okButton.Click += (s, e) => messageBox.Close();
-            }
-
-            messageBox.ShowDialog(this);
+            ConfigViewHelper.ShowMessage(message, this);
         }
 
         private void BrowseButton_Click(object? sender, RoutedEventArgs e)

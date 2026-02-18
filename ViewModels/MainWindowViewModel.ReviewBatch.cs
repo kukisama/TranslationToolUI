@@ -5,20 +5,13 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
-using System.Net.Http;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
-using System.Xml;
 using Avalonia.Media;
 using Avalonia.Threading;
 using Azure.Storage.Blobs;
-using Azure.Storage.Blobs.Models;
-using Azure.Storage.Sas;
-using Microsoft.CognitiveServices.Speech;
-using Microsoft.CognitiveServices.Speech.Audio;
-using Microsoft.CognitiveServices.Speech.Transcription;
-using NAudio.Wave;
+using TranslationToolUI.Helpers;
 using TranslationToolUI.Models;
 using TranslationToolUI.Services;
 
@@ -633,78 +626,20 @@ namespace TranslationToolUI.ViewModels
             return true;
         }
 
-        private bool ShouldWriteBatchLogSuccess => _config.BatchLogLevel == BatchLogLevel.SuccessAndFailure;
+        private bool ShouldWriteBatchLogSuccess => _batchLog.ShouldWriteBatchLogSuccess;
 
-        private bool ShouldWriteBatchLogFailure => _config.BatchLogLevel is BatchLogLevel.FailuresOnly or BatchLogLevel.SuccessAndFailure;
+        private bool ShouldWriteBatchLogFailure => _batchLog.ShouldWriteBatchLogFailure;
 
-        private void EnsureBatchLogFile()
-        {
-            if (_config.BatchLogLevel == BatchLogLevel.Off)
-            {
-                _batchLogFilePath = null;
-                return;
-            }
-
-            if (!string.IsNullOrWhiteSpace(_batchLogFilePath))
-            {
-                return;
-            }
-
-            var sessionsPath = PathManager.Instance.SessionsPath;
-            var logsRoot = Directory.GetParent(sessionsPath)?.FullName ?? sessionsPath;
-            var logsPath = Path.Combine(logsRoot, "Logs");
-            Directory.CreateDirectory(logsPath);
-            var fileName = $"batch_{DateTime.Now:yyyyMMdd_HHmmss}.log";
-            _batchLogFilePath = Path.Combine(logsPath, fileName);
-        }
+        private void EnsureBatchLogFile() => _batchLog.EnsureBatchLogFile();
 
         private void AppendBatchLog(string eventName, string fileName, string status, string message)
-        {
-            if (_config.BatchLogLevel == BatchLogLevel.Off)
-            {
-                return;
-            }
-
-            EnsureBatchLogFile();
-            if (string.IsNullOrWhiteSpace(_batchLogFilePath))
-            {
-                return;
-            }
-
-            var timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff");
-            var line = $"{timestamp} | {eventName} | {fileName} | {status} | {message}";
-
-            lock (_batchLogLock)
-            {
-                File.AppendAllText(_batchLogFilePath, line + Environment.NewLine, new System.Text.UTF8Encoding(false));
-            }
-        }
+            => _batchLog.AppendBatchLog(eventName, fileName, status, message);
 
         private void AppendBatchDebugLog(string eventName, string message)
-        {
-            if (!_config.EnableAuditLog)
-            {
-                return;
-            }
-
-            var sessionsPath = PathManager.Instance.SessionsPath;
-            var logsRoot = Directory.GetParent(sessionsPath)?.FullName ?? sessionsPath;
-            var logsPath = Path.Combine(logsRoot, "Logs");
-            Directory.CreateDirectory(logsPath);
-            var auditPath = Path.Combine(logsPath, "Audit.log");
-            var timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff");
-            var line = $"{timestamp} | {eventName} | {message}";
-
-            lock (_batchLogLock)
-            {
-                File.AppendAllText(auditPath, line + Environment.NewLine, new System.Text.UTF8Encoding(false));
-            }
-        }
+            => _batchLog.AppendBatchDebugLog(eventName, message);
 
         public void AuditUiEvent(string eventName, string message)
-        {
-            AppendBatchDebugLog(eventName, message);
-        }
+            => _batchLog.AppendBatchDebugLog(eventName, message);
 
         public void EnqueueSubtitleAndReviewFromLibraryUi(MediaFileItem? audioFile)
         {
@@ -712,21 +647,7 @@ namespace TranslationToolUI.ViewModels
         }
 
         private static string FormatBatchExceptionForLog(Exception ex)
-        {
-            var sb = new System.Text.StringBuilder(ex.ToString());
-            if (ex.Data.Contains("SpeechBatchError"))
-            {
-                var detail = ex.Data["SpeechBatchError"]?.ToString();
-                if (!string.IsNullOrWhiteSpace(detail))
-                {
-                    sb.AppendLine();
-                    sb.Append("SpeechBatchError: ");
-                    sb.Append(detail);
-                }
-            }
-
-            return sb.ToString();
-        }
+            => BatchLogService.FormatBatchExceptionForLog(ex);
 
         private string GetBatchStartButtonText()
         {
@@ -780,7 +701,7 @@ namespace TranslationToolUI.ViewModels
             _batchCts?.Cancel();
             IsBatchRunning = true;
             BatchStatusMessage = "批处理已开始";
-            _batchLogFilePath = null;
+            _batchLog.ResetLogFile();
             EnsureBatchLogFile();
             if (ShouldWriteBatchLogSuccess)
             {
@@ -1105,7 +1026,7 @@ namespace TranslationToolUI.ViewModels
                     enableReasoning: _config.AiConfig!.SummaryEnableReasoning,
                     onOutcome: o => outcome = o);
 
-                var markdown = InjectTimeLinks(sb.ToString());
+                var markdown = TimeLinkHelper.InjectTimeLinks(sb.ToString());
                 var summaryPath = GetReviewSheetPath(queueItem.FullPath, queueItem.SheetTag);
                 File.WriteAllText(summaryPath, markdown);
                 var note = "完成";
@@ -1299,7 +1220,7 @@ namespace TranslationToolUI.ViewModels
                 return new List<SubtitleCue>();
             }
 
-            var cues = ParseSubtitleFileToCues(subtitlePath);
+            var cues = SubtitleFileParser.ParseSubtitleFileToCues(subtitlePath);
             lock (cueLock)
             {
                 cueCache[audioPath] = cues;
@@ -1594,7 +1515,7 @@ namespace TranslationToolUI.ViewModels
             var sheetPath = GetReviewSheetPath(audioFile.FullPath, sheet.FileTag);
             if (File.Exists(sheetPath))
             {
-                sheet.Markdown = InjectTimeLinks(File.ReadAllText(sheetPath));
+                sheet.Markdown = TimeLinkHelper.InjectTimeLinks(File.ReadAllText(sheetPath));
                 sheet.StatusMessage = $"已加载: {Path.GetFileName(sheetPath)}";
             }
             else
@@ -1928,7 +1849,7 @@ namespace TranslationToolUI.ViewModels
                 }
 
                 var outputPath = GetSpeechSubtitlePath(audioFile.FullPath);
-                WriteVttFile(outputPath, cues);
+                BlobStorageService.WriteVttFile(outputPath, cues);
 
                 SpeechSubtitleStatusMessage = $"speech 字幕已生成: {Path.GetFileName(outputPath)}";
                 LoadSubtitleFilesForAudio(audioFile);
@@ -2058,7 +1979,7 @@ namespace TranslationToolUI.ViewModels
 
             try
             {
-                uploadPath = PrepareBatchUploadAudioPath(
+                uploadPath = AudioFormatConverter.PrepareBatchUploadAudioPath(
                     audioPath,
                     onStatus,
                     token,
@@ -2085,7 +2006,7 @@ namespace TranslationToolUI.ViewModels
 
                 onStatus?.Invoke("批量转写：上传音频...");
 
-                var (audioContainer, outputContainer) = await GetBatchContainersAsync(
+                var (audioContainer, outputContainer) = await BlobStorageService.GetBatchContainersAsync(
                     _config.BatchStorageConnectionString,
                     _config.BatchAudioContainerName,
                     _config.BatchResultContainerName,
@@ -2094,7 +2015,7 @@ namespace TranslationToolUI.ViewModels
                 BlobClient uploadedBlob;
                 try
                 {
-                    uploadedBlob = await UploadAudioToBlobAsync(
+                    uploadedBlob = await BlobStorageService.UploadAudioToBlobAsync(
                         uploadPath,
                         audioContainer,
                         token);
@@ -2133,7 +2054,7 @@ namespace TranslationToolUI.ViewModels
                     tempUploadPath = null;
                 }
 
-                var contentUrl = CreateBlobReadSasUri(uploadedBlob, TimeSpan.FromHours(24));
+                var contentUrl = BlobStorageService.CreateBlobReadSasUri(uploadedBlob, TimeSpan.FromHours(24));
 
                 onStatus?.Invoke("批量转写：提交任务...");
 
@@ -2141,7 +2062,7 @@ namespace TranslationToolUI.ViewModels
                 Action<string, string>? batchLog = ShouldWriteBatchLogSuccess
                     ? (evt, msg) => AppendBatchLog(evt, audioFileName, "Success", msg)
                     : null;
-                var (cues, transcriptionJson) = await BatchTranscribeSpeechToCuesAsync(
+                var (cues, transcriptionJson) = await SpeechBatchApiClient.BatchTranscribeSpeechToCuesAsync(
                     contentUrl,
                     _config.SourceLanguage,
                     subscription,
@@ -2161,11 +2082,11 @@ namespace TranslationToolUI.ViewModels
                 }
 
                 var outputPath = GetSpeechSubtitlePath(audioPath);
-                WriteVttFile(outputPath, cues);
+                BlobStorageService.WriteVttFile(outputPath, cues);
 
                 var baseName = Path.GetFileNameWithoutExtension(audioPath);
-                await UploadTextToBlobAsync(outputContainer, baseName + ".speech.vtt", File.ReadAllText(outputPath), "text/vtt", token);
-                await UploadTextToBlobAsync(outputContainer, baseName + ".speech.json", transcriptionJson, "application/json", token);
+                await BlobStorageService.UploadTextToBlobAsync(outputContainer, baseName + ".speech.vtt", File.ReadAllText(outputPath), "text/vtt", token);
+                await BlobStorageService.UploadTextToBlobAsync(outputContainer, baseName + ".speech.json", transcriptionJson, "application/json", token);
 
                 return true;
             }
@@ -2185,195 +2106,6 @@ namespace TranslationToolUI.ViewModels
             }
         }
 
-        private static string PrepareBatchUploadAudioPath(
-            string audioPath,
-            Action<string>? onStatus,
-            CancellationToken token,
-            out string? tempUploadPath,
-            out bool converted)
-        {
-            tempUploadPath = null;
-            converted = false;
-
-            if (IsPcm16kMonoWav(audioPath))
-            {
-                return audioPath;
-            }
-
-            var tempDir = Path.Combine(Path.GetTempPath(), "TranslationToolUI", "BatchAudio");
-            Directory.CreateDirectory(tempDir);
-            var stamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
-            var unique = Guid.NewGuid().ToString("N");
-            tempUploadPath = Path.Combine(
-                tempDir,
-                $"{Path.GetFileNameWithoutExtension(audioPath)}_{stamp}_{unique}_pcm16k_mono.wav");
-
-            onStatus?.Invoke("批量转写：转换 WAV(16kHz/16-bit/mono)...");
-
-            try
-            {
-                ConvertToPcm16kMonoWav(audioPath, tempUploadPath, token);
-            }
-            catch (Exception ex)
-            {
-                throw new InvalidOperationException($"音频转换失败: {ex.Message}", ex);
-            }
-
-            converted = true;
-
-            return tempUploadPath;
-        }
-
-        private static bool IsPcm16kMonoWav(string audioPath)
-        {
-            if (!string.Equals(Path.GetExtension(audioPath), ".wav", StringComparison.OrdinalIgnoreCase))
-            {
-                return false;
-            }
-
-            try
-            {
-                using var reader = new WaveFileReader(audioPath);
-                var format = reader.WaveFormat;
-                return format.Encoding == WaveFormatEncoding.Pcm
-                       && format.SampleRate == 16000
-                       && format.BitsPerSample == 16
-                       && format.Channels == 1;
-            }
-            catch
-            {
-                return false;
-            }
-        }
-
-        private static void ConvertToPcm16kMonoWav(string sourcePath, string outputPath, CancellationToken token)
-        {
-            using var reader = new AudioFileReader(sourcePath);
-            using var resampler = new MediaFoundationResampler(reader, new WaveFormat(16000, 16, 1))
-            {
-                ResamplerQuality = 60
-            };
-            Directory.CreateDirectory(Path.GetDirectoryName(outputPath) ?? ".");
-            using var writer = new WaveFileWriter(outputPath, resampler.WaveFormat);
-            var buffer = new byte[resampler.WaveFormat.AverageBytesPerSecond];
-            int read;
-            while ((read = resampler.Read(buffer, 0, buffer.Length)) > 0)
-            {
-                token.ThrowIfCancellationRequested();
-                writer.Write(buffer, 0, read);
-            }
-        }
-
-        private static async Task<(BlobContainerClient Audio, BlobContainerClient Result)> GetBatchContainersAsync(
-            string connectionString,
-            string audioContainerName,
-            string resultContainerName,
-            CancellationToken token)
-        {
-            var serviceClient = new BlobServiceClient(connectionString);
-            var normalizedAudio = NormalizeContainerName(audioContainerName, AzureSpeechConfig.DefaultBatchAudioContainerName);
-            var normalizedResult = NormalizeContainerName(resultContainerName, AzureSpeechConfig.DefaultBatchResultContainerName);
-
-            var audioContainer = serviceClient.GetBlobContainerClient(normalizedAudio);
-            await audioContainer.CreateIfNotExistsAsync(PublicAccessType.None, cancellationToken: token);
-
-            var resultContainer = serviceClient.GetBlobContainerClient(normalizedResult);
-            await resultContainer.CreateIfNotExistsAsync(PublicAccessType.None, cancellationToken: token);
-
-            return (audioContainer, resultContainer);
-        }
-
-        private static string NormalizeContainerName(string? name, string fallback)
-        {
-            if (string.IsNullOrWhiteSpace(name))
-            {
-                return fallback;
-            }
-
-            var normalized = new string(name.Trim().ToLowerInvariant()
-                .Select(ch => char.IsLetterOrDigit(ch) ? ch : '-')
-                .ToArray());
-
-            normalized = normalized.Trim('-');
-            if (normalized.Length < 3)
-            {
-                return fallback;
-            }
-
-            if (normalized.Length > 63)
-            {
-                normalized = normalized.Substring(0, 63).Trim('-');
-            }
-
-            return string.IsNullOrWhiteSpace(normalized) ? fallback : normalized;
-        }
-
-        private static async Task<BlobClient> UploadAudioToBlobAsync(
-            string audioPath,
-            BlobContainerClient container,
-            CancellationToken token)
-        {
-            var fileName = Path.GetFileName(audioPath);
-            var timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
-            var blobName = $"{Path.GetFileNameWithoutExtension(fileName)}_{timestamp}{Path.GetExtension(fileName)}";
-
-            var blobClient = container.GetBlobClient(blobName);
-            using var stream = File.OpenRead(audioPath);
-            await blobClient.UploadAsync(stream, overwrite: true, cancellationToken: token);
-            await blobClient.SetHttpHeadersAsync(new BlobHttpHeaders
-            {
-                ContentType = GetAudioContentType(audioPath)
-            }, cancellationToken: token);
-            return blobClient;
-        }
-
-        private static Uri CreateBlobReadSasUri(BlobClient blobClient, TimeSpan validFor)
-        {
-            if (!blobClient.CanGenerateSasUri)
-            {
-                throw new InvalidOperationException("无法生成 SAS URL，请确保使用存储账号连接字符串");
-            }
-
-            var builder = new BlobSasBuilder
-            {
-                BlobContainerName = blobClient.BlobContainerName,
-                BlobName = blobClient.Name,
-                Resource = "b",
-                ExpiresOn = DateTimeOffset.UtcNow.Add(validFor)
-            };
-
-            builder.SetPermissions(BlobSasPermissions.Read);
-            return blobClient.GenerateSasUri(builder);
-        }
-
-        private static string GetAudioContentType(string audioPath)
-        {
-            var extension = Path.GetExtension(audioPath).ToLowerInvariant();
-            return extension switch
-            {
-                ".wav" => "audio/wav",
-                ".mp3" => "audio/mpeg",
-                ".m4a" => "audio/mp4",
-                _ => "application/octet-stream"
-            };
-        }
-
-        private static async Task UploadTextToBlobAsync(
-            BlobContainerClient container,
-            string blobName,
-            string content,
-            string contentType,
-            CancellationToken token)
-        {
-            var blobClient = container.GetBlobClient(blobName);
-            using var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(content));
-            await blobClient.UploadAsync(stream, overwrite: true, cancellationToken: token);
-            await blobClient.SetHttpHeadersAsync(new BlobHttpHeaders
-            {
-                ContentType = contentType
-            }, cancellationToken: token);
-        }
-
         private BatchSubtitleSplitOptions GetBatchSubtitleSplitOptions()
         {
             return new BatchSubtitleSplitOptions
@@ -2386,892 +2118,20 @@ namespace TranslationToolUI.ViewModels
             };
         }
 
-        private sealed class BatchSubtitleSplitOptions
-        {
-            public bool EnableSentenceSplit { get; set; }
-            public bool SplitOnComma { get; set; }
-            public int MaxChars { get; set; }
-            public double MaxDurationSeconds { get; set; }
-            public int PauseSplitMs { get; set; }
-        }
-
-        private static async Task<(List<SubtitleCue> Cues, string TranscriptionJson)> BatchTranscribeSpeechToCuesAsync(
-            Uri contentUrl,
-            string locale,
-            AzureSubscription subscription,
-            CancellationToken token,
-            Action<string> onStatus,
-            BatchSubtitleSplitOptions splitOptions,
-            Action<string, string>? onBatchLog = null)
-        {
-            var endpoint = subscription.GetBatchTranscriptionEndpoint();
-            var requestBody = new
-            {
-                displayName = $"Batch-{DateTime.Now:yyyyMMdd_HHmmss}",
-                locale = locale,
-                contentUrls = new[] { contentUrl.ToString() },
-                properties = new
-                {
-                    diarizationEnabled = true,
-                    wordLevelTimestampsEnabled = true,
-                    punctuationMode = "DictatedAndAutomatic",
-                    profanityFilterMode = "Masked"
-                }
-            };
-
-            using var request = new HttpRequestMessage(HttpMethod.Post, endpoint);
-            request.Headers.Add("Ocp-Apim-Subscription-Key", subscription.SubscriptionKey);
-            request.Content = new StringContent(JsonSerializer.Serialize(requestBody), System.Text.Encoding.UTF8, "application/json");
-
-            using var response = await SpeechBatchHttpClient.SendAsync(request, token);
-            if (!response.IsSuccessStatusCode)
-            {
-                var detail = await response.Content.ReadAsStringAsync(token);
-                throw new InvalidOperationException($"创建批量转写失败: {response.StatusCode} {detail}");
-            }
-
-            var statusUrl = response.Headers.Location?.ToString();
-            if (string.IsNullOrWhiteSpace(statusUrl))
-            {
-                var body = await response.Content.ReadAsStringAsync(token);
-                using var doc = JsonDocument.Parse(body);
-                if (doc.RootElement.TryGetProperty("self", out var selfElement))
-                {
-                    statusUrl = selfElement.GetString();
-                }
-            }
-
-            if (string.IsNullOrWhiteSpace(statusUrl))
-            {
-                throw new InvalidOperationException("未获取到批量转写状态地址");
-            }
-
-            onBatchLog?.Invoke("TranscribeSubmit", $"url={statusUrl}");
-
-            string? lastStatusJson = null;
-            string? lastPolledStatus = null;
-            while (true)
-            {
-                token.ThrowIfCancellationRequested();
-                using var statusRequest = new HttpRequestMessage(HttpMethod.Get, statusUrl);
-                statusRequest.Headers.Add("Ocp-Apim-Subscription-Key", subscription.SubscriptionKey);
-
-                using var statusResponse = await SpeechBatchHttpClient.SendAsync(statusRequest, token);
-                var statusBody = await statusResponse.Content.ReadAsStringAsync(token);
-                lastStatusJson = statusBody;
-
-                if (!statusResponse.IsSuccessStatusCode)
-                {
-                    throw new InvalidOperationException($"查询批量转写状态失败: {statusResponse.StatusCode} {statusBody}");
-                }
-
-                using var statusDoc = JsonDocument.Parse(statusBody);
-                var status = statusDoc.RootElement.TryGetProperty("status", out var statusElement)
-                    ? statusElement.GetString()
-                    : "";
-
-                if (!string.Equals(status, lastPolledStatus, StringComparison.OrdinalIgnoreCase))
-                {
-                    onBatchLog?.Invoke("TranscribePoll", $"status={status}");
-                    lastPolledStatus = status;
-                }
-
-                if (string.Equals(status, "Succeeded", StringComparison.OrdinalIgnoreCase))
-                {
-                    onStatus("批量转写：已完成，整理字幕...");
-                    break;
-                }
-
-                if (string.Equals(status, "Failed", StringComparison.OrdinalIgnoreCase))
-                {
-                    var errorSummary = BuildSpeechBatchFailureSummary(statusDoc) ?? "批量转写失败";
-                    var ex = new InvalidOperationException(errorSummary);
-                    ex.Data["SpeechBatchError"] = statusBody;
-                    throw ex;
-                }
-
-                onStatus($"批量转写：{status}...");
-                await Task.Delay(TimeSpan.FromSeconds(5), token);
-            }
-
-            var filesUrl = statusUrl.TrimEnd('/') + "/files";
-            if (!string.IsNullOrWhiteSpace(lastStatusJson))
-            {
-                using var statusDoc = JsonDocument.Parse(lastStatusJson);
-                if (statusDoc.RootElement.TryGetProperty("links", out var linksElement) &&
-                    linksElement.TryGetProperty("files", out var filesElement))
-                {
-                    filesUrl = filesElement.GetString() ?? filesUrl;
-                }
-            }
-
-            using var filesRequest = new HttpRequestMessage(HttpMethod.Get, filesUrl);
-            filesRequest.Headers.Add("Ocp-Apim-Subscription-Key", subscription.SubscriptionKey);
-
-            using var filesResponse = await SpeechBatchHttpClient.SendAsync(filesRequest, token);
-            var filesBody = await filesResponse.Content.ReadAsStringAsync(token);
-            if (!filesResponse.IsSuccessStatusCode)
-            {
-                throw new InvalidOperationException($"获取批量转写文件列表失败: {filesResponse.StatusCode} {filesBody}");
-            }
-
-            var transcriptionUrl = ExtractTranscriptionContentUrl(filesBody);
-            if (string.IsNullOrWhiteSpace(transcriptionUrl))
-            {
-                throw new InvalidOperationException("未找到批量转写结果文件");
-            }
-
-            var transcriptionJson = await SpeechBatchHttpClient.GetStringAsync(transcriptionUrl, token);
-            var cues = ParseBatchTranscriptionToCues(transcriptionJson, splitOptions);
-            return (cues, transcriptionJson);
-        }
-
-        private static string? ExtractTranscriptionContentUrl(string filesJson)
-        {
-            using var doc = JsonDocument.Parse(filesJson);
-            if (!doc.RootElement.TryGetProperty("values", out var values) || values.ValueKind != JsonValueKind.Array)
-            {
-                return null;
-            }
-
-            foreach (var item in values.EnumerateArray())
-            {
-                var kind = item.TryGetProperty("kind", out var kindElement) ? kindElement.GetString() : "";
-                if (!string.Equals(kind, "Transcription", StringComparison.OrdinalIgnoreCase))
-                {
-                    continue;
-                }
-
-                if (item.TryGetProperty("links", out var linksElement) &&
-                    linksElement.TryGetProperty("contentUrl", out var contentElement))
-                {
-                    return contentElement.GetString();
-                }
-            }
-
-            return null;
-        }
-
-        private static string? BuildSpeechBatchFailureSummary(JsonDocument statusDoc)
-        {
-            if (!statusDoc.RootElement.TryGetProperty("error", out var errorElement))
-            {
-                return null;
-            }
-
-            var code = errorElement.TryGetProperty("code", out var codeElement)
-                ? codeElement.GetString()
-                : null;
-            var message = errorElement.TryGetProperty("message", out var messageElement)
-                ? messageElement.GetString()
-                : null;
-
-            var detailMessages = new List<string>();
-            if (errorElement.TryGetProperty("details", out var detailsElement) &&
-                detailsElement.ValueKind == JsonValueKind.Array)
-            {
-                foreach (var detail in detailsElement.EnumerateArray())
-                {
-                    var detailMessage = detail.TryGetProperty("message", out var detailMessageElement)
-                        ? detailMessageElement.GetString()
-                        : null;
-                    if (!string.IsNullOrWhiteSpace(detailMessage))
-                    {
-                        detailMessages.Add(detailMessage);
-                    }
-                }
-            }
-
-            var summaryParts = new List<string>();
-            if (!string.IsNullOrWhiteSpace(code))
-            {
-                summaryParts.Add(code);
-            }
-            if (!string.IsNullOrWhiteSpace(message))
-            {
-                summaryParts.Add(message);
-            }
-            if (detailMessages.Count > 0)
-            {
-                summaryParts.Add(string.Join("; ", detailMessages));
-            }
-
-            if (summaryParts.Count == 0)
-            {
-                return null;
-            }
-
-            return "批量转写失败: " + string.Join(" | ", summaryParts);
-        }
-
-        private static List<SubtitleCue> ParseBatchTranscriptionToCues(string transcriptionJson, BatchSubtitleSplitOptions splitOptions)
-        {
-            var list = new List<SubtitleCue>();
-            using var doc = JsonDocument.Parse(transcriptionJson);
-            if (!doc.RootElement.TryGetProperty("recognizedPhrases", out var phrases) || phrases.ValueKind != JsonValueKind.Array)
-            {
-                return list;
-            }
-
-            foreach (var phrase in phrases.EnumerateArray())
-            {
-                var text = ExtractPhraseText(phrase);
-                if (string.IsNullOrWhiteSpace(text))
-                {
-                    continue;
-                }
-
-                var speaker = phrase.TryGetProperty("speaker", out var speakerElement)
-                    ? speakerElement.ToString()
-                    : "";
-                var speakerLabel = string.IsNullOrWhiteSpace(speaker) ? "Speaker" : $"Speaker {speaker}";
-
-                if (splitOptions.EnableSentenceSplit && TryGetPhraseWords(phrase, out var words) && words.Count > 0)
-                {
-                    list.AddRange(SplitPhraseToCues(words, text, speakerLabel, splitOptions));
-                    continue;
-                }
-
-                if (!TryParseBatchOffsetDuration(phrase, out var start, out var end))
-                {
-                    continue;
-                }
-
-                list.Add(new SubtitleCue
-                {
-                    Start = start,
-                    End = end,
-                    Text = $"{speakerLabel}: {text}"
-                });
-            }
-
-            return list.OrderBy(c => c.Start).ToList();
-        }
-
-        private sealed class BatchWordInfo
-        {
-            public required string Text { get; init; }
-            public required TimeSpan Start { get; init; }
-            public required TimeSpan End { get; init; }
-        }
-
-        private static bool TryGetPhraseWords(JsonElement phrase, out List<BatchWordInfo> words)
-        {
-            words = new List<BatchWordInfo>();
-            if (!phrase.TryGetProperty("nBest", out var nbest) || nbest.ValueKind != JsonValueKind.Array || nbest.GetArrayLength() == 0)
-            {
-                return false;
-            }
-
-            var best = nbest[0];
-            if (!best.TryGetProperty("words", out var wordsElement) || wordsElement.ValueKind != JsonValueKind.Array)
-            {
-                return false;
-            }
-
-            foreach (var wordElement in wordsElement.EnumerateArray())
-            {
-                if (!wordElement.TryGetProperty("word", out var wordTextElement))
-                {
-                    continue;
-                }
-
-                var wordText = wordTextElement.GetString() ?? "";
-                if (string.IsNullOrWhiteSpace(wordText))
-                {
-                    continue;
-                }
-
-                if (!TryGetWordTiming(wordElement, out var start, out var end))
-                {
-                    continue;
-                }
-
-                words.Add(new BatchWordInfo
-                {
-                    Text = wordText,
-                    Start = start,
-                    End = end
-                });
-            }
-
-            return words.Count > 0;
-        }
-
-        private static bool TryGetWordTiming(JsonElement wordElement, out TimeSpan start, out TimeSpan end)
-        {
-            start = TimeSpan.Zero;
-            end = TimeSpan.Zero;
-            if (!TryGetTimeValue(wordElement, "offset", out start) && !TryGetTimeValue(wordElement, "offsetInTicks", out start))
-            {
-                return false;
-            }
-
-            if (!TryGetTimeValue(wordElement, "duration", out var duration) && !TryGetTimeValue(wordElement, "durationInTicks", out duration))
-            {
-                duration = TimeSpan.Zero;
-            }
-
-            end = start + duration;
-            return true;
-        }
-
-        private static List<SubtitleCue> SplitPhraseToCues(
-            List<BatchWordInfo> words,
-            string displayText,
-            string speakerLabel,
-            BatchSubtitleSplitOptions splitOptions)
-        {
-            var cues = new List<SubtitleCue>();
-            if (words.Count == 0)
-            {
-                return cues;
-            }
-
-            var breakIndices = GetPunctuationBreakIndices(displayText, words, splitOptions.SplitOnComma);
-            var segmentStartIndex = 0;
-            var segmentStartCharIndex = 0;
-            var segmentCharCount = 0;
-            var segmentStartTime = words[0].Start;
-            var currentCharIndex = 0;
-
-            for (var i = 0; i < words.Count; i++)
-            {
-                var word = words[i];
-                var wordLength = GetWordLength(word.Text);
-                segmentCharCount += wordLength;
-                currentCharIndex += wordLength;
-
-                var durationSeconds = (word.End - segmentStartTime).TotalSeconds;
-                var nextGapMs = i + 1 < words.Count
-                    ? (words[i + 1].Start - word.End).TotalMilliseconds
-                    : 0;
-
-                var shouldSplit = false;
-                if (breakIndices.Contains(i))
-                {
-                    shouldSplit = true;
-                }
-                else if (splitOptions.PauseSplitMs > 0 && nextGapMs >= splitOptions.PauseSplitMs)
-                {
-                    shouldSplit = true;
-                }
-                else if (splitOptions.MaxChars > 0 && segmentCharCount >= splitOptions.MaxChars)
-                {
-                    shouldSplit = true;
-                }
-                else if (splitOptions.MaxDurationSeconds > 0 && durationSeconds >= splitOptions.MaxDurationSeconds)
-                {
-                    shouldSplit = true;
-                }
-
-                if (!shouldSplit && i < words.Count - 1)
-                {
-                    continue;
-                }
-
-                var segmentEndIndex = i;
-                var segmentEndCharIndex = currentCharIndex;
-                var segmentText = TrySliceDisplaySegment(displayText, segmentStartCharIndex, segmentEndCharIndex)
-                    ?? string.Concat(words.Skip(segmentStartIndex).Take(segmentEndIndex - segmentStartIndex + 1)
-                        .Select(w => w.Text));
-
-                segmentText = NormalizeSubtitleText(segmentText);
-                if (!string.IsNullOrWhiteSpace(segmentText))
-                {
-                    cues.Add(new SubtitleCue
-                    {
-                        Start = segmentStartTime,
-                        End = word.End,
-                        Text = $"{speakerLabel}: {segmentText}"
-                    });
-                }
-
-                segmentStartIndex = i + 1;
-                segmentStartCharIndex = segmentEndCharIndex;
-                segmentCharCount = 0;
-                if (segmentStartIndex < words.Count)
-                {
-                    segmentStartTime = words[segmentStartIndex].Start;
-                }
-            }
-
-            return cues;
-        }
-
-        private static HashSet<int> GetPunctuationBreakIndices(
-            string displayText,
-            List<BatchWordInfo> words,
-            bool splitOnComma)
-        {
-            var breakIndices = new HashSet<int>();
-            if (string.IsNullOrWhiteSpace(displayText) || words.Count == 0)
-            {
-                return breakIndices;
-            }
-
-            var wordEndOffsets = new List<int>(words.Count);
-            var running = 0;
-            foreach (var word in words)
-            {
-                running += GetWordLength(word.Text);
-                wordEndOffsets.Add(running);
-            }
-
-            var charCount = 0;
-            foreach (var ch in displayText)
-            {
-                if (char.IsWhiteSpace(ch))
-                {
-                    continue;
-                }
-
-                if (IsSentenceBreakPunctuation(ch, splitOnComma))
-                {
-                    if (charCount <= 0)
-                    {
-                        continue;
-                    }
-
-                    var idx = wordEndOffsets.FindIndex(end => end >= charCount);
-                    if (idx >= 0)
-                    {
-                        breakIndices.Add(idx);
-                    }
-                    continue;
-                }
-
-                if (IsSkippableDisplayChar(ch))
-                {
-                    continue;
-                }
-
-                charCount++;
-            }
-
-            return breakIndices;
-        }
-
-        private static string? TrySliceDisplaySegment(string displayText, int startCharIndex, int endCharIndex)
-        {
-            if (string.IsNullOrWhiteSpace(displayText))
-            {
-                return null;
-            }
-
-            var charMap = new List<int>();
-            for (var i = 0; i < displayText.Length; i++)
-            {
-                var ch = displayText[i];
-                if (char.IsWhiteSpace(ch) || IsSkippableDisplayChar(ch))
-                {
-                    continue;
-                }
-
-                charMap.Add(i);
-            }
-
-            if (charMap.Count == 0)
-            {
-                return displayText.Trim();
-            }
-
-            var safeStart = Math.Clamp(startCharIndex, 0, charMap.Count - 1);
-            var safeEnd = Math.Clamp(endCharIndex, safeStart + 1, charMap.Count);
-            var startIndex = charMap[safeStart];
-            var endIndex = charMap[safeEnd - 1];
-
-            while (endIndex + 1 < displayText.Length)
-            {
-                var ch = displayText[endIndex + 1];
-                if (char.IsWhiteSpace(ch) || IsSentenceBreakPunctuation(ch, splitOnComma: true))
-                {
-                    endIndex++;
-                    continue;
-                }
-
-                break;
-            }
-
-            var segment = displayText.Substring(startIndex, endIndex - startIndex + 1);
-            return segment.Trim();
-        }
-
-        private static int GetWordLength(string text)
-        {
-            return string.IsNullOrWhiteSpace(text) ? 0 : text.Replace(" ", "").Length;
-        }
-
-        private static bool IsSkippableDisplayChar(char ch)
-        {
-            return "。！？!?；;，,、：:".IndexOf(ch) >= 0;
-        }
-
-        private static bool IsSentenceBreakPunctuation(char ch, bool splitOnComma)
-        {
-            if ("。！？!?；;".IndexOf(ch) >= 0)
-            {
-                return true;
-            }
-
-            if (splitOnComma && "，,".IndexOf(ch) >= 0)
-            {
-                return true;
-            }
-
-            return false;
-        }
-
-        private static string NormalizeSubtitleText(string text)
-        {
-            if (string.IsNullOrWhiteSpace(text))
-            {
-                return "";
-            }
-
-            return System.Text.RegularExpressions.Regex.Replace(text, "\\s+", " ").Trim();
-        }
-
-        private static string ExtractPhraseText(JsonElement phrase)
-        {
-            if (phrase.TryGetProperty("nBest", out var nbest) && nbest.ValueKind == JsonValueKind.Array && nbest.GetArrayLength() > 0)
-            {
-                var first = nbest[0];
-                if (first.TryGetProperty("display", out var displayElement))
-                {
-                    return displayElement.GetString() ?? "";
-                }
-                if (first.TryGetProperty("lexical", out var lexicalElement))
-                {
-                    return lexicalElement.GetString() ?? "";
-                }
-            }
-
-            if (phrase.TryGetProperty("display", out var directDisplay))
-            {
-                return directDisplay.GetString() ?? "";
-            }
-
-            return "";
-        }
-
-        private static bool TryParseBatchOffsetDuration(JsonElement phrase, out TimeSpan start, out TimeSpan end)
-        {
-            start = TimeSpan.Zero;
-            end = TimeSpan.Zero;
-
-            if (TryGetTimeValue(phrase, "offsetInTicks", out var offsetTicks) &&
-                TryGetTimeValue(phrase, "durationInTicks", out var durationTicks))
-            {
-                start = offsetTicks;
-                end = start + durationTicks;
-                return true;
-            }
-
-            if (TryGetTimeValue(phrase, "offset", out var offset) &&
-                TryGetTimeValue(phrase, "duration", out var duration))
-            {
-                start = offset;
-                end = start + duration;
-                return true;
-            }
-
-            return false;
-        }
-
-        private static bool TryGetTimeValue(JsonElement element, string propertyName, out TimeSpan value)
-        {
-            value = TimeSpan.Zero;
-            if (!element.TryGetProperty(propertyName, out var prop))
-            {
-                return false;
-            }
-
-            if (prop.ValueKind == JsonValueKind.Number && prop.TryGetInt64(out var ticks))
-            {
-                value = TimeSpan.FromTicks(Math.Max(0, ticks));
-                return true;
-            }
-
-            if (prop.ValueKind == JsonValueKind.String)
-            {
-                var text = prop.GetString();
-                if (string.IsNullOrWhiteSpace(text))
-                {
-                    return false;
-                }
-
-                if (text.StartsWith("PT", StringComparison.OrdinalIgnoreCase))
-                {
-                    try
-                    {
-                        value = XmlConvert.ToTimeSpan(text);
-                        return true;
-                    }
-                    catch
-                    {
-                        return false;
-                    }
-                }
-
-                if (TimeSpan.TryParse(text, out var parsed))
-                {
-                    value = parsed;
-                    return true;
-                }
-
-                if (long.TryParse(text, out var parsedTicks))
-                {
-                    value = TimeSpan.FromTicks(Math.Max(0, parsedTicks));
-                    return true;
-                }
-            }
-
-            return false;
-        }
-
         private void CancelSpeechSubtitle()
         {
             _speechSubtitleCts?.Cancel();
         }
 
         private static string GetSpeechSubtitlePath(string audioFilePath)
+            => RealtimeSpeechTranscriber.GetSpeechSubtitlePath(audioFilePath);
+
+        private Task<List<SubtitleCue>> TranscribeSpeechToCuesAsync(string audioPath, CancellationToken token)
         {
-            var directory = Path.GetDirectoryName(audioFilePath) ?? PathManager.Instance.SessionsPath;
-            var baseName = Path.GetFileNameWithoutExtension(audioFilePath);
-            return Path.Combine(directory, baseName + ".speech.vtt");
-        }
-
-        private string GetTranscriptionSourceLanguage()
-        {
-            if (string.Equals(_config.SourceLanguage, "auto", StringComparison.OrdinalIgnoreCase))
-            {
-                return "zh-CN";
-            }
-
-            return _config.SourceLanguage;
-        }
-
-        private async Task<List<SubtitleCue>> TranscribeSpeechToCuesAsync(string audioPath, CancellationToken token)
-        {
-            var subscription = _config.GetActiveSubscription();
-            if (subscription == null || !subscription.IsValid())
-            {
-                throw new InvalidOperationException("语音订阅未配置");
-            }
-
-            if (!File.Exists(audioPath))
-            {
-                throw new FileNotFoundException("未找到音频文件", audioPath);
-            }
-
-            SpeechConfig speechConfig;
-            if (subscription.IsChinaEndpoint)
-            {
-                var host = new Uri(subscription.GetCognitiveServicesHost());
-                speechConfig = SpeechConfig.FromHost(host, subscription.SubscriptionKey);
-            }
-            else
-            {
-                speechConfig = SpeechConfig.FromSubscription(subscription.SubscriptionKey, subscription.ServiceRegion);
-            }
-            speechConfig.SpeechRecognitionLanguage = GetTranscriptionSourceLanguage();
-
-            var cues = new List<SubtitleCue>();
-            var cueLock = new object();
-            var fallbackCursor = TimeSpan.Zero;
-            var completed = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-
-            using var audioConfig = CreateTranscriptionAudioConfig(audioPath, token, out var feedTask);
-            using var transcriber = new ConversationTranscriber(speechConfig, audioConfig);
-
-            transcriber.Transcribed += (_, e) =>
-            {
-                if (e.Result.Reason != ResultReason.RecognizedSpeech)
-                {
-                    return;
-                }
-
-                var text = e.Result.Text?.Trim();
-                if (string.IsNullOrWhiteSpace(text))
-                {
-                    return;
-                }
-
-                var speakerId = string.IsNullOrWhiteSpace(e.Result.SpeakerId)
-                    ? "Speaker"
-                    : $"Speaker {e.Result.SpeakerId}";
-                TimeSpan start;
-                TimeSpan end;
-                if (!TryGetTranscriptionTiming(e.Result, out start, out end))
-                {
-                    lock (cueLock)
-                    {
-                        start = fallbackCursor;
-                        end = start + TimeSpan.FromSeconds(2);
-                        fallbackCursor = end;
-                    }
-                }
-
-                var cue = new SubtitleCue
-                {
-                    Start = start,
-                    End = end,
-                    Text = $"{speakerId}: {text}"
-                };
-
-                lock (cueLock)
-                {
-                    cues.Add(cue);
-                }
-            };
-
-            transcriber.Canceled += (_, e) =>
-            {
-                completed.TrySetException(new InvalidOperationException($"转写取消: {e.Reason}, {e.ErrorDetails}"));
-            };
-
-            transcriber.SessionStopped += (_, _) => completed.TrySetResult(true);
-
-            token.Register(() => completed.TrySetCanceled(token));
-
-            await transcriber.StartTranscribingAsync();
-            if (feedTask != null)
-            {
-                await feedTask;
-            }
-
-            try
-            {
-                await completed.Task;
-            }
-            finally
-            {
-                await transcriber.StopTranscribingAsync();
-            }
-
-            lock (cueLock)
-            {
-                return cues.OrderBy(c => c.Start).ToList();
-            }
-        }
-
-        private static bool TryGetTranscriptionTiming(ConversationTranscriptionResult result, out TimeSpan start, out TimeSpan end)
-        {
-            start = TimeSpan.Zero;
-            end = TimeSpan.Zero;
-
-            var json = result.Properties.GetProperty(PropertyId.SpeechServiceResponse_JsonResult);
-            if (string.IsNullOrWhiteSpace(json))
-            {
-                return false;
-            }
-
-            try
-            {
-                using var doc = System.Text.Json.JsonDocument.Parse(json);
-                if (!TryReadOffsetDuration(doc.RootElement, out var offset, out var duration))
-                {
-                    return false;
-                }
-
-                start = TimeSpan.FromTicks(Math.Max(0, offset));
-                end = start + TimeSpan.FromTicks(Math.Max(0, duration));
-                return true;
-            }
-            catch
-            {
-                return false;
-            }
-        }
-
-        private static bool TryReadOffsetDuration(System.Text.Json.JsonElement root, out long offset, out long duration)
-        {
-            offset = 0;
-            duration = 0;
-
-            if (root.TryGetProperty("Offset", out var offsetElement) &&
-                root.TryGetProperty("Duration", out var durationElement) &&
-                offsetElement.TryGetInt64(out offset) &&
-                durationElement.TryGetInt64(out duration))
-            {
-                return true;
-            }
-
-            if (root.TryGetProperty("NBest", out var nbest) &&
-                nbest.ValueKind == System.Text.Json.JsonValueKind.Array &&
-                nbest.GetArrayLength() > 0)
-            {
-                var first = nbest[0];
-                if (first.TryGetProperty("Offset", out var nbOffset) &&
-                    first.TryGetProperty("Duration", out var nbDuration) &&
-                    nbOffset.TryGetInt64(out offset) &&
-                    nbDuration.TryGetInt64(out duration))
-                {
-                    return true;
-                }
-            }
-
-            return false;
-        }
-
-        private static AudioConfig CreateTranscriptionAudioConfig(string audioPath, CancellationToken token, out Task? feedTask)
-        {
-            var streamFormat = AudioStreamFormat.GetWaveFormatPCM(16000, 16, 1);
-            var pushStream = AudioInputStream.CreatePushStream(streamFormat);
-            var audioConfig = AudioConfig.FromStreamInput(pushStream);
-
-            feedTask = Task.Run(() =>
-            {
-                try
-                {
-                    using var reader = new AudioFileReader(audioPath);
-                    using var resampler = new MediaFoundationResampler(reader, new WaveFormat(16000, 16, 1))
-                    {
-                        ResamplerQuality = 60
-                    };
-
-                    var buffer = new byte[3200];
-                    int read;
-                    while (!token.IsCancellationRequested && (read = resampler.Read(buffer, 0, buffer.Length)) > 0)
-                    {
-                        pushStream.Write(buffer, read);
-                    }
-                }
-                finally
-                {
-                    pushStream.Close();
-                }
-            });
-
-            return audioConfig;
-        }
-
-        private static void WriteVttFile(string outputPath, List<SubtitleCue> cues)
-        {
-            var directory = Path.GetDirectoryName(outputPath);
-            if (!string.IsNullOrWhiteSpace(directory) && !Directory.Exists(directory))
-            {
-                Directory.CreateDirectory(directory);
-            }
-
-            using var writer = new StreamWriter(outputPath, false, new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
-            writer.WriteLine("WEBVTT");
-            writer.WriteLine();
-
-            var index = 1;
-            foreach (var cue in cues)
-            {
-                writer.WriteLine(index++);
-                writer.WriteLine($"{FormatVttTime(cue.Start)} --> {FormatVttTime(cue.End)}");
-                writer.WriteLine(cue.Text);
-                writer.WriteLine();
-            }
-        }
-
-        private static string FormatVttTime(TimeSpan time)
-        {
-            return time.ToString(@"hh\:mm\:ss\.fff");
+            var subscription = _config.GetActiveSubscription()
+                ?? throw new InvalidOperationException("语音订阅未配置");
+            return RealtimeSpeechTranscriber.TranscribeSpeechToCuesAsync(
+                audioPath, subscription, _config.SourceLanguage, token);
         }
 
         private async Task GenerateReviewSheetAsync(ReviewSheetState sheet, MediaFileItem audioFile, List<SubtitleCue> cues)
@@ -3344,7 +2204,7 @@ namespace TranslationToolUI.ViewModels
                         Avalonia.Threading.Dispatcher.UIThread.Post(() =>
                         {
                             sb.Append(chunk);
-                            sheet.Markdown = InjectTimeLinks(sb.ToString());
+                            sheet.Markdown = TimeLinkHelper.InjectTimeLinks(sb.ToString());
                         });
                     },
                     token,
@@ -3433,74 +2293,10 @@ namespace TranslationToolUI.ViewModels
                 return;
             }
 
-            if (TryParseTimeUrl(url, out var time))
+            if (TimeLinkHelper.TryParseTimeUrl(url, out var time))
             {
                 SeekToTime(time);
             }
-        }
-
-        private static bool TryParseTimeUrl(string url, out TimeSpan time)
-        {
-            time = TimeSpan.Zero;
-            if (url.StartsWith("tt://", StringComparison.OrdinalIgnoreCase))
-            {
-                var text = url.Substring("tt://".Length);
-                return TryParseTimestamp(text, out time);
-            }
-
-            if (url.StartsWith("time://", StringComparison.OrdinalIgnoreCase))
-            {
-                var text = url.Substring("time://".Length);
-                return TryParseTimestamp(text, out time);
-            }
-
-            return false;
-        }
-
-        private static bool TryParseTimestamp(string text, out TimeSpan time)
-        {
-            time = TimeSpan.Zero;
-            if (string.IsNullOrWhiteSpace(text))
-            {
-                return false;
-            }
-
-            var parts = text.Split(':');
-            if (parts.Length == 2
-                && int.TryParse(parts[0], out var mm)
-                && int.TryParse(parts[1], out var ss))
-            {
-                time = new TimeSpan(0, mm, ss);
-                return true;
-            }
-
-            if (parts.Length == 3
-                && int.TryParse(parts[0], out var hh)
-                && int.TryParse(parts[1], out var mm2)
-                && int.TryParse(parts[2], out var ss2))
-            {
-                time = new TimeSpan(hh, mm2, ss2);
-                return true;
-            }
-
-            return false;
-        }
-
-        private static string InjectTimeLinks(string markdown)
-        {
-            if (string.IsNullOrWhiteSpace(markdown))
-            {
-                return markdown;
-            }
-
-            var regex = new System.Text.RegularExpressions.Regex(@"\[(?<time>(\d{1,2}:)?\d{2}:\d{2})\](?!\()",
-                System.Text.RegularExpressions.RegexOptions.Compiled);
-
-            return regex.Replace(markdown, match =>
-            {
-                var timeText = match.Groups["time"].Value;
-                return $"[{timeText}](tt://{timeText})";
-            });
         }
 
         private void ParseSrt(string path)
@@ -3542,7 +2338,7 @@ namespace TranslationToolUI.ViewModels
                     line = lines[index].Trim();
                 }
 
-                if (!TryParseTimeRange(line, out var start, out var end))
+                if (!SubtitleFileParser.TryParseTimeRange(line, out var start, out var end))
                 {
                     index++;
                     continue;
@@ -3571,116 +2367,10 @@ namespace TranslationToolUI.ViewModels
             UpdateSubtitleListHeight();
         }
 
-        private static List<SubtitleCue> ParseSubtitleFileToCues(string path)
-        {
-            if (!File.Exists(path))
-            {
-                return new List<SubtitleCue>();
-            }
-
-            var extension = Path.GetExtension(path).ToLowerInvariant();
-            var lines = File.ReadAllLines(path);
-            var expectsHeader = extension == ".vtt";
-            return ParseSubtitleLinesToList(lines, expectsHeader);
-        }
-
-        private static List<SubtitleCue> ParseSubtitleLinesToList(string[] lines, bool expectsHeader)
-        {
-            var list = new List<SubtitleCue>();
-            var index = 0;
-            if (expectsHeader && index < lines.Length && lines[index].StartsWith("WEBVTT", StringComparison.OrdinalIgnoreCase))
-            {
-                index++;
-            }
-
-            while (index < lines.Length)
-            {
-                var line = lines[index].Trim();
-                if (string.IsNullOrWhiteSpace(line))
-                {
-                    index++;
-                    continue;
-                }
-
-                if (int.TryParse(line, out _))
-                {
-                    index++;
-                    if (index >= lines.Length)
-                    {
-                        break;
-                    }
-                    line = lines[index].Trim();
-                }
-
-                if (!TryParseTimeRange(line, out var start, out var end))
-                {
-                    index++;
-                    continue;
-                }
-
-                index++;
-                var textLines = new List<string>();
-                while (index < lines.Length && !string.IsNullOrWhiteSpace(lines[index]))
-                {
-                    textLines.Add(lines[index].Trim());
-                    index++;
-                }
-
-                var text = string.Join(" ", textLines).Trim();
-                if (!string.IsNullOrWhiteSpace(text))
-                {
-                    list.Add(new SubtitleCue
-                    {
-                        Start = start,
-                        End = end,
-                        Text = text
-                    });
-                }
-            }
-
-            return list;
-        }
-
         private void UpdateSubtitleListHeight()
         {
             var visible = Math.Min(_subtitleCues.Count, 6);
             SubtitleListHeight = visible * SubtitleCueRowHeight;
-        }
-
-        private static bool TryParseTimeRange(string line, out TimeSpan start, out TimeSpan end)
-        {
-            start = TimeSpan.Zero;
-            end = TimeSpan.Zero;
-
-            var match = System.Text.RegularExpressions.Regex.Match(line, @"(?<start>\d{2}:\d{2}:\d{2}[\.,]\d{3})\s*-->\s*(?<end>\d{2}:\d{2}:\d{2}[\.,]\d{3})");
-            if (!match.Success)
-            {
-                return false;
-            }
-
-            if (!TryParseTimecode(match.Groups["start"].Value, out start))
-            {
-                return false;
-            }
-
-            if (!TryParseTimecode(match.Groups["end"].Value, out end))
-            {
-                return false;
-            }
-
-            return true;
-        }
-
-        private static bool TryParseTimecode(string value, out TimeSpan time)
-        {
-            time = TimeSpan.Zero;
-            var normalized = value.Replace(',', '.');
-            if (TimeSpan.TryParseExact(normalized, @"hh\:mm\:ss\.fff", null, out time))
-            {
-                return true;
-            }
-
-            return false;
         }
     }
 }

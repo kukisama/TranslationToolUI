@@ -21,13 +21,6 @@ using System.Diagnostics;
 using System.Net.Http;
 using System.Text.Json;
 using NAudio.Wave;
-using Microsoft.CognitiveServices.Speech;
-using Microsoft.CognitiveServices.Speech.Audio;
-using Microsoft.CognitiveServices.Speech.Transcription;
-using Azure.Storage.Blobs;
-using Azure.Storage.Blobs.Models;
-using Azure.Storage.Sas;
-using System.Xml;
 
 namespace TranslationToolUI.ViewModels
 {
@@ -82,8 +75,7 @@ namespace TranslationToolUI.ViewModels
         private string _batchQueueStatusText = "";
         private Task? _batchQueueRunnerTask;
         private List<ReviewSheetPreset> _batchReviewSheetSnapshot = new();
-        private string? _batchLogFilePath;
-        private readonly object _batchLogLock = new();
+        private readonly BatchLogService _batchLog;
         private MediaFileItem? _selectedAudioFile;
         private MediaFileItem? _selectedSubtitleFile;
         private SubtitleCue? _selectedSubtitleCue;
@@ -123,8 +115,6 @@ namespace TranslationToolUI.ViewModels
         private readonly ObservableCollection<ReviewSheetState> _reviewSheets = new();
         private ReviewSheetState? _selectedReviewSheet;
 
-        private static readonly HttpClient SpeechBatchHttpClient = new();
-
         private readonly string[] _sourceLanguages = { "auto", "en", "zh-CN", "ja-JP", "ko-KR", "fr-FR", "de-DE", "es-ES" };
         private readonly string[] _targetLanguages = { "en", "zh-CN", "ja-JP", "ko-KR", "fr-FR", "de-DE", "es-ES" };
 
@@ -137,6 +127,7 @@ namespace TranslationToolUI.ViewModels
         {
             _configService = new ConfigurationService();
             _aiInsightService = new AiInsightService(_azureTokenProvider);
+            _batchLog = new BatchLogService(() => _config.BatchLogLevel, () => _config.EnableAuditLog);
             _config = new AzureSpeechConfig();
             _history = new ObservableCollection<TranslationItem>();
             _subscriptionNames = new ObservableCollection<string>();

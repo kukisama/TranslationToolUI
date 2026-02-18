@@ -368,7 +368,7 @@ namespace TranslationToolUI.ViewModels
 
                 if (_translationService != null)
                 {
-                    _translationService.UpdateConfig(_config);
+                    await _translationService.UpdateConfigAsync(_config);
                 }
 
                 OnPropertyChanged(nameof(IsAiConfigured));

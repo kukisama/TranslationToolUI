@@ -14,6 +14,7 @@ using System.Linq;
 using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
+using TranslationToolUI.Helpers;
 using TranslationToolUI.Models;
 using TranslationToolUI.Services;
 
@@ -122,13 +123,6 @@ namespace TranslationToolUI.Views
             ProviderTypeComboBox.SelectionChanged += (_, _) => UpdateProviderFieldsVisibility();
             AzureAuthModeComboBox.SelectionChanged += (_, _) => UpdateAadFieldsVisibility();
             AiTestButton.Click += AiTestButton_Click;
-            AddPresetButton.Click += AddPresetButton_Click;
-            AddReviewSheetButton.Click += AddReviewSheetButton_Click;
-
-            AadLoginButton.Click += AadLoginButton_Click;
-            AadLogoutButton.Click += AadLogoutButton_Click;
-            AadCopyCodeButton.Click += AadCopyCodeButton_Click;
-            AadOpenLinkButton.Click += AadOpenLinkButton_Click;
 
             MediaBrowseOutputDirButton.Click += MediaBrowseOutputDirButton_Click;
 
@@ -138,16 +132,6 @@ namespace TranslationToolUI.Views
             MediaVideoAzureAuthModeComboBox.SelectionChanged += (_, _) => UpdateMediaVideoAadFieldsVisibility();
             MediaVideoUseImageEndpointCheckBox.IsCheckedChanged += (_, _) => UpdateMediaVideoEndpointSyncState();
             MediaVideoApiModeComboBox.SelectionChanged += (_, _) => UpdateMediaVideoApiModeVisibility();
-
-            MediaImageAadLoginButton.Click += MediaImageAadLoginButton_Click;
-            MediaImageAadLogoutButton.Click += MediaImageAadLogoutButton_Click;
-            MediaImageAadCopyCodeButton.Click += MediaImageAadCopyCodeButton_Click;
-            MediaImageAadOpenLinkButton.Click += MediaImageAadOpenLinkButton_Click;
-
-            MediaVideoAadLoginButton.Click += MediaVideoAadLoginButton_Click;
-            MediaVideoAadLogoutButton.Click += MediaVideoAadLogoutButton_Click;
-            MediaVideoAadCopyCodeButton.Click += MediaVideoAadCopyCodeButton_Click;
-            MediaVideoAadOpenLinkButton.Click += MediaVideoAadOpenLinkButton_Click;
 
             Opened += ConfigCenterView_Opened;
         }
@@ -271,8 +255,8 @@ namespace TranslationToolUI.Views
             MediaImageEndpointTextBox.Text = mc.ImageApiEndpoint;
             MediaImageApiKeyTextBox.Text = mc.ImageApiKey;
             MediaImageAzureAuthModeComboBox.SelectedIndex = mc.ImageAzureAuthMode == AzureAuthMode.AAD ? 1 : 0;
-            MediaImageAzureTenantIdTextBox.Text = mc.ImageAzureTenantId ?? "";
-            MediaImageAzureClientIdTextBox.Text = mc.ImageAzureClientId ?? "";
+            MediaImageAadLoginPanelControl.TenantId = mc.ImageAzureTenantId ?? "";
+            MediaImageAadLoginPanelControl.ClientId = mc.ImageAzureClientId ?? "";
 
             MediaVideoUseImageEndpointCheckBox.IsChecked = mc.VideoUseImageEndpoint;
             MediaVideoModelTextBox.Text = mc.VideoModel;
@@ -281,8 +265,8 @@ namespace TranslationToolUI.Views
             MediaVideoEndpointTextBox.Text = mc.VideoApiEndpoint;
             MediaVideoApiKeyTextBox.Text = mc.VideoApiKey;
             MediaVideoAzureAuthModeComboBox.SelectedIndex = mc.VideoAzureAuthMode == AzureAuthMode.AAD ? 1 : 0;
-            MediaVideoAzureTenantIdTextBox.Text = mc.VideoAzureTenantId ?? "";
-            MediaVideoAzureClientIdTextBox.Text = mc.VideoAzureClientId ?? "";
+            MediaVideoAadLoginPanelControl.TenantId = mc.VideoAzureTenantId ?? "";
+            MediaVideoAadLoginPanelControl.ClientId = mc.VideoAzureClientId ?? "";
             MediaOutputDirTextBox.Text = mc.OutputDirectory;
             MediaMaxLoadedSessionsNumeric.Value = mc.MaxLoadedSessionsInMemory <= 0
                 ? 8
@@ -323,8 +307,8 @@ namespace TranslationToolUI.Views
 
             // AAD auth fields
             AzureAuthModeComboBox.SelectedIndex = _aiConfig.AzureAuthMode == AzureAuthMode.AAD ? 1 : 0;
-            AzureTenantIdTextBox.Text = _aiConfig.AzureTenantId ?? "";
-            AzureClientIdTextBox.Text = _aiConfig.AzureClientId ?? "";
+            AadLoginPanelControl.TenantId = _aiConfig.AzureTenantId ?? "";
+            AadLoginPanelControl.ClientId = _aiConfig.AzureClientId ?? "";
             UpdateAadFieldsVisibility();
 
             InsightSystemPromptTextBox.Text = _aiConfig.InsightSystemPrompt;
@@ -334,7 +318,7 @@ namespace TranslationToolUI.Views
             AutoInsightBufferCheckBox.IsChecked = _aiConfig.AutoInsightBufferOutput;
 
             _presetButtons = new ObservableCollection<InsightPresetButton>(_aiConfig.PresetButtons);
-            PresetButtonsItemsControl.ItemsSource = _presetButtons;
+            PresetButtonsEditorControl.Items = _presetButtons;
 
             _reviewSheets = new ObservableCollection<ReviewSheetPreset>(_aiConfig.ReviewSheets
                 .Select(s => new ReviewSheetPreset
@@ -344,7 +328,7 @@ namespace TranslationToolUI.Views
                     Prompt = s.Prompt,
                     IncludeInBatch = s.IncludeInBatch
                 }));
-            ReviewSheetsItemsControl.ItemsSource = _reviewSheets;
+            ReviewSheetsEditorControl.Items = _reviewSheets;
         }
 
         private void UpdateProviderFieldsVisibility()
@@ -448,282 +432,6 @@ namespace TranslationToolUI.Views
             }
         }
 
-        private string? _lastDeviceCodeUrl;
-        private string? _lastMediaImageDeviceCodeUrl;
-        private string? _lastMediaVideoDeviceCodeUrl;
-
-        private static Avalonia.Media.SolidColorBrush BrushFromHex(string hex)
-        {
-            return new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.Parse(hex));
-        }
-
-        private static void SetStatus(TextBlock tb, string text, string colorHex)
-        {
-            tb.Text = text;
-            tb.Foreground = BrushFromHex(colorHex);
-        }
-
-        private async Task RunAadLoginWithOptionalTenantPickAsync(
-            Button loginButton,
-            TextBlock statusTextBlock,
-            Control deviceCodePanel,
-            TextBlock deviceCodeMessage,
-            TextBox tenantIdTextBox,
-            TextBox clientIdTextBox,
-            Action<string?> setLastDeviceCodeUrl,
-            string profileKey)
-        {
-            loginButton.IsEnabled = false;
-            SetStatus(statusTextBlock, "正在启动登录…", "#6a737d");
-            deviceCodePanel.IsVisible = false;
-            setLastDeviceCodeUrl(null);
-
-            var provider = new AzureTokenProvider(profileKey);
-            var tenantId = tenantIdTextBox.Text?.Trim();
-            var clientId = clientIdTextBox.Text?.Trim();
-
-            Action<string> onDeviceCode = message =>
-            {
-                Avalonia.Threading.Dispatcher.UIThread.Post(() =>
-                {
-                    deviceCodePanel.IsVisible = true;
-                    deviceCodeMessage.Text = message;
-
-                    // 尝试从消息中提取 URL
-                    var urlMatch = System.Text.RegularExpressions.Regex.Match(message, @"https?://\S+");
-                    if (urlMatch.Success)
-                        setLastDeviceCodeUrl(urlMatch.Value);
-                });
-            };
-
-            try
-            {
-                var success = await provider.LoginAutoAsync(tenantId, clientId, onDeviceCode);
-                if (!success)
-                {
-                    SetStatus(statusTextBlock, "✗ 登录失败", "#cb2431");
-                    return;
-                }
-
-                SetStatus(statusTextBlock, $"✓ 已登录: {provider.Username ?? "已认证"}", "#22863a");
-                deviceCodePanel.IsVisible = false;
-
-                // 若用户未指定 tenantId，则在首次登录后尝试拉取租户列表并让用户选择。
-                if (string.IsNullOrWhiteSpace(tenantId))
-                {
-                    SetStatus(statusTextBlock, $"✓ 已登录: {provider.Username ?? "已认证"}（正在获取租户列表…）", "#22863a");
-                    IReadOnlyList<AzureTenantInfo> tenants;
-                    try
-                    {
-                        tenants = await provider.GetAvailableTenantsAsync();
-                    }
-                    catch
-                    {
-                        tenants = Array.Empty<AzureTenantInfo>();
-                    }
-
-                    if (tenants.Count == 1)
-                    {
-                        tenantIdTextBox.Text = tenants[0].TenantId;
-                        SetStatus(statusTextBlock, $"✓ 已登录: {provider.Username ?? "已认证"}（租户: {tenants[0].TenantId}）", "#22863a");
-                    }
-                    else if (tenants.Count > 1)
-                    {
-                        var picked = await TenantSelectionView.ShowAsync(this, tenants);
-                        if (picked != null && !string.IsNullOrWhiteSpace(picked.TenantId))
-                        {
-                            tenantIdTextBox.Text = picked.TenantId;
-
-                            // 切换到用户选择的租户：优先尝试静默（利用 AuthRecord），必要时会再次给出设备码。
-                            SetStatus(statusTextBlock, $"正在切换到租户: {picked.DisplayName ?? picked.TenantId}…", "#6a737d");
-                            var switched = await provider.LoginAutoAsync(picked.TenantId, clientId, onDeviceCode);
-                            if (switched)
-                            {
-                                SetStatus(statusTextBlock, $"✓ 已登录: {provider.Username ?? "已认证"}（租户: {picked.TenantId}）", "#22863a");
-                                deviceCodePanel.IsVisible = false;
-                            }
-                            else
-                            {
-                                SetStatus(statusTextBlock, "✗ 切换租户失败（请检查权限/管理员同意/条件访问策略）", "#cb2431");
-                            }
-                        }
-                        else
-                        {
-                            // 用户取消选择，不做强制切换。
-                            SetStatus(statusTextBlock, $"✓ 已登录: {provider.Username ?? "已认证"}（未选择租户）", "#22863a");
-                        }
-                    }
-                    else
-                    {
-                        // 获取不到租户列表时不阻塞使用：用户仍可手动填写 tenantId。
-                        SetStatus(statusTextBlock, $"✓ 已登录: {provider.Username ?? "已认证"}（未能获取租户列表，可手动填写租户 ID）", "#22863a");
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                SetStatus(statusTextBlock, $"✗ 错误: {ex.Message}", "#cb2431");
-            }
-            finally
-            {
-                loginButton.IsEnabled = true;
-            }
-        }
-
-        private async void AadLoginButton_Click(object? sender, RoutedEventArgs e)
-        {
-            await RunAadLoginWithOptionalTenantPickAsync(
-                AadLoginButton,
-                AadStatusTextBlock,
-                AadDeviceCodePanel,
-                AadDeviceCodeMessage,
-                AzureTenantIdTextBox,
-                AzureClientIdTextBox,
-                url => _lastDeviceCodeUrl = url,
-                profileKey: "ai");
-        }
-
-        private async void MediaImageAadLoginButton_Click(object? sender, RoutedEventArgs e)
-        {
-            await RunAadLoginWithOptionalTenantPickAsync(
-                MediaImageAadLoginButton,
-                MediaImageAadStatusTextBlock,
-                MediaImageAadDeviceCodePanel,
-                MediaImageAadDeviceCodeMessage,
-                MediaImageAzureTenantIdTextBox,
-                MediaImageAzureClientIdTextBox,
-                url => _lastMediaImageDeviceCodeUrl = url,
-                profileKey: "media-image");
-        }
-
-        private void MediaImageAadLogoutButton_Click(object? sender, RoutedEventArgs e)
-        {
-            var provider = new AzureTokenProvider("media-image");
-            provider.Logout();
-            MediaImageAadStatusTextBlock.Text = "已注销";
-            MediaImageAadStatusTextBlock.Foreground = new Avalonia.Media.SolidColorBrush(
-                Avalonia.Media.Color.Parse("#6a737d"));
-            MediaImageAadDeviceCodePanel.IsVisible = false;
-        }
-
-        private async void MediaImageAadCopyCodeButton_Click(object? sender, RoutedEventArgs e)
-        {
-            var text = MediaImageAadDeviceCodeMessage.Text ?? "";
-            var codeMatch = System.Text.RegularExpressions.Regex.Match(text, @"\b[A-Z0-9]{8,}\b");
-            if (codeMatch.Success)
-            {
-                var clipboard = TopLevel.GetTopLevel(this)?.Clipboard;
-                if (clipboard != null)
-                    await clipboard.SetTextAsync(codeMatch.Value);
-            }
-        }
-
-        private void MediaImageAadOpenLinkButton_Click(object? sender, RoutedEventArgs e)
-        {
-            if (!string.IsNullOrEmpty(_lastMediaImageDeviceCodeUrl))
-            {
-                try
-                {
-                    System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
-                    {
-                        FileName = _lastMediaImageDeviceCodeUrl,
-                        UseShellExecute = true
-                    });
-                }
-                catch { }
-            }
-        }
-
-        private async void MediaVideoAadLoginButton_Click(object? sender, RoutedEventArgs e)
-        {
-            await RunAadLoginWithOptionalTenantPickAsync(
-                MediaVideoAadLoginButton,
-                MediaVideoAadStatusTextBlock,
-                MediaVideoAadDeviceCodePanel,
-                MediaVideoAadDeviceCodeMessage,
-                MediaVideoAzureTenantIdTextBox,
-                MediaVideoAzureClientIdTextBox,
-                url => _lastMediaVideoDeviceCodeUrl = url,
-                profileKey: "media-video");
-        }
-
-        private void MediaVideoAadLogoutButton_Click(object? sender, RoutedEventArgs e)
-        {
-            var provider = new AzureTokenProvider("media-video");
-            provider.Logout();
-            MediaVideoAadStatusTextBlock.Text = "已注销";
-            MediaVideoAadStatusTextBlock.Foreground = new Avalonia.Media.SolidColorBrush(
-                Avalonia.Media.Color.Parse("#6a737d"));
-            MediaVideoAadDeviceCodePanel.IsVisible = false;
-        }
-
-        private async void MediaVideoAadCopyCodeButton_Click(object? sender, RoutedEventArgs e)
-        {
-            var text = MediaVideoAadDeviceCodeMessage.Text ?? "";
-            var codeMatch = System.Text.RegularExpressions.Regex.Match(text, @"\b[A-Z0-9]{8,}\b");
-            if (codeMatch.Success)
-            {
-                var clipboard = TopLevel.GetTopLevel(this)?.Clipboard;
-                if (clipboard != null)
-                    await clipboard.SetTextAsync(codeMatch.Value);
-            }
-        }
-
-        private void MediaVideoAadOpenLinkButton_Click(object? sender, RoutedEventArgs e)
-        {
-            if (!string.IsNullOrEmpty(_lastMediaVideoDeviceCodeUrl))
-            {
-                try
-                {
-                    System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
-                    {
-                        FileName = _lastMediaVideoDeviceCodeUrl,
-                        UseShellExecute = true
-                    });
-                }
-                catch { }
-            }
-        }
-
-        private void AadLogoutButton_Click(object? sender, RoutedEventArgs e)
-        {
-            var provider = new AzureTokenProvider("ai");
-            provider.Logout();
-            AadStatusTextBlock.Text = "已注销";
-            AadStatusTextBlock.Foreground = new Avalonia.Media.SolidColorBrush(
-                Avalonia.Media.Color.Parse("#6a737d"));
-            AadDeviceCodePanel.IsVisible = false;
-        }
-
-        private async void AadCopyCodeButton_Click(object? sender, RoutedEventArgs e)
-        {
-            var text = AadDeviceCodeMessage.Text ?? "";
-            // 提取设备代码（通常是大写字母数字组合）
-            var codeMatch = System.Text.RegularExpressions.Regex.Match(text, @"\b[A-Z0-9]{8,}\b");
-            if (codeMatch.Success)
-            {
-                var clipboard = TopLevel.GetTopLevel(this)?.Clipboard;
-                if (clipboard != null)
-                    await clipboard.SetTextAsync(codeMatch.Value);
-            }
-        }
-
-        private void AadOpenLinkButton_Click(object? sender, RoutedEventArgs e)
-        {
-            if (!string.IsNullOrEmpty(_lastDeviceCodeUrl))
-            {
-                try
-                {
-                    System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
-                    {
-                        FileName = _lastDeviceCodeUrl,
-                        UseShellExecute = true
-                    });
-                }
-                catch { }
-            }
-        }
-
         private void EnableRecordingCheckBox_IsCheckedChanged(object? sender, RoutedEventArgs e)
         {
             UpdateRecordingUiEnabledState();
@@ -764,17 +472,7 @@ namespace TranslationToolUI.Views
 
         private void ForceUpdateListBoxSelection(int targetIndex)
         {
-            if (targetIndex >= 0 && targetIndex < _subscriptions.Count)
-            {
-                SubscriptionListBox.Focus();
-                SubscriptionListBox.SelectedIndex = -1;
-                SubscriptionListBox.SelectedIndex = targetIndex;
-
-                if (SubscriptionListBox.SelectedItem != null)
-                {
-                    SubscriptionListBox.ScrollIntoView(SubscriptionListBox.SelectedItem);
-                }
-            }
+            ConfigViewHelper.ForceUpdateListBoxSelection(SubscriptionListBox, targetIndex, _subscriptions.Count);
         }
 
         private void EnsureSelectionWhenSingleItem()
@@ -837,26 +535,26 @@ namespace TranslationToolUI.Views
             if (ProviderTypeComboBox.SelectedIndex == 1 && AzureAuthModeComboBox.SelectedIndex == 1)
             {
                 var username = await TryReadSavedAadUsernameAsync("ai");
-                SetStatus(AadStatusTextBlock,
+                AadLoginPanelControl.SetStatus(
                     username != null ? $"✓ 已保存登录: {username}" : "未登录（无保存记录）",
                     username != null ? "#22863a" : "#6a737d");
             }
             else
             {
-                AadStatusTextBlock.Text = "";
+                AadLoginPanelControl.SetStatus("", "#6a737d");
             }
 
             // --- Media 图片 ---
             if (MediaImageProviderTypeComboBox.SelectedIndex == 1 && MediaImageAzureAuthModeComboBox.SelectedIndex == 1)
             {
                 var username = await TryReadSavedAadUsernameAsync("media-image");
-                SetStatus(MediaImageAadStatusTextBlock,
+                MediaImageAadLoginPanelControl.SetStatus(
                     username != null ? $"✓ 已保存登录: {username}" : "未登录（无保存记录）",
                     username != null ? "#22863a" : "#6a737d");
             }
             else
             {
-                MediaImageAadStatusTextBlock.Text = "";
+                MediaImageAadLoginPanelControl.SetStatus("", "#6a737d");
             }
 
             // --- Media 视频 ---
@@ -873,23 +571,22 @@ namespace TranslationToolUI.Views
             {
                 var username = await TryReadSavedAadUsernameAsync("media-video");
 
-                // 共享终结点时更推荐看 media-image 的登录状态
                 if (videoUsesImageEndpoint)
                 {
-                    SetStatus(MediaVideoAadStatusTextBlock,
+                    MediaVideoAadLoginPanelControl.SetStatus(
                         "使用图片终结点时将复用图片登录状态（如需单独视频登录，请取消勾选共享终结点）",
                         "#6a737d");
                 }
                 else
                 {
-                    SetStatus(MediaVideoAadStatusTextBlock,
+                    MediaVideoAadLoginPanelControl.SetStatus(
                         username != null ? $"✓ 已保存登录: {username}" : "未登录（无保存记录）",
                         username != null ? "#22863a" : "#6a737d");
                 }
             }
             else
             {
-                MediaVideoAadStatusTextBlock.Text = "";
+                MediaVideoAadLoginPanelControl.SetStatus("", "#6a737d");
             }
         }
 
@@ -1255,30 +952,7 @@ namespace TranslationToolUI.Views
 
         private void ShowMessage(string message)
         {
-            var messageBox = new Window
-            {
-                Title = "提示",
-                Width = 300,
-                Height = 150,
-                WindowStartupLocation = WindowStartupLocation.CenterOwner,
-                Content = new StackPanel
-                {
-                    Margin = new Avalonia.Thickness(20),
-                    Spacing = 20,
-                    Children =
-                    {
-                        new TextBlock { Text = message, TextWrapping = Avalonia.Media.TextWrapping.Wrap },
-                        new Button { Content = "确定", HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Center }
-                    }
-                }
-            };
-
-            if (messageBox.Content is StackPanel panel && panel.Children.LastOrDefault() is Button okButton)
-            {
-                okButton.Click += (_, _) => messageBox.Close();
-            }
-
-            messageBox.ShowDialog(this);
+            ConfigViewHelper.ShowMessage(message, this);
         }
 
         private void BrowseButton_Click(object? sender, RoutedEventArgs e)
@@ -1477,57 +1151,19 @@ namespace TranslationToolUI.Views
                 : AiProviderType.OpenAiCompatible;
             _aiConfig.ApiEndpoint = ApiEndpointTextBox.Text?.Trim() ?? "";
             _aiConfig.ApiKey = ApiKeyTextBox.Text?.Trim() ?? "";
-            var quickModel = QuickModelNameTextBox.Text?.Trim() ?? "";
-            var summaryModel = SummaryModelNameTextBox.Text?.Trim() ?? "";
-            if (string.IsNullOrWhiteSpace(quickModel))
-            {
-                quickModel = summaryModel;
-            }
-            if (string.IsNullOrWhiteSpace(summaryModel))
-            {
-                summaryModel = quickModel;
-            }
-            if (string.IsNullOrWhiteSpace(quickModel))
-            {
-                quickModel = _aiConfig.ModelName;
-            }
-            if (string.IsNullOrWhiteSpace(summaryModel))
-            {
-                summaryModel = quickModel;
-            }
-
-            _aiConfig.QuickModelName = quickModel;
-            _aiConfig.SummaryModelName = summaryModel;
-            _aiConfig.ModelName = quickModel;
-
-            var quickDeployment = QuickDeploymentNameTextBox.Text?.Trim() ?? "";
-            var summaryDeployment = SummaryDeploymentNameTextBox.Text?.Trim() ?? "";
-            if (string.IsNullOrWhiteSpace(quickDeployment))
-            {
-                quickDeployment = summaryDeployment;
-            }
-            if (string.IsNullOrWhiteSpace(summaryDeployment))
-            {
-                summaryDeployment = quickDeployment;
-            }
-            if (string.IsNullOrWhiteSpace(quickDeployment))
-            {
-                quickDeployment = _aiConfig.DeploymentName;
-            }
-            if (string.IsNullOrWhiteSpace(summaryDeployment))
-            {
-                summaryDeployment = quickDeployment;
-            }
-
-            _aiConfig.QuickDeploymentName = quickDeployment;
-            _aiConfig.SummaryDeploymentName = summaryDeployment;
-            _aiConfig.DeploymentName = quickDeployment;
+            var existingModel = _aiConfig.ModelName;
+            var existingDeployment = _aiConfig.DeploymentName;
+            _aiConfig.QuickModelName = QuickModelNameTextBox.Text?.Trim() ?? "";
+            _aiConfig.SummaryModelName = SummaryModelNameTextBox.Text?.Trim() ?? "";
+            _aiConfig.QuickDeploymentName = QuickDeploymentNameTextBox.Text?.Trim() ?? "";
+            _aiConfig.SummaryDeploymentName = SummaryDeploymentNameTextBox.Text?.Trim() ?? "";
+            ConfigViewHelper.ApplyModelDeploymentFallbacks(_aiConfig, existingModel, existingDeployment);
             _aiConfig.ApiVersion = ApiVersionTextBox.Text?.Trim() ?? "2024-02-01";
             _aiConfig.AzureAuthMode = AzureAuthModeComboBox.SelectedIndex == 1
                 ? AzureAuthMode.AAD
                 : AzureAuthMode.ApiKey;
-            _aiConfig.AzureTenantId = AzureTenantIdTextBox.Text?.Trim() ?? "";
-            _aiConfig.AzureClientId = AzureClientIdTextBox.Text?.Trim() ?? "";
+            _aiConfig.AzureTenantId = AadLoginPanelControl.TenantId ?? "";
+            _aiConfig.AzureClientId = AadLoginPanelControl.ClientId ?? "";
             _aiConfig.SummaryEnableReasoning = SummaryReasoningCheckBox.IsChecked == true;
             _aiConfig.InsightSystemPrompt = InsightSystemPromptTextBox.Text?.Trim() ?? "";
             _aiConfig.ReviewSystemPrompt = ReviewSystemPromptTextBox.Text?.Trim() ?? "";
@@ -1561,8 +1197,8 @@ namespace TranslationToolUI.Views
             mc.ImageAzureAuthMode = MediaImageAzureAuthModeComboBox.SelectedIndex == 1
                 ? AzureAuthMode.AAD
                 : AzureAuthMode.ApiKey;
-            mc.ImageAzureTenantId = MediaImageAzureTenantIdTextBox.Text?.Trim() ?? "";
-            mc.ImageAzureClientId = MediaImageAzureClientIdTextBox.Text?.Trim() ?? "";
+            mc.ImageAzureTenantId = MediaImageAadLoginPanelControl.TenantId ?? "";
+            mc.ImageAzureClientId = MediaImageAadLoginPanelControl.ClientId ?? "";
 
             mc.VideoUseImageEndpoint = MediaVideoUseImageEndpointCheckBox.IsChecked ?? true;
 
@@ -1590,8 +1226,8 @@ namespace TranslationToolUI.Views
             mc.VideoAzureAuthMode = MediaVideoAzureAuthModeComboBox.SelectedIndex == 1
                 ? AzureAuthMode.AAD
                 : AzureAuthMode.ApiKey;
-            mc.VideoAzureTenantId = MediaVideoAzureTenantIdTextBox.Text?.Trim() ?? "";
-            mc.VideoAzureClientId = MediaVideoAzureClientIdTextBox.Text?.Trim() ?? "";
+            mc.VideoAzureTenantId = MediaVideoAadLoginPanelControl.TenantId ?? "";
+            mc.VideoAzureClientId = MediaVideoAadLoginPanelControl.ClientId ?? "";
             mc.MaxLoadedSessionsInMemory = (int)Math.Clamp(
                 Math.Round(MediaMaxLoadedSessionsNumeric.Value ?? 8m),
                 1,
@@ -1613,38 +1249,6 @@ namespace TranslationToolUI.Views
             }
         }
 
-        private void AddPresetButton_Click(object? sender, RoutedEventArgs e)
-        {
-            _presetButtons.Add(new InsightPresetButton { Name = "新按钮", Prompt = "" });
-        }
-
-        private void RemovePresetButton_Click(object? sender, RoutedEventArgs e)
-        {
-            if (sender is Button btn && btn.Tag is InsightPresetButton item)
-            {
-                _presetButtons.Remove(item);
-            }
-        }
-
-        private void AddReviewSheetButton_Click(object? sender, RoutedEventArgs e)
-        {
-            _reviewSheets.Add(new ReviewSheetPreset
-            {
-                Name = "新复盘",
-                FileTag = "custom",
-                Prompt = "",
-                IncludeInBatch = true
-            });
-        }
-
-        private void RemoveReviewSheet_Click(object? sender, RoutedEventArgs e)
-        {
-            if (sender is Button btn && btn.Tag is ReviewSheetPreset item)
-            {
-                _reviewSheets.Remove(item);
-            }
-        }
-
         private async void AiTestButton_Click(object? sender, RoutedEventArgs e)
         {
             var testConfig = new AiConfig
@@ -1656,103 +1260,13 @@ namespace TranslationToolUI.Views
                 ApiKey = ApiKeyTextBox.Text?.Trim() ?? "",
                 QuickModelName = QuickModelNameTextBox.Text?.Trim() ?? "",
                 SummaryModelName = SummaryModelNameTextBox.Text?.Trim() ?? "",
-                ModelName = QuickModelNameTextBox.Text?.Trim() ?? "",
                 QuickDeploymentName = QuickDeploymentNameTextBox.Text?.Trim() ?? "",
                 SummaryDeploymentName = SummaryDeploymentNameTextBox.Text?.Trim() ?? "",
-                DeploymentName = QuickDeploymentNameTextBox.Text?.Trim() ?? "",
-                ApiVersion = ApiVersionTextBox.Text?.Trim() ?? "2024-02-01"
+                ApiVersion = ApiVersionTextBox.Text?.Trim() ?? "2024-02-01",
+                SummaryEnableReasoning = SummaryReasoningCheckBox.IsChecked == true
             };
-            if (string.IsNullOrWhiteSpace(testConfig.QuickModelName))
-            {
-                testConfig.QuickModelName = testConfig.SummaryModelName;
-                testConfig.ModelName = testConfig.QuickModelName;
-            }
-            if (string.IsNullOrWhiteSpace(testConfig.SummaryModelName))
-            {
-                testConfig.SummaryModelName = testConfig.QuickModelName;
-            }
-            if (string.IsNullOrWhiteSpace(testConfig.QuickDeploymentName))
-            {
-                testConfig.QuickDeploymentName = testConfig.SummaryDeploymentName;
-                testConfig.DeploymentName = testConfig.QuickDeploymentName;
-            }
-            if (string.IsNullOrWhiteSpace(testConfig.SummaryDeploymentName))
-            {
-                testConfig.SummaryDeploymentName = testConfig.QuickDeploymentName;
-            }
-            testConfig.SummaryEnableReasoning = SummaryReasoningCheckBox.IsChecked == true;
-
-            if (!testConfig.IsValid)
-            {
-                StatusTextBlock.Text = "请填写必要的配置信息";
-                StatusTextBlock.Foreground = Avalonia.Media.Brushes.Orange;
-                return;
-            }
-
-            AiTestButton.IsEnabled = false;
-            AiTestButton.Content = "测试中...";
-            StatusTextBlock.Text = "正在连接...";
-            StatusTextBlock.Foreground = Avalonia.Media.Brushes.Gray;
-            ReasoningOutputTextBox.Text = "";
-
-            try
-            {
-                var service = new AiInsightService();
-                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-                var received = false;
-                var reasoningReceived = false;
-                var reasoningBuilder = new System.Text.StringBuilder();
-
-                await service.StreamChatAsync(
-                    testConfig,
-                    "You are a helpful assistant.",
-                    "Provide one short answer and think step-by-step.",
-                    chunk => { received = true; },
-                    cts.Token,
-                    AiChatProfile.Summary,
-                    enableReasoning: testConfig.SummaryEnableReasoning,
-                    onOutcome: null,
-                    onReasoningChunk: chunk =>
-                    {
-                        reasoningReceived = true;
-                        reasoningBuilder.Append(chunk);
-                    });
-
-                if (reasoningReceived)
-                {
-                    ReasoningOutputTextBox.Text = reasoningBuilder.ToString();
-                }
-                else if (testConfig.SummaryEnableReasoning)
-                {
-                    ReasoningOutputTextBox.Text = "未收到思考内容。";
-                }
-
-                if (received)
-                {
-                    StatusTextBlock.Text = "连接成功！AI 服务可用。";
-                    StatusTextBlock.Foreground = Avalonia.Media.Brushes.Green;
-                }
-                else
-                {
-                    StatusTextBlock.Text = "连接成功但未收到响应，请检查模型配置。";
-                    StatusTextBlock.Foreground = Avalonia.Media.Brushes.Orange;
-                }
-            }
-            catch (OperationCanceledException)
-            {
-                StatusTextBlock.Text = "连接超时，请检查 API 端点是否正确。";
-                StatusTextBlock.Foreground = Avalonia.Media.Brushes.Red;
-            }
-            catch (Exception ex)
-            {
-                StatusTextBlock.Text = $"连接失败: {ex.Message}";
-                StatusTextBlock.Foreground = Avalonia.Media.Brushes.Red;
-            }
-            finally
-            {
-                AiTestButton.IsEnabled = true;
-                AiTestButton.Content = "测试连接";
-            }
+            ConfigViewHelper.ApplyModelDeploymentFallbacks(testConfig);
+            await ConfigViewHelper.RunAiConnectionTestAsync(testConfig, StatusTextBlock, ReasoningOutputTextBox, AiTestButton);
         }
 
         private void SelectFontSizeComboBox(int fontSize)
