@@ -28,72 +28,6 @@ namespace TranslationToolUI.Services
     /// </summary>
     public class AiImageGenService : AiMediaServiceBase
     {
-#if DEBUG
-        private static readonly SemaphoreSlim _imageLogLock = new(1, 1);
-
-        private static bool IsImageAuditEnabled()
-        {
-            try
-            {
-                var configPath = PathManager.Instance.ConfigFilePath;
-                if (!File.Exists(configPath))
-                    return false;
-
-                var json = File.ReadAllText(configPath);
-                using var doc = JsonDocument.Parse(json);
-                if (doc.RootElement.TryGetProperty("EnableAuditLog", out var enabledElem)
-                    && enabledElem.ValueKind == JsonValueKind.True)
-                {
-                    return true;
-                }
-            }
-            catch
-            {
-                // 审计开关读取失败不影响主流程
-            }
-
-            return false;
-        }
-
-        private static string GetImageDebugLogPath()
-        {
-            var dir = PathManager.Instance.LogsPath;
-            Directory.CreateDirectory(dir);
-            return Path.Combine(dir, "image_http_debug.log");
-        }
-
-        private static async Task AppendImageDebugLogAsync(string title, string content, CancellationToken ct)
-        {
-            if (!IsImageAuditEnabled())
-                return;
-
-            try
-            {
-                var now = DateTimeOffset.Now;
-                var sb = new StringBuilder();
-                sb.AppendLine(new string('=', 88));
-                sb.AppendLine($"[{now:yyyy-MM-dd HH:mm:ss.fff zzz}] {title}");
-                sb.AppendLine(content);
-
-                var path = GetImageDebugLogPath();
-                await _imageLogLock.WaitAsync(ct);
-                try
-                {
-                    await File.AppendAllTextAsync(path, sb.ToString(), Encoding.UTF8, ct);
-                }
-                finally
-                {
-                    _imageLogLock.Release();
-                }
-
-                System.Diagnostics.Debug.WriteLine($"[ImageAudit] {title} -> {path}");
-            }
-            catch
-            {
-                // Debug 日志失败不影响主流程
-            }
-        }
-
         private static string FormatResponseHeaders(HttpResponseMessage response)
         {
             var sb = new StringBuilder();
@@ -116,8 +50,6 @@ namespace TranslationToolUI.Services
             return sb.ToString();
         }
 
-#endif
-
         /// <summary>
         /// 生成图片，返回 base64 解码后的字节数组列表及耗时信息。
         /// onProgress: 0-49 = 等待服务端生成, 50-95 = 下载响应体, 100 = 完成
@@ -139,8 +71,8 @@ namespace TranslationToolUI.Services
                 .Where(p => !string.IsNullOrWhiteSpace(p) && File.Exists(p))
                 .ToList();
 
-#if DEBUG
-            await AppendImageDebugLogAsync(
+            await AppLogService.Instance.LogHttpDebugAsync(
+                "image",
                 "ImageRequest.Start",
                 $"Mode={(validReferenceImages.Count == 0 ? "Generate" : "Edit")}\n" +
                 $"ProviderType={config.ProviderType}\n" +
@@ -155,7 +87,6 @@ namespace TranslationToolUI.Services
                 $"ReferenceImageCount={validReferenceImages.Count}\n" +
                 $"ReferenceImages={string.Join(";", validReferenceImages)}",
                 ct);
-#endif
 
             if (validReferenceImages.Count > 0)
             {
@@ -200,11 +131,11 @@ namespace TranslationToolUI.Services
                     System.Diagnostics.Debug.WriteLine($"[ImageEdit] POST {editUrl}");
                     System.Diagnostics.Debug.WriteLine($"[ImageEdit] images={validReferenceImages.Count}, model={genConfig.ImageModel}, size={genConfig.ImageSize}, quality={genConfig.ImageQuality}");
 
-#if DEBUG
                     var authModeText = config.ProviderType == AiProviderType.AzureOpenAi
                         ? $"Azure/{config.AzureAuthMode}"
                         : "OpenAICompatible/Bearer";
-                    await AppendImageDebugLogAsync(
+                    await AppLogService.Instance.LogHttpDebugAsync(
+                        "image",
                         "ImageEdit.Request",
                         $"URL={editUrl}\n" +
                         $"AuthMode={authModeText}\n" +
@@ -212,20 +143,18 @@ namespace TranslationToolUI.Services
                         $"ImageCount={validReferenceImages.Count}\n" +
                         $"ImageFiles={string.Join(",", imageNames)}",
                         ct);
-#endif
 
                     response = await _httpClient.SendAsync(editRequest, HttpCompletionOption.ResponseHeadersRead, ct);
 
                     System.Diagnostics.Debug.WriteLine($"[ImageEdit] Response: {(int)response.StatusCode} {response.ReasonPhrase}");
 
-#if DEBUG
-                    await AppendImageDebugLogAsync(
+                    await AppLogService.Instance.LogHttpDebugAsync(
+                        "image",
                         "ImageEdit.Response",
                         $"URL={editUrl}\n" +
                         $"HTTP={(int)response.StatusCode} {response.ReasonPhrase}\n" +
                         $"Headers:\n{FormatResponseHeaders(response)}",
                         ct);
-#endif
                 }
 
                 // 不回退，直接暴露错误
@@ -241,15 +170,14 @@ namespace TranslationToolUI.Services
                     var oneapiRequestId = response.Headers.TryGetValues("X-Oneapi-Request-Id", out var ridVals)
                         ? string.Join(",", ridVals)
                         : string.Empty;
-#if DEBUG
-                    await AppendImageDebugLogAsync(
+                    await AppLogService.Instance.LogHttpDebugAsync(
+                        "image",
                         "ImageEdit.Error",
                         $"HTTP={(int)sc} {rp}\n" +
                         $"URL={editUrl}\n" +
                         $"Headers:\n{FormatResponseHeaders(response)}\n" +
                         $"Body={errorText}",
                         ct);
-#endif
                     response.Dispose();
                     throw new HttpRequestException(
                         $"图片编辑失败: {(int)sc} {rp}. " +
@@ -284,28 +212,26 @@ namespace TranslationToolUI.Services
                 request.Headers.Accept.ParseAdd("application/json");
                 request.Headers.ExpectContinue = false;
 
-#if DEBUG
                 var authModeText = config.ProviderType == AiProviderType.AzureOpenAi
                     ? $"Azure/{config.AzureAuthMode}"
                     : "OpenAICompatible/Bearer";
-                await AppendImageDebugLogAsync(
+                await AppLogService.Instance.LogHttpDebugAsync(
+                    "image",
                     "ImageGenerate.Request",
                     $"URL={url}\n" +
                     $"AuthMode={authModeText}\n" +
                     $"Json={JsonSerializer.Serialize(bodyObj)}",
                     ct);
-#endif
 
                 response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
 
-#if DEBUG
-                await AppendImageDebugLogAsync(
+                await AppLogService.Instance.LogHttpDebugAsync(
+                    "image",
                     "ImageGenerate.Response",
                     $"URL={url}\n" +
                     $"HTTP={(int)response.StatusCode} {response.ReasonPhrase}\n" +
                     $"Headers:\n{FormatResponseHeaders(response)}",
                     ct);
-#endif
 
                 if (!response.IsSuccessStatusCode)
                 {
@@ -315,15 +241,14 @@ namespace TranslationToolUI.Services
                     var oneapiRequestId = response.Headers.TryGetValues("X-Oneapi-Request-Id", out var ridVals)
                         ? string.Join(",", ridVals)
                         : string.Empty;
-#if DEBUG
-                    await AppendImageDebugLogAsync(
+                    await AppLogService.Instance.LogHttpDebugAsync(
+                        "image",
                         "ImageGenerate.Error",
                         $"HTTP={(int)statusCode} {reasonPhrase}\n" +
                         $"URL={url}\n" +
                         $"Headers:\n{FormatResponseHeaders(response)}\n" +
                         $"Body={errorText}",
                         ct);
-#endif
                     response.Dispose();
                     throw new HttpRequestException(
                         $"图片生成失败: {(int)statusCode} {reasonPhrase}. " +

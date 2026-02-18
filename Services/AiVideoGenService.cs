@@ -83,18 +83,7 @@ namespace TranslationToolUI.Services
             return urlsToTry;
         }
 
-#if DEBUG
-        private static readonly SemaphoreSlim _pollLogLock = new(1, 1);
-
-        private static string GetPollDebugLogPath()
-        {
-            // %APPDATA%\TranslationToolUI\Logs\video_poll_debug.log
-            var dir = PathManager.Instance.LogsPath;
-            Directory.CreateDirectory(dir);
-            return Path.Combine(dir, "video_poll_debug.log");
-        }
-
-        private static async Task AppendHttpDebugLogAsync(
+        private static async Task AppendVideoDebugLogAsync(
             string action,
             string videoId,
             string url,
@@ -102,41 +91,21 @@ namespace TranslationToolUI.Services
             string responseText,
             CancellationToken ct)
         {
-            try
+            var sb = new StringBuilder();
+            sb.AppendLine($"{action} videoId={videoId}");
+            sb.AppendLine($"URL: {url}");
+            sb.AppendLine($"HTTP: {(int)response.StatusCode} {response.ReasonPhrase}");
+
+            var ctHeader = response.Content?.Headers?.ContentType?.ToString();
+            if (!string.IsNullOrWhiteSpace(ctHeader))
             {
-                var path = GetPollDebugLogPath();
-                var now = DateTimeOffset.Now;
-
-                var sb = new StringBuilder();
-                sb.AppendLine(new string('=', 88));
-                sb.AppendLine($"[{now:yyyy-MM-dd HH:mm:ss.fff zzz}] {action} videoId={videoId}");
-                sb.AppendLine($"URL: {url}");
-                sb.AppendLine($"HTTP: {(int)response.StatusCode} {response.ReasonPhrase}");
-
-                // 尽量记录 Content-Type，帮助判断是否为 JSON/二进制
-                var ctHeader = response.Content?.Headers?.ContentType?.ToString();
-                if (!string.IsNullOrWhiteSpace(ctHeader))
-                {
-                    sb.AppendLine($"Content-Type: {ctHeader}");
-                }
-
-                sb.AppendLine("Body:");
-                sb.AppendLine(responseText);
-
-                await _pollLogLock.WaitAsync(ct);
-                try
-                {
-                    await File.AppendAllTextAsync(path, sb.ToString(), Encoding.UTF8, ct);
-                }
-                finally
-                {
-                    _pollLogLock.Release();
-                }
+                sb.AppendLine($"Content-Type: {ctHeader}");
             }
-            catch
-            {
-                // Debug 日志失败不影响主流程
-            }
+
+            sb.AppendLine("Body:");
+            sb.AppendLine(responseText);
+
+            await AppLogService.Instance.LogHttpDebugAsync("video", action, sb.ToString(), ct);
         }
 
         private static Task AppendPollDebugLogAsync(
@@ -145,7 +114,7 @@ namespace TranslationToolUI.Services
             HttpResponseMessage response,
             string responseText,
             CancellationToken ct)
-            => AppendHttpDebugLogAsync("Poll", videoId, url, response, responseText, ct);
+            => AppendVideoDebugLogAsync("Poll", videoId, url, response, responseText, ct);
 
         private static Task AppendDownloadDebugLogAsync(
             string videoId,
@@ -153,7 +122,7 @@ namespace TranslationToolUI.Services
             HttpResponseMessage response,
             string responseText,
             CancellationToken ct)
-            => AppendHttpDebugLogAsync("Download", videoId, url, response, responseText, ct);
+            => AppendVideoDebugLogAsync("Download", videoId, url, response, responseText, ct);
 
         private static Task AppendCreateDebugLogAsync(
             string videoId,
@@ -161,8 +130,8 @@ namespace TranslationToolUI.Services
             HttpResponseMessage response,
             string responseText,
             CancellationToken ct)
-            => AppendHttpDebugLogAsync("Create", videoId, url, response, responseText, ct);
-#endif
+            => AppendVideoDebugLogAsync("Create", videoId, url, response, responseText, ct);
+
 
         private static string RemovePreviewApiVersion(string url)
             => url.Replace("?api-version=preview", "", StringComparison.OrdinalIgnoreCase);
@@ -215,9 +184,7 @@ namespace TranslationToolUI.Services
                     (response, json, urlUsed) = await SendOnceAsync(altUrl);
                 }
 
-#if DEBUG
             await AppendPollDebugLogAsync(videoId, urlUsed, response, json, ct);
-#endif
 
             if (!response.IsSuccessStatusCode)
             {
@@ -387,9 +354,7 @@ namespace TranslationToolUI.Services
             var response = await _httpClient.SendAsync(request, ct);
             var json = await response.Content.ReadAsStringAsync(ct);
 
-#if DEBUG
             await AppendCreateDebugLogAsync("(create-multipart)", url, response, json, ct);
-#endif
 
             // 如果 multipart 返回 404/415（Azure 某些版本可能不支持 multipart），回退到 JSON
             if (!response.IsSuccessStatusCode && (int)response.StatusCode is 404 or 415)
@@ -420,9 +385,7 @@ namespace TranslationToolUI.Services
                     response = await _httpClient.SendAsync(req2, ct);
                     json = await response.Content.ReadAsStringAsync(ct);
 
-#if DEBUG
                     await AppendCreateDebugLogAsync("(create-multipart-alt)", altUrl, response, json, ct);
-#endif
                 }
 
                 // 如果 multipart 还是不行，回退到 JSON（Azure 文档中的 curl 用 JSON）
@@ -539,9 +502,7 @@ namespace TranslationToolUI.Services
                 url = altUrl;
             }
 
-#if DEBUG
             await AppendCreateDebugLogAsync("(create-json)", url, response, json, ct);
-#endif
 
             if (!response.IsSuccessStatusCode)
             {
@@ -637,9 +598,7 @@ namespace TranslationToolUI.Services
                 {
                     var errorText = await response.Content.ReadAsStringAsync(ct);
 
-#if DEBUG
                     await AppendDownloadDebugLogAsync(videoId, url, response, errorText, ct);
-#endif
 
                     if ((int)response.StatusCode == 404)
                         return false;

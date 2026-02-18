@@ -132,15 +132,14 @@
                         </StackPanel>
 
                         <StackPanel Spacing="5">
-                            <TextBlock Text="批处理日志"/>
+                            <TextBlock Text="诊断日志"/>
                             <ComboBox x:Name="BatchLogLevelComboBox" MinWidth="220">
                                 <ComboBoxItem Content="关闭"/>
                                 <ComboBoxItem Content="仅失败"/>
                                 <ComboBoxItem Content="成功 + 失败"/>
                             </ComboBox>
-                            <CheckBox x:Name="EnableAuditLogCheckBox" Content="启用审计日志 (Audit.log)"/>
                             <TextBlock FontSize="10" Foreground="Gray"
-                                       Text="日志保存到会话目录，文件后缀为 .log" TextWrapping="Wrap"/>
+                                       Text="统一控制批处理日志、审计日志和 HTTP 调试日志的输出级别" TextWrapping="Wrap"/>
                         </StackPanel>
 
                         <StackPanel Spacing="5">

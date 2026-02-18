@@ -172,7 +172,6 @@ namespace TranslationToolUI.Views
             BatchStorageConnectionStringTextBox.Text = "";
             BatchStorageValidateStatusTextBlock.Text = "";
             BatchLogLevelComboBox.SelectedIndex = 0;
-            EnableAuditLogCheckBox.IsChecked = false;
             BatchForceRegenerationCheckBox.IsChecked = false;
             ContextMenuForceRegenerationCheckBox.IsChecked = true;
             EnableBatchSentenceSplitCheckBox.IsChecked = true;
@@ -231,7 +230,6 @@ namespace TranslationToolUI.Views
                 BatchLogLevel.SuccessAndFailure => 2,
                 _ => 0
             };
-            EnableAuditLogCheckBox.IsChecked = _config.EnableAuditLog;
             BatchForceRegenerationCheckBox.IsChecked = _config.BatchForceRegeneration;
             ContextMenuForceRegenerationCheckBox.IsChecked = _config.ContextMenuForceRegeneration;
             EnableBatchSentenceSplitCheckBox.IsChecked = _config.EnableBatchSubtitleSentenceSplit;
@@ -1091,7 +1089,6 @@ namespace TranslationToolUI.Views
                     2 => BatchLogLevel.SuccessAndFailure,
                     _ => BatchLogLevel.Off
                 };
-                _config.EnableAuditLog = EnableAuditLogCheckBox.IsChecked ?? false;
                 _config.BatchForceRegeneration = BatchForceRegenerationCheckBox.IsChecked ?? false;
                 _config.ContextMenuForceRegeneration = ContextMenuForceRegenerationCheckBox.IsChecked ?? true;
                 _config.EnableBatchSubtitleSentenceSplit = EnableBatchSentenceSplitCheckBox.IsChecked ?? true;

@@ -44,9 +44,6 @@ namespace TranslationToolUI.Views
         private const int SaveSuppressAfterRestoreMs = 350;
         private const int ViewerResolveRetryCount = 30;
 
-        private static readonly SemaphoreSlim _switchAuditLogLock = new(1, 1);
-        private static bool _switchAuditEnabledCache;
-        private static DateTime _switchAuditLastReadUtc = DateTime.MinValue;
 
         public MediaStudioWindow()
         {
@@ -508,33 +505,7 @@ namespace TranslationToolUI.Views
 
         private static bool IsSwitchAuditEnabled()
         {
-            var now = DateTime.UtcNow;
-            if ((now - _switchAuditLastReadUtc).TotalSeconds < 2)
-            {
-                return _switchAuditEnabledCache;
-            }
-
-            _switchAuditLastReadUtc = now;
-            try
-            {
-                var configPath = PathManager.Instance.ConfigFilePath;
-                if (!File.Exists(configPath))
-                {
-                    _switchAuditEnabledCache = false;
-                    return false;
-                }
-
-                var json = File.ReadAllText(configPath);
-                using var doc = JsonDocument.Parse(json);
-                _switchAuditEnabledCache = doc.RootElement.TryGetProperty("EnableAuditLog", out var enabled)
-                    && enabled.ValueKind == JsonValueKind.True;
-                return _switchAuditEnabledCache;
-            }
-            catch
-            {
-                _switchAuditEnabledCache = false;
-                return false;
-            }
+            return AppLogService.IsInitialized && AppLogService.Instance.ShouldLogSuccess;
         }
 
         private static string GetSwitchAuditPath()
@@ -551,28 +522,7 @@ namespace TranslationToolUI.Views
                 return;
             }
 
-            _ = AppendSwitchAuditAsync(traceId, eventName, message);
-        }
-
-        private static async Task AppendSwitchAuditAsync(int traceId, string eventName, string message)
-        {
-            try
-            {
-                var line = $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] [MediaSwitch] [trace={traceId}] {eventName} | {message}";
-                await _switchAuditLogLock.WaitAsync();
-                try
-                {
-                    await File.AppendAllTextAsync(GetSwitchAuditPath(), line + Environment.NewLine, new UTF8Encoding(false));
-                }
-                finally
-                {
-                    _switchAuditLogLock.Release();
-                }
-            }
-            catch
-            {
-                // 审计日志失败不影响主流程
-            }
+            _ = AppLogService.Instance.LogAuditAsync("MediaSwitch", traceId, eventName, message);
         }
 
         private bool TryCaptureVisibleAnchor(MediaSessionViewModel session, ScrollViewer scrollViewer, out int messageIndex, out double viewportOffsetY)

@@ -165,7 +165,6 @@ namespace TranslationToolUI.Models
         public string BatchResultContainerName { get; set; } = DefaultBatchResultContainerName;
         public bool UseSpeechSubtitleForReview { get; set; } = true;
         public BatchLogLevel BatchLogLevel { get; set; } = BatchLogLevel.Off;
-        public bool EnableAuditLog { get; set; } = false;
         public bool BatchForceRegeneration { get; set; } = false;
         public bool ContextMenuForceRegeneration { get; set; } = true;
         public bool EnableBatchSubtitleSentenceSplit { get; set; } = true;

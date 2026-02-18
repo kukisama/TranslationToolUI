@@ -626,20 +626,20 @@ namespace TranslationToolUI.ViewModels
             return true;
         }
 
-        private bool ShouldWriteBatchLogSuccess => _batchLog.ShouldWriteBatchLogSuccess;
+        private bool ShouldWriteBatchLogSuccess => AppLogService.Instance.ShouldLogSuccess;
 
-        private bool ShouldWriteBatchLogFailure => _batchLog.ShouldWriteBatchLogFailure;
+        private bool ShouldWriteBatchLogFailure => AppLogService.Instance.ShouldLogFailure;
 
-        private void EnsureBatchLogFile() => _batchLog.EnsureBatchLogFile();
+        private void EnsureBatchLogFile() => AppLogService.Instance.EnsureBatchFile();
 
         private void AppendBatchLog(string eventName, string fileName, string status, string message)
-            => _batchLog.AppendBatchLog(eventName, fileName, status, message);
+            => AppLogService.Instance.LogBatch(eventName, fileName, status, message);
 
-        private void AppendBatchDebugLog(string eventName, string message)
-            => _batchLog.AppendBatchDebugLog(eventName, message);
+        private void AppendBatchDebugLog(string eventName, string message, bool isSuccess = true)
+            => AppLogService.Instance.LogAudit(eventName, message, isSuccess);
 
-        public void AuditUiEvent(string eventName, string message)
-            => _batchLog.AppendBatchDebugLog(eventName, message);
+        public void AuditUiEvent(string eventName, string message, bool isSuccess = true)
+            => AppLogService.Instance.LogAudit(eventName, message, isSuccess);
 
         public void EnqueueSubtitleAndReviewFromLibraryUi(MediaFileItem? audioFile)
         {
@@ -647,7 +647,7 @@ namespace TranslationToolUI.ViewModels
         }
 
         private static string FormatBatchExceptionForLog(Exception ex)
-            => BatchLogService.FormatBatchExceptionForLog(ex);
+            => AppLogService.FormatException(ex);
 
         private string GetBatchStartButtonText()
         {
@@ -701,7 +701,7 @@ namespace TranslationToolUI.ViewModels
             _batchCts?.Cancel();
             IsBatchRunning = true;
             BatchStatusMessage = "批处理已开始";
-            _batchLog.ResetLogFile();
+            AppLogService.Instance.ResetBatchFile();
             EnsureBatchLogFile();
             if (ShouldWriteBatchLogSuccess)
             {
@@ -1704,7 +1704,6 @@ namespace TranslationToolUI.ViewModels
         {
             var target = audioFile ?? SelectedAudioFile;
             var canExecute = target != null && !string.IsNullOrWhiteSpace(target.FullPath);
-            if (_config.EnableAuditLog)
             {
                 var reason = canExecute
                     ? "ok"

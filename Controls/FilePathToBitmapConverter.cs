@@ -2,9 +2,9 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
-using System.Text.Json;
 using Avalonia.Data.Converters;
 using Avalonia.Media.Imaging;
+using TranslationToolUI.Services;
 
 namespace TranslationToolUI.Controls
 {
@@ -14,42 +14,12 @@ namespace TranslationToolUI.Controls
         private static int _hitCount;
         private static int _missCount;
 
-        private static bool? _auditEnabled;
-        private static bool IsAuditEnabled()
-        {
-            if (_auditEnabled.HasValue) return _auditEnabled.Value;
-            try
-            {
-                var configPath = Services.PathManager.Instance.ConfigFilePath;
-                if (File.Exists(configPath))
-                {
-                    var json = File.ReadAllText(configPath);
-                    using var doc = JsonDocument.Parse(json);
-                    if (doc.RootElement.TryGetProperty("EnableAuditLog", out var v) && v.GetBoolean())
-                    {
-                        _auditEnabled = true;
-                        return true;
-                    }
-                }
-            }
-            catch { }
-            _auditEnabled = false;
-            return false;
-        }
-
         private static void AuditLog(string message)
         {
-            if (!IsAuditEnabled()) return;
+            if (!AppLogService.IsInitialized) return;
             try
             {
-                var sessionsPath = Services.PathManager.Instance.SessionsPath;
-                var logsRoot = Directory.GetParent(sessionsPath)?.FullName ?? sessionsPath;
-                var logsPath = Path.Combine(logsRoot, "Logs");
-                Directory.CreateDirectory(logsPath);
-                var auditPath = Path.Combine(logsPath, "Audit.log");
-                var timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff");
-                var line = $"{timestamp} | 图片缓存 | {message}";
-                File.AppendAllText(auditPath, line + Environment.NewLine, new System.Text.UTF8Encoding(false));
+                AppLogService.Instance.LogAudit("ImageCache", message);
             }
             catch { }
         }

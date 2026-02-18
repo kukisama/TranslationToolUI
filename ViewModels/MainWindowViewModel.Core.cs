@@ -66,7 +66,7 @@ namespace TranslationToolUI.ViewModels
             }
             catch (Exception ex)
             {
-                AppendBatchDebugLog("PostShowInitFailed", $"action='{actionName}' error='{ex.Message}'");
+                AppendBatchDebugLog("PostShowInitFailed", $"action='{actionName}' error='{ex.Message}'", isSuccess: false);
             }
         }
 

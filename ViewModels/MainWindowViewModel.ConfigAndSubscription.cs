@@ -383,7 +383,7 @@ namespace TranslationToolUI.ViewModels
                 catch (Exception ex)
                 {
                     AppendBatchDebugLog("ConfigSaveFailed",
-                        $"reason='{reason}' path='{configPath}' error='{ex.Message}'");
+                        $"reason='{reason}' path='{configPath}' error='{ex.Message}'", isSuccess: false);
                 }
             });
         }

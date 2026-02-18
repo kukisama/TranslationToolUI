@@ -75,7 +75,7 @@ namespace TranslationToolUI.ViewModels
         private string _batchQueueStatusText = "";
         private Task? _batchQueueRunnerTask;
         private List<ReviewSheetPreset> _batchReviewSheetSnapshot = new();
-        private readonly BatchLogService _batchLog;
+
         private MediaFileItem? _selectedAudioFile;
         private MediaFileItem? _selectedSubtitleFile;
         private SubtitleCue? _selectedSubtitleCue;
@@ -127,8 +127,8 @@ namespace TranslationToolUI.ViewModels
         {
             _configService = new ConfigurationService();
             _aiInsightService = new AiInsightService(_azureTokenProvider);
-            _batchLog = new BatchLogService(() => _config.BatchLogLevel, () => _config.EnableAuditLog);
             _config = new AzureSpeechConfig();
+            AppLogService.Initialize(() => _config.BatchLogLevel);
             _history = new ObservableCollection<TranslationItem>();
             _subscriptionNames = new ObservableCollection<string>();
             _audioDevices = new ObservableCollection<AudioDeviceInfo>();
