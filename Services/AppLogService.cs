@@ -153,10 +153,10 @@ namespace TranslationToolUI.Services
             try
             {
                 var path = GetAuditPath();
-                await _auditLock.WaitAsync();
+                await _auditLock.WaitAsync().ConfigureAwait(false);
                 try
                 {
-                    await File.AppendAllTextAsync(path, line + Environment.NewLine, Utf8NoBom);
+                    await File.AppendAllTextAsync(path, line + Environment.NewLine, Utf8NoBom).ConfigureAwait(false);
                 }
                 finally
                 {
@@ -193,10 +193,10 @@ namespace TranslationToolUI.Services
                 sb.AppendLine($"[{DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss.fff zzz}] {title}");
                 sb.AppendLine(content);
 
-                await _httpDebugLock.WaitAsync(ct);
+                await _httpDebugLock.WaitAsync(ct).ConfigureAwait(false);
                 try
                 {
-                    await File.AppendAllTextAsync(path, sb.ToString(), Encoding.UTF8, ct);
+                    await File.AppendAllTextAsync(path, sb.ToString(), Encoding.UTF8, ct).ConfigureAwait(false);
                 }
                 finally
                 {
