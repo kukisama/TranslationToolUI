@@ -18,9 +18,11 @@ namespace TranslationToolUI.ViewModels
         public ICommand ShowFloatingSubtitlesCommand { get; }
         public ICommand ToggleEditorTypeCommand { get; }
         public ICommand OpenAzureSpeechPortalCommand { get; }
+        public ICommand OpenFoundryPortalCommand { get; }
         public ICommand OpenProjectGitHubCommand { get; }
         public ICommand ShowAboutCommand { get; }
         public ICommand ShowHelpCommand { get; }
+        public string AppVersion { get; }
         public ICommand SendInsightCommand { get; }
         public ICommand StopInsightCommand { get; }
         public ICommand ClearInsightCommand { get; }

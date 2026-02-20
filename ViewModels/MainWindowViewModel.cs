@@ -276,10 +276,17 @@ namespace TranslationToolUI.ViewModels
                 canExecute: _ => true
             );
 
+            OpenFoundryPortalCommand = new RelayCommand(
+                execute: _ => OpenUrl("https://ai.azure.com"),
+                canExecute: _ => true
+            );
+
             OpenProjectGitHubCommand = new RelayCommand(
                 execute: _ => OpenUrl("https://github.com/kukisama/TranslationToolUI"),
                 canExecute: _ => true
             );
+
+            AppVersion = LoadAppVersion();
 
             ShowAboutCommand = new RelayCommand(
                 execute: async _ => await ShowAbout(),

@@ -101,10 +101,13 @@
                     <Button.ContextMenu>
                         <ContextMenu>
                             <MenuItem Header="获取Azure Speech服务" Command="{Binding OpenAzureSpeechPortalCommand}"/>
+                            <MenuItem Header="获取Microsoft Foundry服务" Command="{Binding OpenFoundryPortalCommand}"/>
                             <MenuItem Header="项目github地址" Command="{Binding OpenProjectGitHubCommand}"/>
                             <MenuItem Header="说明" Command="{Binding ShowHelpCommand}"/>
                             <Separator/>
                             <MenuItem Header="关于" Command="{Binding ShowAboutCommand}"/>
+                            <Separator/>
+                            <MenuItem Header="{Binding AppVersion}" IsEnabled="False" FontSize="11"/>
                         </ContextMenu>
                     </Button.ContextMenu>
                 </Button>

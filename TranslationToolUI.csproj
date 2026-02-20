@@ -44,6 +44,10 @@
     <AvaloniaResource Include="Assets\**" />
   </ItemGroup>
 
+  <ItemGroup>
+    <None Include="RELEASE_NOTES.md" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
   <Target Name="GenerateAppIconIco" BeforeTargets="CoreCompile" Condition="'$(AppIconPng)' != ''">
     <PropertyGroup>
       <_GeneratedIconDir>$(MSBuildProjectDirectory)\obj\Generated</_GeneratedIconDir>

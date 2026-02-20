@@ -1,6 +1,9 @@
 using System;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
+using System.IO;
+using System.Linq;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
@@ -425,6 +428,34 @@ namespace TranslationToolUI.ViewModels
             {
                 StatusMessage = $"打开链接失败: {ex.Message}";
             }
+        }
+
+        private static string LoadAppVersion()
+        {
+            try
+            {
+                // Try next to executable first, then project root (dev scenario).
+                var candidates = new[]
+                {
+                    Path.Combine(AppContext.BaseDirectory, "RELEASE_NOTES.md"),
+                    Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "RELEASE_NOTES.md")
+                };
+
+                foreach (var path in candidates)
+                {
+                    if (!File.Exists(path)) continue;
+                    var firstLine = File.ReadLines(path).FirstOrDefault() ?? "";
+                    var match = Regex.Match(firstLine, @"v(\d+\.\d+\.\d+)");
+                    if (match.Success)
+                        return $"版本 {match.Groups[1].Value}";
+                }
+            }
+            catch
+            {
+                // ignore
+            }
+
+            return "版本 未知";
         }
 
         private async Task ShowAbout()
