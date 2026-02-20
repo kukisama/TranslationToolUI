@@ -48,7 +48,8 @@
     <None Include="RELEASE_NOTES.md" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
-  <Target Name="GenerateAppIconIco" BeforeTargets="CoreCompile" Condition="'$(AppIconPng)' != ''">
+  <!-- IconGen 自动生成图标已禁用，改用 tools/IconTool 手动处理。如需恢复，移除 Condition="false"。 -->
+  <Target Name="GenerateAppIconIco" BeforeTargets="CoreCompile" Condition="false">
     <PropertyGroup>
       <_GeneratedIconDir>$(MSBuildProjectDirectory)\obj\Generated</_GeneratedIconDir>
       <_IconBuildId>$([System.Guid]::NewGuid())</_IconBuildId>
