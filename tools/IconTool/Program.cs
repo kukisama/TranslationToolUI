@@ -79,12 +79,16 @@ static void PrintUsage()
       IconTool transparent photo.png -c "#FF0000"      去除红色背景
       IconTool transparent photo.png -c white          去除白色背景(默认)
       IconTool transparent photo.png -t 30             设置颜色容差(默认 30)
+      IconTool transparent icon.png -c black --flood   连通填充模式去黑色背景
 
     transparent 选项:
       -o, --output <路径>      输出文件路径 (默认: 原文件名_transparent.png)
       -c, --color <颜色>       要去除的背景色 (默认: white)
                                支持: white, black, #RRGGBB, #RRGGBBAA
       -t, --threshold <值>     颜色匹配容差 0-255 (默认: 30)
+      --flood                  连通填充模式：仅从边缘可达的背景色区域被移除
+                               适合圆角图标（避免删除内部深色内容）
+                               自动模式默认使用此模式
 
     示例:
       IconTool                                         自动处理当前目录
@@ -224,6 +228,7 @@ static int RunTransparent(string[] args)
     string? outputPath = null;
     string colorName = "white";
     int threshold = 30;
+    bool useFloodFill = false;
 
     for (int i = 2; i < args.Length; i++)
     {
@@ -242,6 +247,9 @@ static int RunTransparent(string[] args)
                 if (i + 1 >= args.Length) return Error("-t/--threshold 需要一个参数。");
                 if (!int.TryParse(args[++i], out threshold) || threshold < 0 || threshold > 255)
                     return Error("阈值必须为 0-255 之间的整数。");
+                break;
+            case "--flood":
+                useFloodFill = true;
                 break;
             default:
                 return Error($"未知选项: {args[i]}");
@@ -264,6 +272,7 @@ static int RunTransparent(string[] args)
     Console.WriteLine($"  输入: {filePath}");
     Console.WriteLine($"  去除背景色: {colorName} (R={targetColor.R}, G={targetColor.G}, B={targetColor.B})");
     Console.WriteLine($"  颜色容差: {threshold}");
+    Console.WriteLine($"  模式: {(useFloodFill ? "连通填充（仅从边缘可达区域）" : "全局匹配")}");
     Console.WriteLine($"  输出: {outputPath}");
     Console.WriteLine();
 
@@ -272,39 +281,43 @@ static int RunTransparent(string[] args)
         using var image = Image.Load<Rgba32>(filePath);
         Console.WriteLine($"  图像尺寸: {image.Width}x{image.Height}");
 
-        int removedCount = 0;
+        int removedCount;
         int totalPixels = image.Width * image.Height;
 
-        image.ProcessPixelRows(accessor =>
+        if (useFloodFill)
         {
-            for (int y = 0; y < accessor.Height; y++)
+            removedCount = FloodFillTransparent(image, targetColor, threshold);
+        }
+        else
+        {
+            removedCount = 0;
+            image.ProcessPixelRows(accessor =>
             {
-                var row = accessor.GetRowSpan(y);
-                for (int x = 0; x < row.Length; x++)
+                for (int y = 0; y < accessor.Height; y++)
                 {
-                    ref var pixel = ref row[x];
-                    if (IsColorMatch(pixel, targetColor, threshold))
+                    var row = accessor.GetRowSpan(y);
+                    for (int x = 0; x < row.Length; x++)
                     {
-                        // 完全匹配 → 完全透明
-                        pixel = new Rgba32(0, 0, 0, 0);
-                        removedCount++;
-                    }
-                    else if (pixel.A == 255)
-                    {
-                        // 边缘半透明过渡处理：
-                        // 计算与目标色的距离，如果在 threshold*2 范围内，做渐变透明
-                        var distance = ColorDistance(pixel, targetColor);
-                        if (distance < threshold * 2)
+                        ref var pixel = ref row[x];
+                        if (IsColorMatch(pixel, targetColor, threshold))
                         {
-                            // 距离越近 → 越透明
-                            var alpha = (byte)Math.Clamp((int)(255.0 * distance / (threshold * 2)), 0, 255);
-                            pixel = new Rgba32(pixel.R, pixel.G, pixel.B, alpha);
-                            if (alpha == 0) removedCount++;
+                            pixel = new Rgba32(0, 0, 0, 0);
+                            removedCount++;
+                        }
+                        else if (pixel.A == 255)
+                        {
+                            var distance = ColorDistance(pixel, targetColor);
+                            if (distance < threshold * 2)
+                            {
+                                var alpha = (byte)Math.Clamp((int)(255.0 * distance / (threshold * 2)), 0, 255);
+                                pixel = new Rgba32(pixel.R, pixel.G, pixel.B, alpha);
+                                if (alpha == 0) removedCount++;
+                            }
                         }
                     }
                 }
-            }
-        });
+            });
+        }
 
         double ratio = Math.Round((double)removedCount / totalPixels * 100, 2);
         Console.WriteLine($"  已透明化像素: {removedCount}/{totalPixels} ({ratio}%)");
@@ -314,7 +327,8 @@ static int RunTransparent(string[] args)
         if (!string.IsNullOrEmpty(outDir))
             Directory.CreateDirectory(outDir);
 
-        image.SaveAsPng(outputPath);
+        var rgbaEncoder = new PngEncoder { ColorType = PngColorType.RgbWithAlpha };
+        image.SaveAsPng(outputPath, rgbaEncoder);
         var fileSize = new FileInfo(outputPath).Length;
         Console.WriteLine($"  输出文件大小: {FormatFileSize(fileSize)}");
         Console.WriteLine();
@@ -516,6 +530,117 @@ static double ColorDistance(Rgba32 a, Rgba32 b)
     return Math.Sqrt(dr * dr + dg * dg + db * db);
 }
 
+/// <summary>
+/// 使用四向边缘扫描线 + 交集策略移除背景。
+/// 水平方向（从左或从右）和垂直方向（从上或从下）各自独立扫描，
+/// 只有同时被水平和垂直方向标记的像素才算背景。
+/// 这确保只有真正在角落/边缘浅层的背景被移除，图标内部的深色内容不受影响。
+/// </summary>
+static int FloodFillTransparent(Image<Rgba32> image, Rgba32 bgColor, int threshold)
+{
+    int w = image.Width, h = image.Height;
+    var verticalBg = new bool[w, h];   // 从上或从下可达
+    var horizontalBg = new bool[w, h]; // 从左或从右可达
+
+    // 从上往下扫（每列）
+    for (int x = 0; x < w; x++)
+    {
+        for (int y = 0; y < h; y++)
+        {
+            if (IsColorMatch(image[x, y], bgColor, threshold))
+                verticalBg[x, y] = true;
+            else
+                break;
+        }
+    }
+
+    // 从下往上扫（每列）
+    for (int x = 0; x < w; x++)
+    {
+        for (int y = h - 1; y >= 0; y--)
+        {
+            if (IsColorMatch(image[x, y], bgColor, threshold))
+                verticalBg[x, y] = true;
+            else
+                break;
+        }
+    }
+
+    // 从左往右扫（每行）
+    for (int y = 0; y < h; y++)
+    {
+        for (int x = 0; x < w; x++)
+        {
+            if (IsColorMatch(image[x, y], bgColor, threshold))
+                horizontalBg[x, y] = true;
+            else
+                break;
+        }
+    }
+
+    // 从右往左扫（每行）
+    for (int y = 0; y < h; y++)
+    {
+        for (int x = w - 1; x >= 0; x--)
+        {
+            if (IsColorMatch(image[x, y], bgColor, threshold))
+                horizontalBg[x, y] = true;
+            else
+                break;
+        }
+    }
+
+    // 仅水平和垂直方向交集处才是真正的背景
+    var isBackground = new bool[w, h];
+    int removedCount = 0;
+    for (int y = 0; y < h; y++)
+    {
+        for (int x = 0; x < w; x++)
+        {
+            if (verticalBg[x, y] && horizontalBg[x, y])
+            {
+                isBackground[x, y] = true;
+                image[x, y] = new Rgba32(0, 0, 0, 0);
+                removedCount++;
+            }
+        }
+    }
+
+    // 对背景-内容交界处做半透明渐变（抗锯齿）
+    for (int y = 0; y < h; y++)
+    {
+        for (int x = 0; x < w; x++)
+        {
+            if (isBackground[x, y]) continue;
+            var pixel = image[x, y];
+            if (pixel.A == 0) continue;
+
+            bool adjacentToBackground = false;
+            for (int dy = -1; dy <= 1 && !adjacentToBackground; dy++)
+                for (int dx = -1; dx <= 1 && !adjacentToBackground; dx++)
+                {
+                    if (dx == 0 && dy == 0) continue;
+                    int nx = x + dx, ny = y + dy;
+                    if (nx >= 0 && nx < w && ny >= 0 && ny < h && isBackground[nx, ny])
+                        adjacentToBackground = true;
+                }
+
+            if (adjacentToBackground)
+            {
+                var distance = ColorDistance(pixel, bgColor);
+                if (distance < threshold * 3)
+                {
+                    var alpha = (byte)Math.Clamp((int)(255.0 * distance / (threshold * 3)), 0, 255);
+                    image[x, y] = new Rgba32(pixel.R, pixel.G, pixel.B, alpha);
+                    if (alpha == 0) removedCount++;
+                }
+            }
+        }
+    }
+
+    return removedCount;
+}
+
 static string FormatFileSize(long bytes)
 {
     if (bytes < 1024) return $"{bytes} B";
@@ -623,37 +748,13 @@ static int RunAutoProcess()
             File.Copy(filePath, backupPath, overwrite: true);
             logLines.Add($"  备份源文件: {fileName} → {Path.GetFileName(backupPath)}");
 
-            // 4. 透明化处理
-            int threshold = 30;
-            int removedCount = 0;
+            // 4. 透明化处理 — 使用 Flood Fill（从四角开始连通填充）
+            // 只移除从图像四角可达的、颜色匹配的连通背景区域，
+            // 不会误伤图标内部的深色像素
+            // Flood Fill 容差需要比全局模式小得多（3），避免沿暗色边缘泄漏进图标内部
+            int threshold = 3;
+            int removedCount = FloodFillTransparent(image, bgColor, threshold);
             int totalPixels = image.Width * image.Height;
-
-            image.ProcessPixelRows(accessor =>
-            {
-                for (int y = 0; y < accessor.Height; y++)
-                {
-                    var row = accessor.GetRowSpan(y);
-                    for (int x = 0; x < row.Length; x++)
-                    {
-                        ref var pixel = ref row[x];
-                        if (IsColorMatch(pixel, bgColor, threshold))
-                        {
-                            pixel = new Rgba32(0, 0, 0, 0);
-                            removedCount++;
-                        }
-                        else if (pixel.A == 255)
-                        {
-                            var distance = ColorDistance(pixel, bgColor);
-                            if (distance < threshold * 2)
-                            {
-                                var alpha = (byte)Math.Clamp((int)(255.0 * distance / (threshold * 2)), 0, 255);
-                                pixel = new Rgba32(pixel.R, pixel.G, pixel.B, alpha);
-                                if (alpha == 0) removedCount++;
-                            }
-                        }
-                    }
-                }
-            });
 
             double ratio = Math.Round((double)removedCount / totalPixels * 100, 2);
             Console.WriteLine($"  透明化: {removedCount}/{totalPixels} 像素 ({ratio}%)");
@@ -674,7 +775,8 @@ static int RunAutoProcess()
                 outputPngPath = filePath;
             }
 
-            image.SaveAsPng(outputPngPath);
+            var rgbaEncoder = new PngEncoder { ColorType = PngColorType.RgbWithAlpha };
+            image.SaveAsPng(outputPngPath, rgbaEncoder);
             var pngFileSize = new FileInfo(outputPngPath).Length;
             Console.WriteLine($"  输出: {Path.GetFileName(outputPngPath)} ({FormatFileSize(pngFileSize)})");
             logLines.Add($"  输出文件: {Path.GetFileName(outputPngPath)} ({FormatFileSize(pngFileSize)})");
@@ -711,49 +813,68 @@ static int RunAutoProcess()
 }
 
 /// <summary>
-/// 采样图像四条边的像素，判断是否为单一背景色（白/黑）。
-/// 返回 null 表示四周颜色不一致、不适合自动处理。
+/// 采样图像四个角区域的像素，判断是否为单一背景色（白/黑）。
+/// 改为角区域采样而非整条边，适配圆角矩形图标（图标内容延伸到边缘中段）。
+/// 返回 null 表示四角颜色不一致、不适合自动处理。
 /// </summary>
 static (Rgba32 Color, string Name)? DetectBorderColor(Image<Rgba32> image)
 {
     int w = image.Width, h = image.Height;
 
-    // 采样四条边上的像素（间隔采样，避免太慢）
-    var borderPixels = new List<Rgba32>();
-    int step = Math.Max(1, Math.Min(w, h) / 40); // 每条边约 40 个采样点
+    // 角区域大小：图像短边的 5%，对于紧贴边缘的圆角矩形图标足够覆盖角落背景
+    // 同时不至于深入到圆角弧线内侧的图标内容
+    int regionSize = Math.Max(4, Math.Min(w, h) * 5 / 100);
+    int step = Math.Max(1, regionSize / 10); // 每个角区域约 10x10=100 个采样点
 
-    // 上边
-    for (int x = 0; x < w; x += step) borderPixels.Add(image[x, 0]);
-    // 下边
-    for (int x = 0; x < w; x += step) borderPixels.Add(image[x, h - 1]);
-    // 左边
-    for (int y = 0; y < h; y += step) borderPixels.Add(image[0, y]);
-    // 右边
-    for (int y = 0; y < h; y += step) borderPixels.Add(image[w - 1, y]);
+    var cornerPixels = new List<Rgba32>();
 
-    if (borderPixels.Count == 0) return null;
+    // 采样四个角区域（矩形块而非单条边线）
+    // 左上角
+    for (int y = 0; y < regionSize; y += step)
+        for (int x = 0; x < regionSize; x += step)
+            cornerPixels.Add(image[x, y]);
+
+    // 右上角
+    for (int y = 0; y < regionSize; y += step)
+        for (int x = w - regionSize; x < w; x += step)
+            cornerPixels.Add(image[x, y]);
+
+    // 左下角
+    for (int y = h - regionSize; y < h; y += step)
+        for (int x = 0; x < regionSize; x += step)
+            cornerPixels.Add(image[x, y]);
+
+    // 右下角
+    for (int y = h - regionSize; y < h; y += step)
+        for (int x = w - regionSize; x < w; x += step)
+            cornerPixels.Add(image[x, y]);
+
+    if (cornerPixels.Count == 0) return null;
 
     // 统计：看是否绝大多数接近白色或黑色
     int whiteCount = 0, blackCount = 0;
+    int otherCount = 0;
     int tolerance = 30;
 
-    foreach (var px in borderPixels)
+    foreach (var px in cornerPixels)
     {
         if (px.A < 128) continue; // 已透明的忽略
         if (px.R >= (255 - tolerance) && px.G >= (255 - tolerance) && px.B >= (255 - tolerance))
             whiteCount++;
         else if (px.R <= tolerance && px.G <= tolerance && px.B <= tolerance)
             blackCount++;
+        else
+            otherCount++;
     }
 
-    double totalOpaque = borderPixels.Count;
+    double totalOpaque = cornerPixels.Count;
     double whiteRatio = whiteCount / totalOpaque;
     double blackRatio = blackCount / totalOpaque;
 
-    // >=85% 的边缘像素为同一颜色才认为可处理
-    if (whiteRatio >= 0.85)
+    // >=80% 的角区域像素为同一颜色才认为可处理
+    if (whiteRatio >= 0.80)
         return (new Rgba32(255, 255, 255, 255), "white");
-    if (blackRatio >= 0.85)
+    if (blackRatio >= 0.80)
         return (new Rgba32(0, 0, 0, 255), "black");
 
     return null;
@@ -852,7 +973,8 @@ static Image<Rgba32> PadToSquare(Image<Rgba32> source)
 static byte[] EncodePng(Image<Rgba32> image)
 {
     using var ms = new MemoryStream();
-    image.SaveAsPng(ms);
+    var rgbaEncoder = new PngEncoder { ColorType = PngColorType.RgbWithAlpha };
+    image.SaveAsPng(ms, rgbaEncoder);
     return ms.ToArray();
 }
 
