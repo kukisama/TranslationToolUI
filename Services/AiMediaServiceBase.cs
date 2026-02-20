@@ -84,8 +84,11 @@ namespace TranslationToolUI.Services
 
             if (config.ProviderType == AiProviderType.AzureOpenAi)
             {
-                // Azure OpenAI: /openai/deployments/{deployment}/images/generations?api-version=...
-                return $"{baseUrl}/openai/deployments/{config.DeploymentName}/images/generations?api-version={config.ApiVersion}";
+                // 旧方式（传统 Azure 部署路径）：
+                // return $"{baseUrl}/openai/deployments/{config.DeploymentName}/images/generations?api-version={config.ApiVersion}";
+
+                // 新方式：走 OpenAI 兼容路径
+                return $"{baseUrl}/openai/v1/images/generations";
             }
 
             // OpenAI Compatible
