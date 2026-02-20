@@ -153,7 +153,7 @@ namespace TranslationToolUI.Controls
         {
             var provider = new AzureTokenProvider(ProfileKey);
             provider.Logout();
-            SetStatus("已注销", "#6a737d");
+            SetStatus("已注销（认证记录与缓存已清除）", "#6a737d");
             DeviceCodePanel.IsVisible = false;
         }
 

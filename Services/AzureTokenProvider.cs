@@ -380,23 +380,54 @@ namespace TranslationToolUI.Services
         }
 
         /// <summary>
-        /// 注销，清除缓存的凭据
+        /// 注销，清除缓存的凭据、AuthRecord 配置文件及 MSAL 持久化 Token Cache。
         /// </summary>
         public void Logout()
         {
+            // 1. 删除 AuthenticationRecord 配置文件
+            TryDeleteFile(AuthRecordPath, "AuthRecord");
+
+            // 2. 删除 MSAL 持久化 Token Cache 文件（Windows 位于 %LOCALAPPDATA%\.IdentityService\）
             try
             {
-                if (File.Exists(AuthRecordPath))
-                    File.Delete(AuthRecordPath);
+                var identityServiceDir = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                    ".IdentityService");
+
+                if (Directory.Exists(identityServiceDir))
+                {
+                    // MSAL cache 文件名 = TokenCachePersistenceOptions.Name
+                    var cachePath = Path.Combine(identityServiceDir, TokenCacheName);
+                    TryDeleteFile(cachePath, "MSAL TokenCache");
+
+                    // MSAL 可能同时生成 .lockfile
+                    TryDeleteFile(cachePath + ".lockfile", "MSAL TokenCache lockfile");
+                }
             }
             catch (Exception ex)
             {
-                Debug.WriteLine($"删除 AuthRecord 失败: {ex.Message}");
+                Debug.WriteLine($"清理 MSAL Token Cache 目录时出错: {ex.Message}");
             }
 
             _credential = null;
             _cachedToken = default;
             Username = null;
+        }
+
+        /// <summary>
+        /// 尝试删除指定文件，失败时输出调试日志。
+        /// </summary>
+        private static void TryDeleteFile(string path, string label)
+        {
+            try
+            {
+                if (File.Exists(path))
+                    File.Delete(path);
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"删除 {label} 失败 ({path}): {ex.Message}");
+            }
         }
     }
 }
