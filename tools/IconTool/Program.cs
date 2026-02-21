@@ -40,6 +40,7 @@ return command switch
 {
     "check" => RunCheck(args),
     "transparent" => RunTransparent(args),
+    "crop" => RunCrop(args),
     "help" or "--help" or "-h" or "/?" => PrintUsageAndReturn(),
     _ => Error($"未知命令: {command}。使用 'IconTool help' 查看帮助。")
 };
@@ -59,15 +60,17 @@ static void PrintUsage()
       IconTool                                 自动处理当前目录所有 PNG/JPG
       IconTool check <文件路径>                检测 PNG/ICO 是否包含透明通道
       IconTool transparent <文件路径> [选项]    将图片背景透明化并输出为 PNG
+      IconTool crop <文件路径> [选项]           居中裁剪缩放到指定尺寸
 
     无参数自动模式:
       扫描当前目录的 *.png / *.jpg / *.jpeg 文件，自动执行以下流程：
-      1. 检测是否已透明 → 已透明则跳过
+      1. 检测是否已透明 → 已透明则跳过透明化
       2. 采样四周像素判断背景色 → 仅 white/black 才处理
       3. 去除背景色生成透明 PNG（覆盖原文件）
-      4. 生成同名 .ico 图标文件（16/32/48/256 四尺寸）
-      5. 源文件（含已有 .ico）备份到按时间命名的子目录
-      6. 生成详细处理日志
+      4. 居中裁剪缩放到 512x512
+      5. 生成同名 .ico 图标文件（16/32/48/256 四尺寸）
+      6. 源文件（含已有 .ico）备份到按时间命名的子目录
+      7. 生成详细处理日志
 
     check 命令:
       IconTool check logo.png                  检测 logo.png 的透明度
@@ -90,10 +93,20 @@ static void PrintUsage()
                                适合圆角图标（避免删除内部深色内容）
                                自动模式默认使用此模式
 
+    crop 命令:
+      IconTool crop photo.png                  居中裁剪缩放到 512x512
+      IconTool crop photo.png -s 256           裁剪到 256x256
+      IconTool crop photo.png -o out.png       指定输出文件路径
+
+    crop 选项:
+      -s, --size <值>          目标正方形边长 (默认: 512)
+      -o, --output <路径>      输出文件路径 (默认: 原文件名_cropped.png)
+
     示例:
       IconTool                                         自动处理当前目录
       IconTool check "C:\icons\app.ico"
       IconTool transparent banner.jpg -c white -t 50 -o banner_clean.png
+      IconTool crop logo.png -s 512 -o logo_512.png
     """);
 }
 
@@ -655,6 +668,108 @@ static int Error(string message)
 }
 
 // ═══════════════════════════════════════════════════════════════════
+// crop 命令：居中裁剪缩放
+// ═══════════════════════════════════════════════════════════════════
+
+static int RunCrop(string[] args)
+{
+    if (args.Length < 2)
+        return Error("用法: IconTool crop <文件路径> [选项]");
+
+    var filePath = args[1];
+    if (!File.Exists(filePath))
+        return Error($"文件不存在: {filePath}");
+
+    // 解析选项
+    string? outputPath = null;
+    int targetSize = 512;
+
+    for (int i = 2; i < args.Length; i++)
+    {
+        var arg = args[i].ToLowerInvariant();
+        switch (arg)
+        {
+            case "-o" or "--output":
+                if (i + 1 >= args.Length) return Error("-o/--output 需要一个参数。");
+                outputPath = args[++i];
+                break;
+            case "-s" or "--size":
+                if (i + 1 >= args.Length) return Error("-s/--size 需要一个参数。");
+                if (!int.TryParse(args[++i], out targetSize) || targetSize < 1 || targetSize > 4096)
+                    return Error("目标尺寸必须为 1-4096 之间的整数。");
+                break;
+            default:
+                return Error($"未知选项: {args[i]}");
+        }
+    }
+
+    // 确定输出路径
+    if (string.IsNullOrEmpty(outputPath))
+    {
+        var dir = Path.GetDirectoryName(Path.GetFullPath(filePath)) ?? ".";
+        var name = Path.GetFileNameWithoutExtension(filePath);
+        outputPath = Path.Combine(dir, $"{name}_cropped.png");
+    }
+
+    Console.WriteLine($"── 居中裁剪缩放 ──");
+    Console.WriteLine($"  输入: {filePath}");
+    Console.WriteLine($"  目标尺寸: {targetSize}x{targetSize}");
+    Console.WriteLine($"  输出: {outputPath}");
+    Console.WriteLine();
+
+    try
+    {
+        using var image = Image.Load<Rgba32>(filePath);
+        Console.WriteLine($"  原始尺寸: {image.Width}x{image.Height}");
+
+        using var cropped = CenterCropAndResize(image, targetSize);
+        Console.WriteLine($"  裁剪后尺寸: {cropped.Width}x{cropped.Height}");
+
+        // 确保输出目录存在
+        var outDir = Path.GetDirectoryName(Path.GetFullPath(outputPath));
+        if (!string.IsNullOrEmpty(outDir))
+            Directory.CreateDirectory(outDir);
+
+        var rgbaEncoder = new PngEncoder { ColorType = PngColorType.RgbWithAlpha };
+        cropped.SaveAsPng(outputPath, rgbaEncoder);
+        var fileSize = new FileInfo(outputPath).Length;
+        Console.WriteLine($"  输出文件大小: {FormatFileSize(fileSize)}");
+        Console.WriteLine();
+        Console.WriteLine("✓ 裁剪完成。");
+
+        return 0;
+    }
+    catch (Exception ex)
+    {
+        return Error($"处理失败: {ex.Message}");
+    }
+}
+
+/// <summary>
+/// 居中裁剪并缩放到目标正方形尺寸。
+/// 对于非正方形图像，先取短边为正方形边长居中裁剪，再缩放到 targetSize。
+/// 对于已是正方形的图像，直接缩放。
+/// </summary>
+static Image<Rgba32> CenterCropAndResize(Image<Rgba32> source, int targetSize)
+{
+    int w = source.Width, h = source.Height;
+    int side = Math.Min(w, h);
+
+    // 居中裁剪为正方形
+    int cropX = (w - side) / 2;
+    int cropY = (h - side) / 2;
+
+    var result = source.Clone(ctx =>
+    {
+        if (w != h)
+            ctx.Crop(new Rectangle(cropX, cropY, side, side));
+        ctx.Resize(targetSize, targetSize, KnownResamplers.Lanczos3);
+    });
+
+    return result;
+}
+
+// ═══════════════════════════════════════════════════════════════════
 // 自动处理模式（无参数）
 // ═══════════════════════════════════════════════════════════════════
 
@@ -719,11 +834,43 @@ static int RunAutoProcess()
             if (alreadyTransparent && report.CornersTransparent)
             {
                 Console.WriteLine($"  已是透明图片（透明像素 {report.TransparentPixels}），跳过透明化。");
-                logLines.Add($"  结果: 跳过 — 已是透明图片（透明像素={report.TransparentPixels}, 占比={Math.Round((double)report.TransparentPixels / report.TotalPixels * 100, 2)}%）");
+                logLines.Add($"  结果: 跳过透明化 — 已是透明图片（透明像素={report.TransparentPixels}, 占比={Math.Round((double)report.TransparentPixels / report.TotalPixels * 100, 2)}%）");
 
-                // 即便已透明，也尝试生成 ICO
-                GenerateIcoForFile(filePath, image, backupDir, logLines, currentDir);
-                skipCount++;
+                // 备份源文件
+                var backupPathSkip = Path.Combine(backupDir, fileName);
+                File.Copy(filePath, backupPathSkip, overwrite: true);
+                logLines.Add($"  备份源文件: {fileName}");
+
+                // 居中裁剪缩放到 512x512
+                using var croppedSkip = CenterCropAndResize(image, 512);
+                Console.WriteLine($"  裁剪缩放: {image.Width}x{image.Height} → {croppedSkip.Width}x{croppedSkip.Height}");
+                logLines.Add($"  裁剪缩放: {image.Width}x{image.Height} → {croppedSkip.Width}x{croppedSkip.Height}");
+
+                // 保存裁剪后的 PNG
+                var extSkip = Path.GetExtension(filePath).ToLowerInvariant();
+                string outputPngPathSkip;
+                if (extSkip is ".jpg" or ".jpeg")
+                {
+                    outputPngPathSkip = Path.Combine(currentDir, nameNoExt + ".png");
+                    File.Delete(filePath);
+                    logLines.Add($"  源文件为 JPG，转换为 PNG: {nameNoExt}.png");
+                }
+                else
+                {
+                    outputPngPathSkip = filePath;
+                }
+
+                var rgbaEncoderSkip = new PngEncoder { ColorType = PngColorType.RgbWithAlpha };
+                croppedSkip.SaveAsPng(outputPngPathSkip, rgbaEncoderSkip);
+                var pngFileSizeSkip = new FileInfo(outputPngPathSkip).Length;
+                Console.WriteLine($"  输出: {Path.GetFileName(outputPngPathSkip)} ({FormatFileSize(pngFileSizeSkip)})");
+                logLines.Add($"  输出文件: {Path.GetFileName(outputPngPathSkip)} ({FormatFileSize(pngFileSizeSkip)})");
+
+                // 生成 ICO
+                GenerateIcoForFile(outputPngPathSkip, croppedSkip, backupDir, logLines, currentDir);
+
+                logLines.Add($"  结果: 成功（跳过透明化，执行裁剪）");
+                successCount++;
                 Console.WriteLine();
                 continue;
             }
@@ -760,7 +907,12 @@ static int RunAutoProcess()
             Console.WriteLine($"  透明化: {removedCount}/{totalPixels} 像素 ({ratio}%)");
             logLines.Add($"  透明化像素: {removedCount}/{totalPixels} ({ratio}%)");
 
-            // 5. 覆盖写入为 PNG（如果源是 jpg 则写为同名 .png）
+            // 5. 居中裁剪缩放到 512x512
+            using var cropped = CenterCropAndResize(image, 512);
+            Console.WriteLine($"  裁剪缩放: {image.Width}x{image.Height} → {cropped.Width}x{cropped.Height}");
+            logLines.Add($"  裁剪缩放: {image.Width}x{image.Height} → {cropped.Width}x{cropped.Height}");
+
+            // 6. 覆盖写入为 PNG（如果源是 jpg 则写为同名 .png）
             var ext = Path.GetExtension(filePath).ToLowerInvariant();
             string outputPngPath;
             if (ext is ".jpg" or ".jpeg")
@@ -776,13 +928,13 @@ static int RunAutoProcess()
             }
 
             var rgbaEncoder = new PngEncoder { ColorType = PngColorType.RgbWithAlpha };
-            image.SaveAsPng(outputPngPath, rgbaEncoder);
+            cropped.SaveAsPng(outputPngPath, rgbaEncoder);
             var pngFileSize = new FileInfo(outputPngPath).Length;
             Console.WriteLine($"  输出: {Path.GetFileName(outputPngPath)} ({FormatFileSize(pngFileSize)})");
             logLines.Add($"  输出文件: {Path.GetFileName(outputPngPath)} ({FormatFileSize(pngFileSize)})");
 
-            // 6. 生成 ICO
-            GenerateIcoForFile(outputPngPath, image, backupDir, logLines, currentDir);
+            // 7. 生成 ICO
+            GenerateIcoForFile(outputPngPath, cropped, backupDir, logLines, currentDir);
 
             logLines.Add($"  结果: 成功");
             successCount++;
