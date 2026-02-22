@@ -7,9 +7,8 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <AvaloniaUseCompiledBindingsByDefault>false</AvaloniaUseCompiledBindingsByDefault>
 
-    <AppLogoPng>Assets\AppLogo.png</AppLogoPng>
-    <AppIconPng Condition="Exists('Assets\\AppIcon.png')">Assets\\AppIcon.png</AppIconPng>
-    <AppIconPng Condition="'$(AppIconPng)'=='' and Exists('Assets\\AppLogo.png')">$(AppLogoPng)</AppIconPng>
+    <AppIconPng>Assets\AppIcon.png</AppIconPng>
+    <ApplicationIcon>Assets\AppIcon.ico</ApplicationIcon>
   </PropertyGroup>
   
   
@@ -48,32 +47,4 @@
     <None Include="RELEASE_NOTES.md" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
-  <!-- IconGen 自动生成图标已禁用，改用 tools/IconTool 手动处理。如需恢复，移除 Condition="false"。 -->
-  <Target Name="GenerateAppIconIco" BeforeTargets="CoreCompile" Condition="false">
-    <PropertyGroup>
-      <_GeneratedIconDir>$(MSBuildProjectDirectory)\obj\Generated</_GeneratedIconDir>
-      <_IconBuildId>$([System.Guid]::NewGuid())</_IconBuildId>
-      <_GeneratedIconIco>$(_GeneratedIconDir)\AppIcon.$(_IconBuildId).ico</_GeneratedIconIco>
-      <_GeneratedIconLatest>$(_GeneratedIconDir)\AppIcon.ico</_GeneratedIconLatest>
-      <_AgreedIconIco>$(MSBuildProjectDirectory)\Assets\AppIcon.ico</_AgreedIconIco>
-    </PropertyGroup>
-
-    <MakeDir Directories="$(_GeneratedIconDir)" />
-    <ItemGroup>
-      <_OldGeneratedIcons Include="$(_GeneratedIconDir)\AppIcon.*.ico" Exclude="$(_GeneratedIconIco)" />
-    </ItemGroup>
-    <Delete Files="@(_OldGeneratedIcons)" ContinueOnError="true" />
-    <Delete Files="$(_GeneratedIconIco)" ContinueOnError="true" />
-
-    <Message Importance="high" Text="[Icon] Generating $(_GeneratedIconIco) from $(AppIconPng)" />
-    <Exec Command="dotnet run --project &quot;$(MSBuildProjectDirectory)\tools\IconGen\IconGen.csproj&quot; -c Release -- &quot;$(MSBuildProjectDirectory)\$(AppIconPng)&quot; &quot;$(_GeneratedIconIco)&quot;" IgnoreExitCode="true" ContinueOnError="WarnAndContinue" />
-    <PropertyGroup Condition="Exists('$(_GeneratedIconIco)')">
-      <ApplicationIcon>$(_GeneratedIconIco)</ApplicationIcon>
-    </PropertyGroup>
-    <Message Importance="high" Condition="Exists('$(_GeneratedIconIco)')" Text="[Icon] ApplicationIcon=$(_GeneratedIconIco)" />
-    <Copy SourceFiles="$(_GeneratedIconIco)" DestinationFiles="$(_GeneratedIconLatest)" Condition="Exists('$(_GeneratedIconIco)')" OverwriteReadOnlyFiles="true" SkipUnchangedFiles="false" ContinueOnError="true" />
-    <Copy SourceFiles="$(_GeneratedIconIco)" DestinationFiles="$(_AgreedIconIco)" Condition="Exists('$(_GeneratedIconIco)')" OverwriteReadOnlyFiles="true" SkipUnchangedFiles="false" ContinueOnError="true" />
-    <Message Importance="high" Condition="Exists('$(_AgreedIconIco)')" Text="[Icon] Copied to $(_AgreedIconIco)" />
-    <Warning Condition="!Exists('$(_GeneratedIconIco)')" Text="[Icon] Failed to generate ICO (build continues; app still runs)." />
-  </Target>
 </Project>

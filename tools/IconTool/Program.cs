@@ -535,6 +535,13 @@ static bool IsColorMatch(Rgba32 pixel, Rgba32 target, int threshold)
         && Math.Abs(pixel.B - target.B) <= threshold;
 }
 
+static bool IsBackgroundCandidate(Rgba32 pixel, Rgba32 target, int threshold)
+{
+    // 已经透明/几乎透明的边缘像素视为可穿透背景，避免扫描在抗锯齿处提前中断。
+    if (pixel.A <= 8) return true;
+    return IsColorMatch(pixel, target, threshold);
+}
+
 static double ColorDistance(Rgba32 a, Rgba32 b)
 {
     int dr = a.R - b.R;
@@ -560,7 +567,7 @@ static int FloodFillTransparent(Image<Rgba32> image, Rgba32 bgColor, int thresho
     {
         for (int y = 0; y < h; y++)
         {
-            if (IsColorMatch(image[x, y], bgColor, threshold))
+            if (IsBackgroundCandidate(image[x, y], bgColor, threshold))
                 verticalBg[x, y] = true;
             else
                 break;
@@ -572,7 +579,7 @@ static int FloodFillTransparent(Image<Rgba32> image, Rgba32 bgColor, int thresho
     {
         for (int y = h - 1; y >= 0; y--)
         {
-            if (IsColorMatch(image[x, y], bgColor, threshold))
+            if (IsBackgroundCandidate(image[x, y], bgColor, threshold))
                 verticalBg[x, y] = true;
             else
                 break;
@@ -584,7 +591,7 @@ static int FloodFillTransparent(Image<Rgba32> image, Rgba32 bgColor, int thresho
     {
         for (int x = 0; x < w; x++)
         {
-            if (IsColorMatch(image[x, y], bgColor, threshold))
+            if (IsBackgroundCandidate(image[x, y], bgColor, threshold))
                 horizontalBg[x, y] = true;
             else
                 break;
@@ -596,7 +603,7 @@ static int FloodFillTransparent(Image<Rgba32> image, Rgba32 bgColor, int thresho
     {
         for (int x = w - 1; x >= 0; x--)
         {
-            if (IsColorMatch(image[x, y], bgColor, threshold))
+            if (IsBackgroundCandidate(image[x, y], bgColor, threshold))
                 horizontalBg[x, y] = true;
             else
                 break;
@@ -652,6 +659,69 @@ static int FloodFillTransparent(Image<Rgba32> image, Rgba32 bgColor, int thresho
     }
 
     return removedCount;
+}
+
+static int AutoFloodFillTransparent(Image<Rgba32> image, Rgba32 bgColor, out int usedThreshold)
+{
+    var thresholds = new[] { 3, 6, 10, 14 };
+    var totalPixels = image.Width * image.Height;
+
+    int bestRemoved = 0;
+    int bestThreshold = thresholds[0];
+    Image<Rgba32>? bestResult = null;
+
+    try
+    {
+        foreach (var t in thresholds)
+        {
+            using var candidate = image.Clone();
+            var removed = FloodFillTransparent(candidate, bgColor, t);
+            if (removed <= 0)
+                continue;
+
+            var ratio = (double)removed / totalPixels;
+            // 防止误伤主体：若透明化比例过高，视为风险方案。
+            if (ratio > 0.55)
+                continue;
+
+            if (removed > bestRemoved)
+            {
+                bestRemoved = removed;
+                bestThreshold = t;
+
+                bestResult?.Dispose();
+                bestResult = candidate.Clone();
+            }
+        }
+
+        if (bestResult is not null)
+        {
+            CopyPixels(bestResult, image);
+            usedThreshold = bestThreshold;
+            return bestRemoved;
+        }
+
+        usedThreshold = thresholds[0];
+        return 0;
+    }
+    finally
+    {
+        bestResult?.Dispose();
+    }
+}
+
+static void CopyPixels(Image<Rgba32> source, Image<Rgba32> destination)
+{
+    if (source.Width != destination.Width || source.Height != destination.Height)
+        throw new ArgumentException("源图与目标图尺寸不一致，无法复制像素。");
+
+    for (int y = 0; y < source.Height; y++)
+    {
+        for (int x = 0; x < source.Width; x++)
+        {
+            destination[x, y] = source[x, y];
+        }
+    }
 }
 
 static string FormatFileSize(long bytes)
@@ -895,16 +965,17 @@ static int RunAutoProcess()
             File.Copy(filePath, backupPath, overwrite: true);
             logLines.Add($"  备份源文件: {fileName} → {Path.GetFileName(backupPath)}");
 
-            // 4. 透明化处理 — 使用 Flood Fill（从四角开始连通填充）
-            // 只移除从图像四角可达的、颜色匹配的连通背景区域，
-            // 不会误伤图标内部的深色像素
-            // Flood Fill 容差需要比全局模式小得多（3），避免沿暗色边缘泄漏进图标内部
-            int threshold = 3;
-            int removedCount = FloodFillTransparent(image, bgColor, threshold);
+            // 4. 透明化处理（自动策略）
+            // - 四向扫描交集，避免误删主体
+            // - 使用自适应阈值（3/6/10/14）提升近白/近黑边框命中率
+            // - 允许穿透已透明像素，减少抗锯齿边缘造成的扫描中断
+            int removedCount = AutoFloodFillTransparent(image, bgColor, out var usedThreshold);
             int totalPixels = image.Width * image.Height;
 
             double ratio = Math.Round((double)removedCount / totalPixels * 100, 2);
+            Console.WriteLine($"  自动阈值: {usedThreshold}");
             Console.WriteLine($"  透明化: {removedCount}/{totalPixels} 像素 ({ratio}%)");
+            logLines.Add($"  自动阈值: {usedThreshold}");
             logLines.Add($"  透明化像素: {removedCount}/{totalPixels} ({ratio}%)");
 
             // 5. 居中裁剪缩放到 512x512
