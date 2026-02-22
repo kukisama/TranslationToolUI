@@ -1,4 +1,4 @@
-﻿using Avalonia.Controls;
+using Avalonia.Controls;
 using Avalonia.Interactivity;
 using Avalonia.Platform.Storage;
 using Azure.Storage.Blobs;
@@ -14,11 +14,11 @@ using System.Linq;
 using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
-using TranslationToolUI.Helpers;
-using TranslationToolUI.Models;
-using TranslationToolUI.Services;
+using TrueFluentPro.Helpers;
+using TrueFluentPro.Models;
+using TrueFluentPro.Services;
 
-namespace TranslationToolUI.Views
+namespace TrueFluentPro.Views
 {
     public partial class ConfigCenterView : Window
     {

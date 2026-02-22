@@ -7,9 +7,9 @@ using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
-using TranslationToolUI.Models;
+using TrueFluentPro.Models;
 
-namespace TranslationToolUI.Services
+namespace TrueFluentPro.Services
 {
     /// <summary>
     /// 图片生成结果（含耗时信息）

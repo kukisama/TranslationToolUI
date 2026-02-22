@@ -1,6 +1,6 @@
 using System.ComponentModel;
 
-namespace TranslationToolUI.Models
+namespace TrueFluentPro.Models
 {
     public enum BatchTaskStatus
     {

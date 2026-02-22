@@ -6,9 +6,9 @@ using System.Threading.Tasks;
 using Avalonia.Controls;
 using Avalonia.Media;
 using Avalonia.Threading;
-using TranslationToolUI.Models;
+using TrueFluentPro.Models;
 
-namespace TranslationToolUI.ViewModels
+namespace TrueFluentPro.ViewModels
 {
     public partial class MainWindowViewModel
     {

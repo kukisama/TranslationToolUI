@@ -1,15 +1,15 @@
 using Avalonia.Controls;
 using Avalonia.Interactivity;
-using TranslationToolUI.Helpers;
-using TranslationToolUI.Models;
-using TranslationToolUI.Services;
+using TrueFluentPro.Helpers;
+using TrueFluentPro.Models;
+using TrueFluentPro.Services;
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
 using System.Threading;
 
-namespace TranslationToolUI.Views
+namespace TrueFluentPro.Views
 {
     public partial class AiConfigView : Window
     {

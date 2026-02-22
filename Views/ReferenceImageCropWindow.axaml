@@ -1,6 +1,6 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        x:Class="TranslationToolUI.Views.ReferenceImageCropWindow"
+        x:Class="TrueFluentPro.Views.ReferenceImageCropWindow"
         Title="裁切参考图"
         Width="980"
         Height="760"

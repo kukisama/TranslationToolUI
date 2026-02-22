@@ -1,9 +1,9 @@
 using System;
 using System.Collections.ObjectModel;
 using System.Windows.Input;
-using TranslationToolUI.Models;
-using TranslationToolUI.Services;
-using TranslationToolUI.Views;
+using TrueFluentPro.Models;
+using TrueFluentPro.Services;
+using TrueFluentPro.Views;
 using System.Threading.Tasks;
 using Avalonia;
 using Avalonia.Controls;
@@ -15,14 +15,14 @@ using System.Text.RegularExpressions;
 using System.ComponentModel;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Media;
-using TranslationToolUI.Services.Audio;
+using TrueFluentPro.Services.Audio;
 using System.IO;
 using System.Diagnostics;
 using System.Net.Http;
 using System.Text.Json;
 using NAudio.Wave;
 
-namespace TranslationToolUI.ViewModels
+namespace TrueFluentPro.ViewModels
 {
     public enum EditorDisplayMode
     {
@@ -282,7 +282,7 @@ namespace TranslationToolUI.ViewModels
             );
 
             OpenProjectGitHubCommand = new RelayCommand(
-                execute: _ => OpenUrl("https://github.com/kukisama/TranslationToolUI"),
+                execute: _ => OpenUrl("https://github.com/kukisama/TrueFluentPro"),
                 canExecute: _ => true
             );
 

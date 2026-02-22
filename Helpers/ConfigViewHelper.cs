@@ -4,10 +4,10 @@ using System.Threading;
 using System.Threading.Tasks;
 using Avalonia.Controls;
 using Avalonia.Media;
-using TranslationToolUI.Models;
-using TranslationToolUI.Services;
+using TrueFluentPro.Models;
+using TrueFluentPro.Services;
 
-namespace TranslationToolUI.Helpers
+namespace TrueFluentPro.Helpers
 {
     public static class ConfigViewHelper
     {

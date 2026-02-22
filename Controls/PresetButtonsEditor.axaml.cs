@@ -2,9 +2,9 @@ using System.Collections.ObjectModel;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
-using TranslationToolUI.Models;
+using TrueFluentPro.Models;
 
-namespace TranslationToolUI.Controls
+namespace TrueFluentPro.Controls
 {
     public partial class PresetButtonsEditor : UserControl
     {

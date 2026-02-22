@@ -1,4 +1,4 @@
-namespace TranslationToolUI.ViewModels
+namespace TrueFluentPro.ViewModels
 {
     public enum SubscriptionValidationState
     {

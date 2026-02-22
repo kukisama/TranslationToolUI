@@ -3,9 +3,9 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using Avalonia.Controls;
-using TranslationToolUI.Models;
+using TrueFluentPro.Models;
 
-namespace TranslationToolUI.Views
+namespace TrueFluentPro.Views
 {
     public partial class TenantSelectionView : Window
     {

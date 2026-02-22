@@ -6,10 +6,10 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Input;
 using Avalonia.Threading;
-using TranslationToolUI.Models;
-using TranslationToolUI.Services;
+using TrueFluentPro.Models;
+using TrueFluentPro.Services;
 
-namespace TranslationToolUI.ViewModels
+namespace TrueFluentPro.ViewModels
 {
     public partial class MainWindowViewModel
     {

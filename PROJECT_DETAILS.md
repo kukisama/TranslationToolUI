@@ -47,7 +47,7 @@ dotnet run
 
 ## 依赖与版本
 
-项目依赖版本以 NuGet 引用为准（见 TranslationToolUI.csproj），以下为当前核心组件与版本：
+项目依赖版本以 NuGet 引用为准（见 TrueFluentPro.csproj），以下为当前核心组件与版本：
 
 - .NET：.NET 10（运行时依赖 Desktop Runtime）
 - Avalonia UI：Avalonia 11.3.11 / Avalonia.Desktop 11.3.11

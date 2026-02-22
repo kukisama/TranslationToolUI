@@ -1,7 +1,7 @@
 using System.ComponentModel;
 using System.Threading;
 
-namespace TranslationToolUI.Models
+namespace TrueFluentPro.Models
 {
     public enum BatchQueueItemType
     {

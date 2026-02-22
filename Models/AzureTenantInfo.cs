@@ -1,4 +1,4 @@
-namespace TranslationToolUI.Models
+namespace TrueFluentPro.Models
 {
     /// <summary>
     /// AAD / Entra 租户信息（用于 UI 展示与选择）。

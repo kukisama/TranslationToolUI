@@ -1,7 +1,7 @@
 using System.Threading;
-using TranslationToolUI.Models;
+using TrueFluentPro.Models;
 
-namespace TranslationToolUI.ViewModels
+namespace TrueFluentPro.ViewModels
 {
     public class ReviewSheetState : ViewModelBase
     {

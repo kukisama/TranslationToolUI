@@ -3,9 +3,9 @@ using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Threading;
 using System.Threading.Tasks;
-using TranslationToolUI.Models;
+using TrueFluentPro.Models;
 
-namespace TranslationToolUI.Services
+namespace TrueFluentPro.Services
 {
     /// <summary>
     /// 图片/视频生成服务的共享基类（HttpClient、认证、URL 构建）

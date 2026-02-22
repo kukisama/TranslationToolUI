@@ -1,9 +1,9 @@
-﻿using Avalonia;
+using Avalonia;
 using Avalonia.Controls;
-using TranslationToolUI.Models;
+using TrueFluentPro.Models;
 using System;
 
-namespace TranslationToolUI.Controls
+namespace TrueFluentPro.Controls
 {
     public class ConfigurableTextEditor : UserControl
     {

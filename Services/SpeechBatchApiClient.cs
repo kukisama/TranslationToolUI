@@ -4,9 +4,9 @@ using System.Net.Http;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
-using TranslationToolUI.Models;
+using TrueFluentPro.Models;
 
-namespace TranslationToolUI.Services
+namespace TrueFluentPro.Services
 {
     public static class SpeechBatchApiClient
     {

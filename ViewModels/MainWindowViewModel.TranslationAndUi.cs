@@ -9,11 +9,11 @@ using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Media;
 using Avalonia.Threading;
-using TranslationToolUI.Models;
-using TranslationToolUI.Services;
-using TranslationToolUI.Views;
+using TrueFluentPro.Models;
+using TrueFluentPro.Services;
+using TrueFluentPro.Views;
 
-namespace TranslationToolUI.ViewModels
+namespace TrueFluentPro.ViewModels
 {
     public partial class MainWindowViewModel
     {

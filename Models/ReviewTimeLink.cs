@@ -1,6 +1,6 @@
 using System;
 
-namespace TranslationToolUI.Models
+namespace TrueFluentPro.Models
 {
     public class ReviewTimeLink
     {

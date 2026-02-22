@@ -1,13 +1,13 @@
-﻿using Avalonia.Controls;
-using TranslationToolUI.Services;
-using TranslationToolUI.ViewModels;
+using Avalonia.Controls;
+using TrueFluentPro.Services;
+using TrueFluentPro.ViewModels;
 using System;
 using Avalonia.Interactivity;
-using TranslationToolUI.Models;
+using TrueFluentPro.Models;
 using Avalonia.Input;
 using Avalonia.VisualTree;
 
-namespace TranslationToolUI;
+namespace TrueFluentPro;
 
 public partial class MainWindow : Window
 {

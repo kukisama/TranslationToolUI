@@ -5,7 +5,7 @@ using NAudio.CoreAudioApi;
 using NAudio.Wave;
 using NAudio.Wave.SampleProviders;
 
-namespace TranslationToolUI.Services.Audio
+namespace TrueFluentPro.Services.Audio
 {
     public sealed class WasapiPcm16AudioSource : IAsyncDisposable
     {

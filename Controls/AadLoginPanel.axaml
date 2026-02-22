@@ -1,6 +1,6 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             x:Class="TranslationToolUI.Controls.AadLoginPanel">
+             x:Class="TrueFluentPro.Controls.AadLoginPanel">
     <StackPanel Spacing="8">
         <StackPanel Spacing="5">
             <TextBlock Text="Tenant ID (可选)"/>

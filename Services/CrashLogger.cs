@@ -6,7 +6,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace TranslationToolUI.Services;
+namespace TrueFluentPro.Services;
 
 public static class CrashLogger
 {
@@ -25,7 +25,7 @@ public static class CrashLogger
         _logDir = TryCreateLogDir(Path.Combine(AppContext.BaseDirectory, "logs"))
             ?? TryCreateLogDir(Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "TranslationToolUI",
+                "TrueFluentPro",
                 "logs"));
 
         AppDomain.CurrentDomain.UnhandledException += (_, e) =>

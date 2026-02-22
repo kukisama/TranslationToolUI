@@ -4,9 +4,9 @@ using System.Globalization;
 using System.IO;
 using Avalonia.Data.Converters;
 using Avalonia.Media.Imaging;
-using TranslationToolUI.Services;
+using TrueFluentPro.Services;
 
-namespace TranslationToolUI.Controls
+namespace TrueFluentPro.Controls
 {
     public class FilePathToBitmapConverter : IValueConverter
     {

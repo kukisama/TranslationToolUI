@@ -5,7 +5,7 @@ using System.Threading.Tasks;
 using NAudio.Wave;
 using NAudio.MediaFoundation;
 
-namespace TranslationToolUI.Services.Audio
+namespace TrueFluentPro.Services.Audio
 {
     public static class WavToMp3Transcoder
     {

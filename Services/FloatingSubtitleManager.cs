@@ -1,9 +1,9 @@
-﻿using System;
-using TranslationToolUI.Views;
-using TranslationToolUI.ViewModels;
-using TranslationToolUI.Services;
+using System;
+using TrueFluentPro.Views;
+using TrueFluentPro.ViewModels;
+using TrueFluentPro.Services;
 
-namespace TranslationToolUI.Services
+namespace TrueFluentPro.Services
 {
     public class FloatingSubtitleManager
     {

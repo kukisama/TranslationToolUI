@@ -4,10 +4,10 @@ using System.Linq;
 using System.Threading.Tasks;
 using Avalonia.Controls;
 using Avalonia.Threading;
-using TranslationToolUI.Models;
-using TranslationToolUI.Services.Audio;
+using TrueFluentPro.Models;
+using TrueFluentPro.Services.Audio;
 
-namespace TranslationToolUI.ViewModels
+namespace TrueFluentPro.ViewModels
 {
     public partial class MainWindowViewModel
     {

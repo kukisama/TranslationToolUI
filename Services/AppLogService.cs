@@ -3,9 +3,9 @@ using System.IO;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using TranslationToolUI.Models;
+using TrueFluentPro.Models;
 
-namespace TranslationToolUI.Services
+namespace TrueFluentPro.Services
 {
     /// <summary>
     /// 统一诊断日志服务。

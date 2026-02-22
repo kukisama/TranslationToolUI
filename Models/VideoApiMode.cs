@@ -1,4 +1,4 @@
-namespace TranslationToolUI.Models
+namespace TrueFluentPro.Models
 {
     /// <summary>
     /// 视频生成 API 模式。

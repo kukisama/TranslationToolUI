@@ -1,7 +1,7 @@
 using System.Collections.Generic;
 using System.Text.Json.Serialization;
 
-namespace TranslationToolUI.Models
+namespace TrueFluentPro.Models
 {
     public enum AiProviderType
     {

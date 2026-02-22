@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 
-namespace TranslationToolUI.Models
+namespace TrueFluentPro.Models
 {
     /// <summary>
     /// Media Studio 会话索引（轻量清单）。

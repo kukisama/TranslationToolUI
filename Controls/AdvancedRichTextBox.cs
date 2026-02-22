@@ -1,4 +1,4 @@
-﻿using Avalonia;
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Layout;
 using Avalonia.Media;
@@ -7,7 +7,7 @@ using AvaloniaEdit;
 using AvaloniaEdit.Document;
 using System;
 
-namespace TranslationToolUI.Controls
+namespace TrueFluentPro.Controls
 {
     public class AdvancedRichTextBox : UserControl, INotifyPropertyChanged
     {

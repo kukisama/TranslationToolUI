@@ -9,10 +9,10 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Input;
 using Avalonia.Threading;
-using TranslationToolUI.Models;
-using TranslationToolUI.Services;
+using TrueFluentPro.Models;
+using TrueFluentPro.Services;
 
-namespace TranslationToolUI.ViewModels
+namespace TrueFluentPro.ViewModels
 {
     /// <summary>
     /// Media Studio 主 ViewModel — 管理会话列表、全局状态

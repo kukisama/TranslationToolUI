@@ -1,9 +1,9 @@
 using System;
 using System.Globalization;
 using Avalonia.Data.Converters;
-using TranslationToolUI.Services;
+using TrueFluentPro.Services;
 
-namespace TranslationToolUI.Controls
+namespace TrueFluentPro.Controls
 {
     public sealed class FirstFrameBadgeVisibilityConverter : IValueConverter
     {

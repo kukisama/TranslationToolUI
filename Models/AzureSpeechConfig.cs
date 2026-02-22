@@ -1,10 +1,10 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Text.Json.Serialization;
-using TranslationToolUI.Services;
+using TrueFluentPro.Services;
 
-namespace TranslationToolUI.Models
+namespace TrueFluentPro.Models
 {
     public enum BatchLogLevel
     {
@@ -156,8 +156,8 @@ namespace TranslationToolUI.Models
 
         public string? SessionDirectoryOverride { get; set; }
 
-        public const string DefaultBatchAudioContainerName = "translationtoolui-audio";
-        public const string DefaultBatchResultContainerName = "translationtoolui-results";
+        public const string DefaultBatchAudioContainerName = "truefluentpro-audio";
+        public const string DefaultBatchResultContainerName = "truefluentpro-results";
 
         public string BatchStorageConnectionString { get; set; } = "";
         public bool BatchStorageIsValid { get; set; } = false;

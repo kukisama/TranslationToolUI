@@ -2,9 +2,9 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-        xmlns:models="using:TranslationToolUI.Models"
+        xmlns:models="using:TrueFluentPro.Models"
         mc:Ignorable="d" d:DesignWidth="600" d:DesignHeight="500"
-        x:Class="TranslationToolUI.Views.ConfigView"
+        x:Class="TrueFluentPro.Views.ConfigView"
         Title="Azure 订阅管理"
         Width="600" Height="500"
         WindowStartupLocation="CenterOwner">

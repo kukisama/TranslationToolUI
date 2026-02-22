@@ -1,4 +1,4 @@
-namespace TranslationToolUI.Models
+namespace TrueFluentPro.Models
 {
     /// <summary>
     /// 图片/视频生成的全局配置（持久化到 config.json）

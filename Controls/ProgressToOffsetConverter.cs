@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using Avalonia.Data.Converters;
 
-namespace TranslationToolUI.Controls
+namespace TrueFluentPro.Controls
 {
     public class ProgressToOffsetConverter : IMultiValueConverter
     {

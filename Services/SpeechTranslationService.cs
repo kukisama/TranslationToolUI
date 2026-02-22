@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.IO;
 using System.Text.Json;
 using System.Threading;
@@ -6,10 +6,10 @@ using System.Threading.Tasks;
 using Microsoft.CognitiveServices.Speech;
 using Microsoft.CognitiveServices.Speech.Audio;
 using Microsoft.CognitiveServices.Speech.Translation;
-using TranslationToolUI.Models;
-using TranslationToolUI.Services.Audio;
+using TrueFluentPro.Models;
+using TrueFluentPro.Services.Audio;
 
-namespace TranslationToolUI.Services
+namespace TrueFluentPro.Services
 {
     public class SpeechTranslationService
     {

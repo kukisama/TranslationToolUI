@@ -1,9 +1,9 @@
 using System;
 using System.Linq;
 using NAudio.Wave;
-using TranslationToolUI.Models;
+using TrueFluentPro.Models;
 
-namespace TranslationToolUI.ViewModels
+namespace TrueFluentPro.ViewModels
 {
     public partial class MainWindowViewModel
     {

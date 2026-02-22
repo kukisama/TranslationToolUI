@@ -1,12 +1,12 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Linq;
 using System.Runtime.CompilerServices;
 using Avalonia.Media;
-using TranslationToolUI.Services;
+using TrueFluentPro.Services;
 
-namespace TranslationToolUI.ViewModels
+namespace TrueFluentPro.ViewModels
 {    public class FloatingSubtitleViewModel : INotifyPropertyChanged
     {
         private string _subtitleText = "等待字幕内容...";

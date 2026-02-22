@@ -7,10 +7,10 @@ using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
-using TranslationToolUI.Services;
-using TranslationToolUI.ViewModels;
+using TrueFluentPro.Services;
+using TrueFluentPro.ViewModels;
 
-namespace TranslationToolUI.Views
+namespace TrueFluentPro.Views
 {
     public partial class ReferenceImageCropWindow : Window
     {

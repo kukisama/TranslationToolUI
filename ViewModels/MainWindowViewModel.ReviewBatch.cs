@@ -11,11 +11,11 @@ using System.Threading.Tasks;
 using Avalonia.Media;
 using Avalonia.Threading;
 using Azure.Storage.Blobs;
-using TranslationToolUI.Helpers;
-using TranslationToolUI.Models;
-using TranslationToolUI.Services;
+using TrueFluentPro.Helpers;
+using TrueFluentPro.Models;
+using TrueFluentPro.Services;
 
-namespace TranslationToolUI.ViewModels
+namespace TrueFluentPro.ViewModels
 {
     public partial class MainWindowViewModel
     {

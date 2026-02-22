@@ -2,10 +2,10 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-        xmlns:models="using:TranslationToolUI.Models"
-        xmlns:controls="clr-namespace:TranslationToolUI.Controls"
+        xmlns:models="using:TrueFluentPro.Models"
+        xmlns:controls="clr-namespace:TrueFluentPro.Controls"
         mc:Ignorable="d" d:DesignWidth="980" d:DesignHeight="720"
-        x:Class="TranslationToolUI.Views.ConfigCenterView"
+        x:Class="TrueFluentPro.Views.ConfigCenterView"
         Title="配置中心"
         Width="980" Height="720"
         WindowStartupLocation="CenterOwner">

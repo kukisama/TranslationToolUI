@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 
-namespace TranslationToolUI.Models
+namespace TrueFluentPro.Models
 {
     /// <summary>
     /// 单个视频能力配置档（按 API 模式 + 模型匹配）。

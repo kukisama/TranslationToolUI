@@ -1,8 +1,8 @@
-﻿using Avalonia;
+using Avalonia;
 using System;
-using TranslationToolUI.Services;
+using TrueFluentPro.Services;
 
-namespace TranslationToolUI;
+namespace TrueFluentPro;
 
 class Program
 {

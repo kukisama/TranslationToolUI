@@ -2,7 +2,7 @@ using System;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
 
-namespace TranslationToolUI.Models
+namespace TrueFluentPro.Models
 {
     public enum MediaGenType
     {

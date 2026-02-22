@@ -1,6 +1,6 @@
 using System.Windows.Input;
 
-namespace TranslationToolUI.ViewModels
+namespace TrueFluentPro.ViewModels
 {
     public partial class MainWindowViewModel
     {

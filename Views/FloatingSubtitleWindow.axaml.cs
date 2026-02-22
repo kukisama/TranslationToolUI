@@ -1,11 +1,11 @@
-﻿using System;
+using System;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
-using TranslationToolUI.ViewModels;
+using TrueFluentPro.ViewModels;
 
-namespace TranslationToolUI.Views
+namespace TrueFluentPro.Views
 {    public partial class FloatingSubtitleWindow : Window
     {
         public FloatingSubtitleWindow()

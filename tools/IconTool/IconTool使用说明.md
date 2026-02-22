@@ -15,7 +15,7 @@ IconTool 是一个独立的命令行工具，提供四大核心功能：
 
 技术栈：.NET 10 + SixLabors.ImageSharp，支持发布为 Windows 单文件可执行程序（无需安装 .NET 运行时）。
 
-> **注意**：主项目 `TranslationToolUI.csproj` 中的 `GenerateAppIconIco` Target（原 IconGen 自动构建）已禁用。图标生成改为通过 IconTool 手动执行。如需恢复自动构建，移除 csproj 中 Target 的 `Condition="false"`。
+> **注意**：主项目 `TrueFluentPro.csproj` 中的 `GenerateAppIconIco` Target（原 IconGen 自动构建）已禁用。图标生成改为通过 IconTool 手动执行。如需恢复自动构建，移除 csproj 中 Target 的 `Condition="false"`。
 
 ---
 

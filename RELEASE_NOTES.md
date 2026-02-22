@@ -12,8 +12,8 @@
 
 | 文件 | 说明 |
 |------|------|
-| `TranslationToolUI-win-x64-fdd.zip` | Windows x64 版本（推荐） |
-| `TranslationToolUI-win-arm64-fdd.zip` | Windows ARM64 版本（可选） 实验性： MP3 录音导出功能缺少库，暂时不能做speech。 |
+| `TrueFluentPro-win-x64-fdd.zip` | Windows x64 版本（推荐） |
+| `TrueFluentPro-win-arm64-fdd.zip` | Windows ARM64 版本（可选） 实验性： MP3 录音导出功能缺少库，暂时不能做speech。 |
 
 ### 运行前提
 
@@ -25,4 +25,4 @@
 
 1. 下载对应架构的 zip 文件
 2. 解压到任意目录
-3. 运行 `TranslationToolUI.exe`
+3. 运行 `TrueFluentPro.exe`

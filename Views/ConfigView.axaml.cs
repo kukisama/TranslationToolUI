@@ -1,8 +1,8 @@
-﻿using Avalonia.Controls;
+using Avalonia.Controls;
 using Avalonia.Interactivity;
-using TranslationToolUI.Helpers;
-using TranslationToolUI.Models;
-using TranslationToolUI.Services;
+using TrueFluentPro.Helpers;
+using TrueFluentPro.Models;
+using TrueFluentPro.Services;
 using System;
 using System.IO;
 using System.Collections.ObjectModel;
@@ -15,7 +15,7 @@ using System.Threading;
 using Avalonia.Platform.Storage;
 using System.Net.Http;
 
-namespace TranslationToolUI.Views
+namespace TrueFluentPro.Views
 {
     public partial class ConfigView : Window
     {

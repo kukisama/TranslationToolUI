@@ -1,4 +1,4 @@
-namespace TranslationToolUI.Models
+namespace TrueFluentPro.Models
 {
     public class ReviewSheetPreset
     {

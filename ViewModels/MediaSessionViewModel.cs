@@ -8,10 +8,10 @@ using System.Net.Http;
 using System.Threading;
 using System.Windows.Input;
 using Avalonia.Threading;
-using TranslationToolUI.Models;
-using TranslationToolUI.Services;
+using TrueFluentPro.Models;
+using TrueFluentPro.Services;
 
-namespace TranslationToolUI.ViewModels
+namespace TrueFluentPro.ViewModels
 {
     /// <summary>
     /// 单会话 ViewModel — 聊天交互+任务管理

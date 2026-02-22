@@ -3,7 +3,7 @@ using System;
 using System.IO;
 using System.Text;
 
-namespace TranslationToolUI.Services;
+namespace TrueFluentPro.Services;
 
 public static class MarkdownContentLoader
 {
@@ -27,7 +27,7 @@ public static class MarkdownContentLoader
         // 2) Fallback: embedded Avalonia asset.
         try
         {
-            var uri = new Uri($"avares://TranslationToolUI/{assetPath}");
+            var uri = new Uri($"avares://TrueFluentPro/{assetPath}");
             if (!AssetLoader.Exists(uri))
             {
                 return $"（未找到内置资源：{assetPath}）";

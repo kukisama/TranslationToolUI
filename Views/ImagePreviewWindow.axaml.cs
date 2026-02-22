@@ -11,7 +11,7 @@ using System.Linq;
 using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 
-namespace TranslationToolUI.Views
+namespace TrueFluentPro.Views
 {
     public partial class ImagePreviewWindow : Window
     {

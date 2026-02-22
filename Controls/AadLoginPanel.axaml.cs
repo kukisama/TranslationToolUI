@@ -5,11 +5,11 @@ using System;
 using System.Collections.Generic;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
-using TranslationToolUI.Models;
-using TranslationToolUI.Services;
-using TranslationToolUI.Views;
+using TrueFluentPro.Models;
+using TrueFluentPro.Services;
+using TrueFluentPro.Views;
 
-namespace TranslationToolUI.Controls
+namespace TrueFluentPro.Controls
 {
     public partial class AadLoginPanel : UserControl
     {

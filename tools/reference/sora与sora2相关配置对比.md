@@ -27,7 +27,7 @@
 
 ## 2. AAD 认证
 
-两种模式共享相同的 AAD 认证机制。本项目使用 `Azure.Identity` 的 `DeviceCodeCredential`，认证记录持久化在 `%APPDATA%\TranslationToolUI\azure_auth_record.json`。
+两种模式共享相同的 AAD 认证机制。本项目使用 `Azure.Identity` 的 `DeviceCodeCredential`，认证记录持久化在 `%APPDATA%\TrueFluentPro\azure_auth_record.json`。
 
 ### 认证流程
 
@@ -279,7 +279,7 @@ GET /openai/v1/videos/{videoId}/content?api-version=preview
 
 ```mermaid
 sequenceDiagram
-    participant Client as TranslationToolUI
+    participant Client as TrueFluentPro
     participant AAD as Azure AD
     participant API as Azure OpenAI
 
@@ -311,7 +311,7 @@ sequenceDiagram
 
 ```mermaid
 sequenceDiagram
-    participant Client as TranslationToolUI
+    participant Client as TrueFluentPro
     participant AAD as Azure AD
     participant API as Azure OpenAI
 

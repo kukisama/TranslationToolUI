@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 
-namespace TranslationToolUI.Models
+namespace TrueFluentPro.Models
 {
     /// <summary>
     /// 会话模型（包含聊天记录和任务列表）

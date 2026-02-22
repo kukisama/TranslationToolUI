@@ -1,7 +1,7 @@
-﻿using System;
+using System;
 using System.ComponentModel;
 
-namespace TranslationToolUI.Services
+namespace TrueFluentPro.Services
 {
     public class SubtitleSyncService
     {

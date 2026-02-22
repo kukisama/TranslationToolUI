@@ -3,12 +3,12 @@ using Avalonia.Controls;
 using Avalonia.Media.Imaging;
 using Avalonia.Platform;
 
-namespace TranslationToolUI.Services;
+namespace TrueFluentPro.Services;
 
 public static class AppIconProvider
 {
-    private static readonly Uri AppIconUri = new("avares://TranslationToolUI/Assets/AppIcon.png");
-    private static readonly Uri FallbackLogoUri = new("avares://TranslationToolUI/Assets/AppLogo.png");
+    private static readonly Uri AppIconUri = new("avares://TrueFluentPro/Assets/AppIcon.png");
+    private static readonly Uri FallbackLogoUri = new("avares://TrueFluentPro/Assets/AppLogo.png");
 
     private static readonly Lazy<Bitmap?> LogoBitmapLazy = new(() =>
     {

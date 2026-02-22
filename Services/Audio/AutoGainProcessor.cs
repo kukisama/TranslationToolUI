@@ -1,7 +1,7 @@
 using System;
 using NAudio.Wave;
 
-namespace TranslationToolUI.Services.Audio
+namespace TrueFluentPro.Services.Audio
 {
     public sealed class AutoGainProcessor
     {

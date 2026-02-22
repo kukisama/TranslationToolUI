@@ -1,7 +1,7 @@
 using Avalonia.Controls;
-using TranslationToolUI.Services;
+using TrueFluentPro.Services;
 
-namespace TranslationToolUI.Views;
+namespace TrueFluentPro.Views;
 
 public partial class HelpView : Window
 {

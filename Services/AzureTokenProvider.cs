@@ -9,9 +9,9 @@ using System.Threading;
 using System.Threading.Tasks;
 using Azure.Core;
 using Azure.Identity;
-using TranslationToolUI.Models;
+using TrueFluentPro.Models;
 
-namespace TranslationToolUI.Services
+namespace TrueFluentPro.Services
 {
     /// <summary>
     /// Azure Entra ID (AAD) Token 提供者。
@@ -35,7 +35,7 @@ namespace TranslationToolUI.Services
         private string AuthRecordPath =>
             Path.Combine(PathManager.Instance.AppDataPath, $"azure_auth_record_{_profileKey}.json");
 
-        private string TokenCacheName => $"TranslationToolUI_{_profileKey}";
+        private string TokenCacheName => $"TrueFluentPro_{_profileKey}";
 
         public AzureTokenProvider(string? profileKey = null)
         {

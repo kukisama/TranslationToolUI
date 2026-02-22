@@ -1,6 +1,6 @@
 using System;
 
-namespace TranslationToolUI.ViewModels
+namespace TrueFluentPro.ViewModels
 {
     /// <summary>
     /// 参考图裁切窗口 ViewModel。

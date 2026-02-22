@@ -1,6 +1,6 @@
 using System;
 
-namespace TranslationToolUI.Helpers
+namespace TrueFluentPro.Helpers
 {
     public static class TimeLinkHelper
     {

@@ -4,7 +4,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using SkiaSharp;
 
-namespace TranslationToolUI.Services
+namespace TrueFluentPro.Services
 {
     /// <summary>
     /// 参考图裁切与缩放服务（基于 SkiaSharp）。

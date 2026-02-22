@@ -7,9 +7,9 @@ using NAudio.CoreAudioApi;
 using NAudio.Lame;
 using NAudio.Wave;
 using NAudio.Wave.SampleProviders;
-using TranslationToolUI.Models;
+using TrueFluentPro.Models;
 
-namespace TranslationToolUI.Services.Audio
+namespace TrueFluentPro.Services.Audio
 {
     public sealed class HighQualityRecorder : IAsyncDisposable
     {

@@ -1,14 +1,14 @@
-﻿using System;
+using System;
 using System.IO;
 
-namespace TranslationToolUI.Services
+namespace TrueFluentPro.Services
 {
     public class PathManager
     {
         private static readonly Lazy<PathManager> _instance = new(() => new PathManager());
         public static PathManager Instance => _instance.Value;
         
-        private readonly string _appName = "TranslationToolUI";
+        private readonly string _appName = "TrueFluentPro";
         
         #region 🎯 主要路径属性 - 外部调用这些
         

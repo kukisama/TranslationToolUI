@@ -6,7 +6,7 @@ using Windows.Media.Editing;
 using Windows.Storage;
 using Windows.Storage.Streams;
 
-namespace TranslationToolUI.Services
+namespace TrueFluentPro.Services
 {
     public sealed class VideoFrameExtractResult
     {

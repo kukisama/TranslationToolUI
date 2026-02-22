@@ -1,9 +1,9 @@
-﻿using Avalonia;
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Media;
 using System.ComponentModel;
 
-namespace TranslationToolUI.Controls
+namespace TrueFluentPro.Controls
 {
     public class SimpleRichTextBox : UserControl, INotifyPropertyChanged
     {

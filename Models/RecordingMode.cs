@@ -1,6 +1,6 @@
 using System.Text.Json.Serialization;
 
-namespace TranslationToolUI.Models
+namespace TrueFluentPro.Models
 {
     [JsonConverter(typeof(JsonStringEnumConverter))]
     public enum RecordingMode

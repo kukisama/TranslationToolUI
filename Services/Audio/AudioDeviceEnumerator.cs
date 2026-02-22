@@ -1,9 +1,9 @@
 using System;
 using System.Collections.Generic;
 using NAudio.CoreAudioApi;
-using TranslationToolUI.Models;
+using TrueFluentPro.Models;
 
-namespace TranslationToolUI.Services.Audio
+namespace TrueFluentPro.Services.Audio
 {
     public static class AudioDeviceEnumerator
     {

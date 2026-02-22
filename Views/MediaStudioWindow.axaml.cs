@@ -17,11 +17,11 @@ using Avalonia.Media.Imaging;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
-using TranslationToolUI.Models;
-using TranslationToolUI.Services;
-using TranslationToolUI.ViewModels;
+using TrueFluentPro.Models;
+using TrueFluentPro.Services;
+using TrueFluentPro.ViewModels;
 
-namespace TranslationToolUI.Views
+namespace TrueFluentPro.Views
 {
     public partial class MediaStudioWindow : Window
     {

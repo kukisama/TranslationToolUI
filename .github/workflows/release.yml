@@ -34,23 +34,23 @@ jobs:
 
       - name: Publish (${{ matrix.rid }})
         run: |
-          dotnet publish TranslationToolUI.csproj `
+          dotnet publish TrueFluentPro.csproj `
             -c Release `
             -r ${{ matrix.rid }} `
             --self-contained false `
-            -o artifacts/publish/TranslationToolUI-${{ matrix.rid }}-fdd
+            -o artifacts/publish/TrueFluentPro-${{ matrix.rid }}-fdd
 
       - name: Create zip
         run: |
           Compress-Archive `
-            -Path "artifacts/publish/TranslationToolUI-${{ matrix.rid }}-fdd/*" `
-            -DestinationPath "artifacts/TranslationToolUI-${{ matrix.rid }}-fdd.zip"
+            -Path "artifacts/publish/TrueFluentPro-${{ matrix.rid }}-fdd/*" `
+            -DestinationPath "artifacts/TrueFluentPro-${{ matrix.rid }}-fdd.zip"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: release-${{ matrix.rid }}
-          path: artifacts/TranslationToolUI-${{ matrix.rid }}-fdd.zip
+          path: artifacts/TrueFluentPro-${{ matrix.rid }}-fdd.zip
 
   # ── 第二阶段：汇总所有 zip，读取 RELEASE_NOTES.md，创建 GitHub Release ──
   release:

@@ -3,7 +3,7 @@
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         mc:Ignorable="d" d:DesignWidth="520" d:DesignHeight="230"
-        x:Class="TranslationToolUI.Views.TenantSelectionView"
+        x:Class="TrueFluentPro.Views.TenantSelectionView"
         Title="选择 Azure 目录(租户)"
         Width="520" Height="230"
         WindowStartupLocation="CenterOwner">

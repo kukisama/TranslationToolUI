@@ -4,7 +4,7 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
   xmlns:md="clr-namespace:Markdown.Avalonia;assembly=Markdown.Avalonia"
         mc:Ignorable="d" d:DesignWidth="520" d:DesignHeight="360"
-        x:Class="TranslationToolUI.Views.AboutView"
+        x:Class="TrueFluentPro.Views.AboutView"
   x:CompileBindings="False"
         Title="关于"
         WindowStartupLocation="CenterOwner"

@@ -1,6 +1,6 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             x:Class="TranslationToolUI.Controls.PresetButtonsEditor">
+             x:Class="TrueFluentPro.Controls.PresetButtonsEditor">
     <Border BorderBrush="#FFE2E8F0" BorderThickness="0,1,0,0" Padding="0,12,0,0">
         <StackPanel Spacing="8">
             <TextBlock Text="洞察预设按钮配置" FontSize="14" FontWeight="SemiBold"/>

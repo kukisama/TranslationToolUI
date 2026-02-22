@@ -3,7 +3,7 @@ using System.IO;
 using System.Threading;
 using NAudio.Wave;
 
-namespace TranslationToolUI.Services
+namespace TrueFluentPro.Services
 {
     public static class AudioFormatConverter
     {
@@ -22,7 +22,7 @@ namespace TranslationToolUI.Services
                 return audioPath;
             }
 
-            var tempDir = Path.Combine(Path.GetTempPath(), "TranslationToolUI", "BatchAudio");
+            var tempDir = Path.Combine(Path.GetTempPath(), "TrueFluentPro", "BatchAudio");
             Directory.CreateDirectory(tempDir);
             var stamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
             var unique = Guid.NewGuid().ToString("N");

@@ -1,9 +1,9 @@
 using System;
 using System.IO;
 using System.Text;
-using TranslationToolUI.Models;
+using TrueFluentPro.Models;
 
-namespace TranslationToolUI.Services
+namespace TrueFluentPro.Services
 {
     public class BatchLogService
     {
