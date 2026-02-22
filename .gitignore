@@ -4,7 +4,7 @@ obj/
 out/
 artifacts/
 Docs/
-
+.github/copilot-instructions.md
 
 # NuGet packages
 packages/
