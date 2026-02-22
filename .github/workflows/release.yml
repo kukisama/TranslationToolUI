@@ -2,7 +2,7 @@
 #
 # 流程：build job（按 matrix 并行构建多个 RID）→ release job（汇总所有 zip，读取 RELEASE_NOTES.md 创建 Release）
 # 关联文件：
-#   - RELEASE_NOTES.md          ← Release 说明正文（每次发布前编辑）
+#   - Assets/RELEASE_NOTES.md   ← Release 说明正文（每次发布前编辑）
 #   - Docs/publish-fdd.ps1      ← 本地一键打包脚本（本 workflow 不调用，仅供手动使用）
 #   - Docs/release.ps1           ← 本地一键发布脚本（含 tag + gh release，可替代本 workflow）
 
@@ -59,7 +59,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          sparse-checkout: RELEASE_NOTES.md
+          sparse-checkout: |
+            Assets/RELEASE_NOTES.md
+            RELEASE_NOTES.md
+
+      - name: Resolve release notes path
+        id: resolve_notes
+        shell: bash
+        run: |
+          if [ -f "Assets/RELEASE_NOTES.md" ]; then
+            echo "path=Assets/RELEASE_NOTES.md" >> "$GITHUB_OUTPUT"
+          elif [ -f "RELEASE_NOTES.md" ]; then
+            echo "path=RELEASE_NOTES.md" >> "$GITHUB_OUTPUT"
+          else
+            echo "RELEASE_NOTES.md not found in Assets/ or repository root"
+            exit 1
+          fi
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
@@ -70,7 +85,7 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          body_path: RELEASE_NOTES.md
+          body_path: ${{ steps.resolve_notes.outputs.path }}
           generate_release_notes: true
           append_body: true
           files: dist/*.zip

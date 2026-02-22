@@ -437,7 +437,9 @@ namespace TrueFluentPro.ViewModels
                 // Try next to executable first, then project root (dev scenario).
                 var candidates = new[]
                 {
+                    Path.Combine(AppContext.BaseDirectory, "Assets", "RELEASE_NOTES.md"),
                     Path.Combine(AppContext.BaseDirectory, "RELEASE_NOTES.md"),
+                    Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "Assets", "RELEASE_NOTES.md"),
                     Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "RELEASE_NOTES.md")
                 };
 

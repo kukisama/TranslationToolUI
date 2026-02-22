@@ -45,7 +45,13 @@
   </ItemGroup>
 
   <ItemGroup>
-    <None Include="RELEASE_NOTES.md" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="Assets\RELEASE_NOTES.md"
+          Link="RELEASE_NOTES.md"
+          CopyToOutputDirectory="PreserveNewest"
+          Condition="Exists('Assets\RELEASE_NOTES.md')" />
+    <None Include="RELEASE_NOTES.md"
+          CopyToOutputDirectory="PreserveNewest"
+          Condition="!Exists('Assets\RELEASE_NOTES.md') and Exists('RELEASE_NOTES.md')" />
   </ItemGroup>
 
 </Project>
